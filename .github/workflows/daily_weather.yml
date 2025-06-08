@@ -78,7 +78,10 @@ jobs:
           tar xzf wgrib2.tgz
           echo "====== 展開後のファイル一覧 ======"
           ls -lR
+          echo "====== find . -name 'wgrib2*' ======"
+          find . -name "wgrib2*"
           echo "=================================="
+
           # 一時的にmv以降を全部コメントアウト
           # if [ -f ./wgrib2 ]; then
           #   sudo mv ./wgrib2 /usr/local/bin/
