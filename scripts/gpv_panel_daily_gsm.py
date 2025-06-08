@@ -99,5 +99,6 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
 
+    print(">>> Slack送信直前です")
     send_file_to_slack("weather_map.jpg", channel="C08988S0SRY")
-    print(response.status_code, response.text)
+    print(">>> Slack送信後です")
