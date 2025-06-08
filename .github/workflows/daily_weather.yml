@@ -18,23 +18,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: '3.11'
+          auto-update-conda: true
+          miniforge-variant: Mambaforge
+          python-version: 3.11
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Install wgrib2
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wgrib2
-          wgrib2 -V
+        run: mamba install -c conda-forge wgrib2
 
-      # ここでGPVダウンロード・変換
       - name: Convert GRIB2 to NetCDF
-        run: |
-          wgrib2 data/your_file.grib2 -netcdf data/your_file.nc
-
-      # 以降、Pythonスクリプト実行 & Slack通知など
+        run: wgrib2 data/your_file.grib2 -netcdf data/your_file.nc
