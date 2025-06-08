@@ -2,9 +2,6 @@ FROM ubuntu:22.04
 
 # 基本ツール
 RUN apt-get update && \
-    apt-get install -y wget git bzip2 python3 python3-pip
-# 追加: ビルド系パッケージ・依存ライブラリ
-RUN apt-get update && \
     apt-get install -y \
         wget git bzip2 \
         python3 python3-pip \
