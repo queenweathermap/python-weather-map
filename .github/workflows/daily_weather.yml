@@ -28,7 +28,11 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install wgrib2
-        run: sudo apt-get update && sudo apt-get install -y wgrib2
+        run: |
+          wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
+          tar xzf wgrib2.tgz
+          sudo mv wgrib2/wgrib2 /usr/local/bin/
+          wgrib2 -V
 
       - name: Run weather map script
         env:
