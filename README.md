@@ -8,8 +8,8 @@
 
 ```
 gpv_project/
-└── notebook/
-    ├── ex02.ipynb〜ex13.ipynb  # 各種処理ノートブック
+    └── data/
+    ├── weather.ipynb  # 各種処理ノートブック
     └── module/
         ├── gpvutils.py
         ├── gpv_downloader.py
@@ -36,8 +36,8 @@ from gpv_downloader import download_msm_data
 
 ## 🔧 対応モデル
 
-- MSM（実装済み）
-- GSM（`download_gsm_data()` 関数を `gpv_downloader.py` に実装してください）
+- MSM
+- GSM
 
 ## 📌 依存ライブラリ（例）
 
