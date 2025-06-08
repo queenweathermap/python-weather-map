@@ -4,5 +4,5 @@ matplotlib
 cartopy
 xarray
 scipy
-requests     # Slack送信用
+requests
 slack_sdk
