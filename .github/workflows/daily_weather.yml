@@ -25,4 +25,5 @@ jobs:
       - name: Run weather map script
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: python gpv_panel_daily_gsm.py   # ここを自分のバッチエントリー.pyに
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}   # ←ここを追加！
+        run: python gpv_panel_daily_gsm.py
