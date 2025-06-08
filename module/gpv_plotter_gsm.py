@@ -3,7 +3,7 @@
 # GSMモデル用まとめimportモジュール
 # ===============================================
 
-from module.plot_300hPa import plot_300hpa_height_wind
+from module.plot_300hpa import plot_300hpa_height_wind
 from module.plot_700hpa_dindex_500hpa_temp import plot_700hpa_temp_rh
 from module.plot_850hpa_temp_wind_700hPa_w import plot_850hpa_temp_wind_w
 from module.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
