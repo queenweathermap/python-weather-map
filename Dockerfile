@@ -1,14 +1,28 @@
 FROM ubuntu:22.04
 
-# 必要パッケージ＋wgrib2
+# 基本ツール
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip wgrib2 wget git
+    apt-get install -y wget git bzip2 python3 python3-pip
+
+# Miniconda導入（バージョン固定でダウンロード）
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-py311_24.1.2-0-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+    bash /tmp/miniconda.sh -b -p /opt/conda && \
+    rm /tmp/miniconda.sh && \
+    /opt/conda/bin/conda clean -tipsy && \
+    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate base" >> ~/.bashrc
+
+ENV PATH="/opt/conda/bin:$PATH"
+
+# wgrib2をconda-forgeからインストール
+RUN conda install -c conda-forge wgrib2
 
 WORKDIR /workspace
 
 COPY . /workspace
 
-RUN pip3 install --upgrade pip
-RUN pip3 install -r requirements.txt
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
 
 CMD ["python3", "scripts/main_weather_batch.py"]
