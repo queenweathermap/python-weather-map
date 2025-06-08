@@ -12,7 +12,8 @@ RUN apt-get update && \
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
 RUN bash /tmp/miniconda.sh -b -p /opt/conda
 RUN rm /tmp/miniconda.sh
-RUN /opt/conda/bin/conda clean -tipsy
+RUN /opt/conda/bin/conda clean -a -y
+# RUN /opt/conda/bin/conda clean -tipsy  ← 削除やコメントアウトでもOK
 RUN ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh
 RUN echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc
 RUN echo "conda activate base" >> ~/.bashrc
