@@ -1,26 +1,28 @@
+# scripts/gpv_downloader.py
 # ===============================
-# 1. 必要なライブラリインポート
+# GPV自動ダウンロード & grib2→NetCDF変換ユーティリティ
+# 他スクリプトからimportで再利用可
 # ===============================
+
 import os
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 import subprocess
 
-# ===============================
-# 2. データ取得パターン指定
-# ===============================
-# 取得したいファイルのパターンを選択（例: GSM日本域0.1度 気圧面 L-pall）
-# 他パターンは上記資料/ディレクトリリストを参照して変更可能
-GPV_PATTERN = "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"  # 例：日本域・気圧面
+# --- 取得ファイルパターン例（用途に応じて修正）---
+GPV_PATTERN = "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
 BASE_DIR = "./data"
-# 必要に応じて "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin" など
+
 
 # ===============================
 # 3. 日付・ディレクトリからファイル名を自動検索
 # ===============================
 def download_available_gsm_gpv(pattern=GPV_PATTERN, base_dir=BASE_DIR):
-    now = datetime.utcnow() + timedelta(hours=9)
+    """
+    今日/昨日でダウンロード可能な最新GSM GPVファイルを探索し取得
+    """
+    now = datetime.utcnow() + timedelta(hours=9)  # JST
     tried = []
     for day_offset in range(0, 2):  # 今日→昨日
         dt = now - timedelta(days=day_offset)
@@ -43,13 +45,19 @@ def download_available_gsm_gpv(pattern=GPV_PATTERN, base_dir=BASE_DIR):
                 print(f"[NG] {url.split('/')[-1]}: {e}")
     print("【ERROR】直近2日間でダウンロードできるファイルが見つかりませんでした。")
     print("試行URL：")
-    for t in tried:　　
+    for t in tried:
         print(t)
     return None, None
+
+
+
 # ===============================
 # 4. 今日/昨日のデータでダウンロードURL自動選択
 # ===============================
 def download_gsm_gpv(pattern=GPV_PATTERN, out_dir=BASE_DIR):
+    """
+    最新ダウンロードファイルのパス・初期時刻を返す
+    """
     out_path, init_time = download_available_gsm_gpv(pattern=pattern, base_dir=out_dir)
     if out_path is not None and init_time is not None:
         return out_path, init_time
@@ -60,12 +68,15 @@ def download_gsm_gpv(pattern=GPV_PATTERN, out_dir=BASE_DIR):
 # 5. grib2→nc変換 (wgrib2必須)
 # ===============================
 def grib2_to_nc(grib2_path):
+    """
+    wgrib2によるgrib2→NetCDF変換
+    """
     grib2_path = Path(grib2_path)
     nc_path = grib2_path.with_suffix(grib2_path.suffix + ".nc")
     if nc_path.exists():
         print(f"既にNetCDF変換済: {nc_path}")
         return nc_path
-    cmd = f"wgrib2 {grib2_path} -netcdf {nc_path}"  # パス修正
+    cmd = f"wgrib2 {grib2_path} -netcdf {nc_path}"
     print(f"[INFO] grib2→nc変換: {cmd}")
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
@@ -113,7 +124,8 @@ plot_simple_panel(nc_path, init_time)　
 
 
 
+# ---- 単体テスト・手動利用時 ----
 if __name__ == "__main__":
     grib2_path, init_time = download_gsm_gpv()
     nc_path = grib2_to_nc(grib2_path)
-    plot_simple_panel(nc_path, init_time)
+    print(f"取得→変換: {grib2_path} -> {nc_path}")
