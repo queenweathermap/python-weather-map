@@ -76,14 +76,12 @@ jobs:
         run: |
           wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
           tar xzf wgrib2.tgz
-          ls -lR  # 展開したファイル一覧を確認
-          # "wgrib2"バイナリの場所を探してインストール
+          ls -lR  # ← 展開後のすべてのファイル・フォルダを表示
+          # "wgrib2" バイナリのありかをパターン分岐
           if [ -f ./wgrib2 ]; then
             sudo mv ./wgrib2 /usr/local/bin/
           elif [ -f wgrib2/wgrib2 ]; then
             sudo mv wgrib2/wgrib2 /usr/local/bin/
-          elif [ -f wgrib2.tgz/wgrib2 ]; then
-            sudo mv wgrib2.tgz/wgrib2 /usr/local/bin/
           else
             echo "wgrib2 binary not found"
             find . -name "wgrib2"
