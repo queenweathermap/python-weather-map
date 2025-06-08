@@ -5,3 +5,4 @@ cartopy
 xarray
 scipy
 requests     # Slack送信用
+slack_sdk
