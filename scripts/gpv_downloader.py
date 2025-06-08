@@ -12,7 +12,7 @@ import subprocess
 # ===============================
 # 取得したいファイルのパターンを選択（例: GSM日本域0.1度 気圧面 L-pall）
 # 他パターンは上記資料/ディレクトリリストを参照して変更可能
-GPV_PATTERN = "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
+GPV_PATTERN = "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"  # 例：日本域・気圧面
 BASE_DIR = "./data"
 # 必要に応じて "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin" など
 
@@ -65,13 +65,14 @@ def grib2_to_nc(grib2_path):
     if nc_path.exists():
         print(f"既にNetCDF変換済: {nc_path}")
         return nc_path
-    cmd = f"/Users/home/miniforge3/envs/met_env/bin/wgrib2 {grib2_path} -netcdf {nc_path}"
+    cmd = f"wgrib2 {grib2_path} -netcdf {nc_path}"  # パス修正
     print(f"[INFO] grib2→nc変換: {cmd}")
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
         raise RuntimeError("grib2→nc変換に失敗しました")
     print(f"[INFO] 変換後NetCDF: {nc_path}")
     return nc_path
+
 
 # ===============================
 # 6. xarrayで開いて初期時刻＋hhラベル付きで天気図描画
@@ -116,4 +117,3 @@ if __name__ == "__main__":
     grib2_path, init_time = download_gsm_gpv()
     nc_path = grib2_to_nc(grib2_path)
     plot_simple_panel(nc_path, init_time)
-
