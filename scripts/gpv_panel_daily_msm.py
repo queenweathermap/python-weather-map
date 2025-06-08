@@ -1,7 +1,10 @@
-
 # ===============================
 # MSM用：1時刻の5段パネルを保存
 # ===============================
+import sys
+import os
+# この2行をスクリプトの一番最初に追加！
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import numpy as np
 import matplotlib.pyplot as plt
