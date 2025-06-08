@@ -18,18 +18,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-update-conda: true
-          miniforge-variant: Mambaforge
-          python-version: 3.11
+      - name: Build Docker image
+        run: docker build -t weather-map-app .
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install wgrib2
-        run: mamba install -c conda-forge wgrib2
-
-      - name: Convert GRIB2 to NetCDF
-        run: wgrib2 data/your_file.grib2 -netcdf data/your_file.nc
+      - name: Run weather batch in Docker
+        env:
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+        run: |
+          docker run --rm \
+            -e SLACK_TOKEN="${SLACK_TOKEN}" \
+            weather-map-app
