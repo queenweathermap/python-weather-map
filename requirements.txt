@@ -1,0 +1,7 @@
+numpy
+pandas
+matplotlib
+cartopy
+xarray
+scipy
+requests     # Slack送信用
