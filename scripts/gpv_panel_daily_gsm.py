@@ -117,16 +117,16 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
 
 # ...（上は同じ）...
 
-    if __name__ == "__main__":
-        # ここにNetCDFファイル読み込みや時刻リストの取得処理を書く
-        import xarray as xr
+if __name__ == "__main__":
+    print("==== スクリプト実行開始 ====")
+    import xarray as xr
 
-        # 例: ファイルと時刻はご自身の運用に合わせて設定
-        nc_path = "data/your_file.nc"
-        save_path = "weather_map.jpg"
-        ds = xr.open_dataset(nc_path)
-        times = ds.time.values[:4]  # 例：最初の4時刻だけ
-    
-        print("==== 天気図パネル作成開始 ====")
-        make_daily_weather_panel_multi_time(ds, times, save_path)
-        print("==== 完了 ====")
+    # [!!!] ここはご自身のNetCDFファイルパスと時刻指定に合わせてください
+    nc_path = "data/your_file.nc"
+    save_path = "weather_map.jpg"
+    ds = xr.open_dataset(nc_path)
+    times = ds.time.values[:4]  # 例として最初の4時刻
+
+    print("==== パネル作成 ====")
+    make_daily_weather_panel_multi_time(ds, times, save_path)
+    print("==== 完了 ====")
