@@ -3,7 +3,6 @@
 # GitHub Actions用：天気図自動作成＆Slack通知ワークフロー
 # 毎日JST 5時/17時 & 手動実行対応
 # ===============================
-
 name: Daily Weather Map
 
 on:
