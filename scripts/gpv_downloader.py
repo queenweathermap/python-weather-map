@@ -97,6 +97,10 @@ def plot_simple_panel(nc_path, init_time, save_path="gsm_weather_map.jpg"):
     ds = xr.open_dataset(nc_path)
     times = ds.time.values[:4]
     plt.figure(figsize=(16, 4))
+    print(ds)
+    print(ds.dims)
+    print(ds.coords)
+
     for col, t in enumerate(times):
         ax = plt.subplot(1, 4, col+1, projection=ccrs.PlateCarree())
         # 例：300hPa高度 (実際は好きな変数を選ぶ)
