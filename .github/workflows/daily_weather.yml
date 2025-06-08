@@ -34,6 +34,14 @@ jobs:
           sudo mv wgrib2/wgrib2 /usr/local/bin/
           wgrib2 -V
 
+      # ★ダウンロード済みの最新grib2ファイルを自動変換
+      - name: Convert GRIB2 to NetCDF
+        run: |
+          GRIB2_FILE=$(ls data/*.grib2.bin | sort | tail -n 1)
+          NC_FILE="${GRIB2_FILE}.nc"
+          echo "GRIB2: $GRIB2_FILE → NetCDF: $NC_FILE"
+          wgrib2 "$GRIB2_FILE" -netcdf "$NC_FILE"
+
       - name: Run weather map script
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
