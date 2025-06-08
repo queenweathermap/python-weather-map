@@ -28,19 +28,6 @@ jobs:
 
       - name: Install wgrib2
         run: |
-          wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
-          tar xzf wgrib2.tgz
-          echo "===== grib2ディレクトリ内確認 ====="
-          ls -lR grib2
-          echo "===== バイナリのfile確認 ====="
-          file grib2/wgrib2 || echo "fileコマンド失敗"
-          echo "===== /usr/local/binへのmv ====="
-          sudo mv grib2/wgrib2 /usr/local/bin/wgrib2
-          sudo chmod +x /usr/local/bin/wgrib2
-          ls -l /usr/local/bin/wgrib2
-          echo "===== ldd（依存ライブラリ確認）====="
-          ldd /usr/local/bin/wgrib2 || echo "ldd失敗"
-          echo "===== which wgrib2 ====="
-          which wgrib2 || echo "which失敗"
-          echo "===== wgrib2 -V ====="
-          wgrib2 -V || echo "実行不可"
+          sudo apt-get update
+          sudo apt-get install -y wgrib2
+          wgrib2 -V
