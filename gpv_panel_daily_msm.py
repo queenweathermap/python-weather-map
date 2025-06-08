@@ -1,0 +1,31 @@
+
+# ===============================
+# MSM用：1時刻の5段パネルを保存
+# ===============================
+
+import numpy as np
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from matplotlib.colors import LinearSegmentedColormap
+from module.gpv_plotter_msm import (
+    plot_300hpa_height_wind,
+    plot_700hpa_temp_rh,
+    plot_850hpa_temp_wind_w,
+    plot_850hpa_thetae_stream,
+    plot_surface_pressure_and_wind
+)
+
+def make_daily_weather_panel_multi_time(ds, times, save_path):
+    fig, axes = plt.subplots(nrows=5, ncols=len(times), figsize=(4*len(times), 10),
+                             subplot_kw={"projection": ccrs.PlateCarree()})
+    for col, time in enumerate(times):
+        dsi = ds.sel(time=time)
+        plot_300hpa_height_wind(axes[0, col], dsi)
+        plot_700hpa_temp_rh(axes[1, col], dsi)
+        plot_850hpa_temp_wind_w(axes[2, col], dsi)
+        plot_850hpa_thetae_stream(axes[3, col], dsi)
+        plot_surface_pressure_and_wind(axes[4, col], dsi)
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
