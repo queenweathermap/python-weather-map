@@ -26,14 +26,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Install wgrib2 (official binary)
+      - name: Install wgrib2
         run: |
-          wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
-          tar xzf wgrib2.tgz
-          sudo mv wgrib2/wgrib2 /usr/local/bin/wgrib2
-          sudo chmod +x /usr/local/bin/wgrib2
+          sudo apt-get update
+          sudo apt-get install -y wgrib2
           wgrib2 -V
 
+      # ここでGPVダウンロード・変換
       - name: Convert GRIB2 to NetCDF
         run: |
           wgrib2 data/your_file.grib2 -netcdf data/your_file.nc
+
+      # 以降、Pythonスクリプト実行 & Slack通知など
