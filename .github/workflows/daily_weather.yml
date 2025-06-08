@@ -26,4 +26,4 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}   # ←ここを追加！
-        run: python gpv_panel_daily_gsm.py
+        run: python -m scripts.gpv_panel_daily_gsm
