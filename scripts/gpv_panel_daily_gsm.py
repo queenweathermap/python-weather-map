@@ -1,11 +1,18 @@
 # ===============================
 # GSM用：5行×任意列パネル作成モジュール
 # ===============================
+import sys
+import os
+# この2行をスクリプトの一番最初に追加！
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import pandas as pd
 from pathlib import Path
+
+# ここは「from module.モジュール名」でOK！
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind,
     plot_700hpa_temp_rh,
@@ -13,6 +20,8 @@ from module.gpv_plotter_gsm import (
     plot_850hpa_thetae_stream,
     plot_surface_pressure_and_wind,
 )
+
+
 
 # ===============================
 # 経度・緯度線追加関数（全パネル一括）
