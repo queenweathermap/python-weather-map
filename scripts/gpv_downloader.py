@@ -49,26 +49,12 @@ def download_available_gsm_gpv(pattern=GPV_PATTERN, base_dir=BASE_DIR):
 # ===============================
 # 4. 今日/昨日のデータでダウンロードURL自動選択
 # ===============================
-def download_gsm_gpv(pattern=GPV_PATTERN, out_dir="gpv_data"):
-    now = datetime.utcnow() + timedelta(hours=9)  # JSTベース
-    for offset in range(0, 2):  # 今日→昨日
-        date = now - timedelta(days=offset)
-        url = find_gsm_gpv_url(date, pattern)
-        if url:
-            print(f"ダウンロードURL: {url}")
-            os.makedirs(out_dir, exist_ok=True)
-            local_file = os.path.join(out_dir, os.path.basename(url))
-            # 既存ならスキップ
-            if not os.path.exists(local_file):
-                urllib.request.urlretrieve(url, local_file)
-                print(f"ダウンロード完了: {local_file}")
-            else:
-                print(f"既にダウンロード済: {local_file}")
-            # 初期時刻推定
-            ymdhh = os.path.basename(url).split('_')[3]
-            init_time = datetime.strptime(ymdhh, "%Y%m%d%H%M%S")
-            return local_file, init_time
+def download_gsm_gpv(pattern=GPV_PATTERN, out_dir=BASE_DIR):
+    out_path, init_time = download_available_gsm_gpv(pattern=pattern, base_dir=out_dir)
+    if out_path is not None and init_time is not None:
+        return out_path, init_time
     raise FileNotFoundError("GPVファイルが見つかりませんでした")
+
 
 # ===============================
 # 5. grib2→nc変換 (wgrib2必須)
@@ -123,3 +109,11 @@ def plot_simple_panel(nc_path, init_time, save_path="gsm_weather_map.jpg"):
 grib2_path, init_time = download_gsm_gpv()
 nc_path = grib2_to_nc(grib2_path)
 plot_simple_panel(nc_path, init_time)　
+
+
+
+if __name__ == "__main__":
+    grib2_path, init_time = download_gsm_gpv()
+    nc_path = grib2_to_nc(grib2_path)
+    plot_simple_panel(nc_path, init_time)
+
