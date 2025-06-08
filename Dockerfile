@@ -8,7 +8,7 @@ RUN apt-get update && \
         build-essential python3-dev libfreetype6-dev pkg-config
 
 # Miniconda導入・wgrib2インストール（先ほどのままでOK）
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-py311_24.1.2-0-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
     bash /tmp/miniconda.sh -b -p /opt/conda && \
     rm /tmp/miniconda.sh && \
     /opt/conda/bin/conda clean -tipsy && \
