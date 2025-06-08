@@ -29,3 +29,36 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: python scripts/gpv_panel_daily_gsm.py
+
+jobs:
+  run-weather-batch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ←★ここを追加！
+      - name: Install wgrib2
+        run: sudo apt-get update && sudo apt-get install -y wgrib2
+
+      - name: Convert GRIB2 to NetCDF
+        run: |
+          # 必要な変換コマンドをここに書く
+          # 例
+          wgrib2 data/INPUT_FILE.grib2 -netcdf data/OUTPUT_FILE.nc
+
+      - name: Run weather map script
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: python scripts/gpv_panel_daily_gsm.py
