@@ -1,21 +1,24 @@
+# scripts/gpv_panel_daily_gsm.py
 # ===============================
-# GSM用：5行×任意列パネル作成モジュール（クラウド自動運用・Slack通知付き）
+# GSM天気図 5行×n列パネル生成 ＋ Slack自動通知
+#  - GPV自動DL/変換も統合
+#  - GitHub Actions/ローカル両対応
 # ===============================
+
 import sys
 import os
 from pathlib import Path
-
-# --- モジュールパス追加（module配下をimport対象に）
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import pandas as pd
+import xarray as xr
 
+# --- サブモジュールimport（GPV自動DL&変換ユーティリティ） ---
 from scripts.gpv_downloader import download_gsm_gpv, grib2_to_nc
 
-# --- 描画関数まとめてimport（必要に応じて修正！）
+# --- 描画関数・Slack通知ユーティリティ ---
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind,
     plot_700hpa_dindex_500hpa_temp,
@@ -39,6 +42,7 @@ def add_gridlines(ax):
     gl.right_labels = False
     return gl
 
+
 # ===============================
 # GSM用：5行×n列パネル作成メイン関数
 # ===============================
@@ -59,6 +63,8 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     elif axes.shape[0] != 5:
         axes = axes.reshape((5, -1))
 
+
+    
     # --- 初期時刻＆ラベル準備 ---
     init_time = pd.Timestamp(times[0])
     init_label = init_time.strftime('%Y%m%d %HUTC')
@@ -93,6 +99,7 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     for ax in axes.flatten():
         add_gridlines(ax)
 
+
     # --- パネル全体タイトル ---
     fig.suptitle(
         f"GSM天気図パネル\nInit: {init_label} | Forecasts: {', '.join(hh_labels)}",
@@ -112,18 +119,18 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
         print("Slack送信で例外:", e)
     print(">>> Slack送信後です")
 
-# ===============================
-# main処理：NetCDFファイルを開いてパネル生成・Slack送信
-# ===============================
-if __name__ == "__main__":
-    import xarray as xr
 
-    grib2_path, init_time = download_gsm_gpv()         # ← 最新ファイルを自動ダウンロード
-    nc_path = grib2_to_nc(grib2_path)                  # ← grib2→NetCDFに自動変換
-
-    ds = xr.open_dataset(nc_path)
-    times = ds.time.values[:4]
-
-    print("==== パネル作成 ====")
-    make_daily_weather_panel_multi_time(ds, times, "weather_map.jpg")
-    print("==== 完了 ====")
+    # --- メイン処理 ---
+    if __name__ == "__main__":
+        # --- 1. 最新データのダウンロード＆変換 ---
+        grib2_path, init_time = download_gsm_gpv()
+        nc_path = grib2_to_nc(grib2_path)
+    
+        # --- 2. xarrayで開いて対象時刻リスト作成 ---
+        ds = xr.open_dataset(nc_path)
+        times = ds.time.values[:4]  # ← 必要に応じて全時刻/間引き等
+    
+        # --- 3. パネル作成＆Slack送信 ---
+        print("==== パネル作成 ====")
+        make_daily_weather_panel_multi_time(ds, times, "weather_map.jpg")
+        print("==== 完了 ====")
