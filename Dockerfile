@@ -20,6 +20,7 @@ RUN echo "conda activate base" >> ~/.bashrc
 
 
 ENV PATH="/opt/conda/bin:$PATH"
+ENV PYTHONPATH=/workspace
 
 # wgrib2をconda-forgeからインストール
 RUN conda install -c conda-forge wgrib2
