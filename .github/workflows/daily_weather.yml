@@ -63,15 +63,15 @@ jobs:
           NC_FILE="${GRIB2_FILE}.nc"
           echo "Converting $GRIB2_FILE to $NC_FILE"
           wgrib2 "$GRIB2_FILE" -netcdf "$NC_FILE"
-
+          
       - name: Run weather map script
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: python scripts/gpv_panel_daily_gsm.py
 
 
-        - name: Install Python deps
-  run: pip install -r requirements.txt
+      - name: Install Python deps
+        run: pip install -r requirements.txt
 
       - name: Install wgrib2
         run: |
