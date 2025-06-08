@@ -1,12 +1,13 @@
 # ===============================
-# 毎日自動で天気図作成→Slack通知（GitHub Actions用YAML）
+# 天気図自動作成＆Slack通知（GPV自動DL付きGitHub Actions YAML）
 # ===============================
+
 name: Daily Weather Map
 
 on:
   schedule:
-    - cron: '0 20 * * *'   # JST 5時
-    - cron: '0 8 * * *'    # JST 17時
+    - cron: '0 20 * * *'  # JST 5時
+    - cron: '0 8 * * *'   # JST 17時
   workflow_dispatch:
 
 jobs:
@@ -34,12 +35,33 @@ jobs:
           sudo mv wgrib2/wgrib2 /usr/local/bin/
           wgrib2 -V
 
-      # ★ダウンロード済みの最新grib2ファイルを自動変換
+      # =========================
+      # ↓★★★ここが「自動ダウンロード」★★★
+      # =========================
+      - name: Download latest GSM GPV file
+        run: |
+          mkdir -p data
+          BASE_URL="https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
+          # 今日の日付（JSTでUTC+9換算）
+          JST=$(date -u -d '+9 hours' '+%Y%m%d')
+          YEAR=$(date -u -d '+9 hours' '+%Y')
+          MONTH=$(date -u -d '+9 hours' '+%m')
+          DAY=$(date -u -d '+9 hours' '+%d')
+          for H in 18 12 06 00; do
+            FNAME="Z__C_RJTD_${JST}${H}0000_GSM_GPV_Rgl_FD0000_grib2.bin"
+            URL="${BASE_URL}/${YEAR}/${MONTH}/${DAY}/${FNAME}"
+            echo "Trying: $URL"
+            if wget -O "data/$FNAME" "$URL"; then
+              echo "Downloaded: $FNAME"
+              break
+            fi
+          done
+
       - name: Convert GRIB2 to NetCDF
         run: |
           GRIB2_FILE=$(ls data/*.grib2.bin | sort | tail -n 1)
           NC_FILE="${GRIB2_FILE}.nc"
-          echo "GRIB2: $GRIB2_FILE → NetCDF: $NC_FILE"
+          echo "Converting $GRIB2_FILE to $NC_FILE"
           wgrib2 "$GRIB2_FILE" -netcdf "$NC_FILE"
 
       - name: Run weather map script
