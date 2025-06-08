@@ -68,3 +68,18 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: python scripts/gpv_panel_daily_gsm.py
+
+
+        - name: Install Python deps
+  run: pip install -r requirements.txt
+
+      - name: Install wgrib2
+        run: |
+          wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
+          tar xzf wgrib2.tgz
+          sudo mv wgrib2/wgrib2 /usr/local/bin/
+          wgrib2 -V
+      
+      - name: Run GPV Downloader (auto download/convert/plot)
+        run: python scripts/gpv_downloader.py
+
