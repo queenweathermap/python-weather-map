@@ -3,8 +3,14 @@ FROM ubuntu:22.04
 # 基本ツール
 RUN apt-get update && \
     apt-get install -y wget git bzip2 python3 python3-pip
+# 追加: ビルド系パッケージ・依存ライブラリ
+RUN apt-get update && \
+    apt-get install -y \
+        wget git bzip2 \
+        python3 python3-pip \
+        build-essential python3-dev libfreetype6-dev pkg-config
 
-# Miniconda導入（バージョン固定でダウンロード）
+# Miniconda導入・wgrib2インストール（先ほどのままでOK）
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-py311_24.1.2-0-Linux-x86_64.sh -O /tmp/miniconda.sh && \
     bash /tmp/miniconda.sh -b -p /opt/conda && \
     rm /tmp/miniconda.sh && \
