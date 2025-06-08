@@ -120,7 +120,7 @@ def plot_simple_panel(nc_path, init_time, save_path="gsm_weather_map.jpg"):
 # ===============================
 grib2_path, init_time = download_gsm_gpv()
 nc_path = grib2_to_nc(grib2_path)
-plot_simple_panel(nc_path, init_time)　
+plot_simple_panel(nc_path, init_time)
 
 
 
