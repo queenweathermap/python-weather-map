@@ -3,6 +3,9 @@
 # ===============================
 
 name: Daily Weather Map
+on:
+  workflow_dispatch:
+
 
 on:
   schedule:
