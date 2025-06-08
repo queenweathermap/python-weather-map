@@ -1,18 +1,19 @@
 # ===============================
-# GSM用：5行×任意列パネル作成モジュール
+# GSM用：5行×任意列パネル作成モジュール（クラウド自動運用・Slack通知付き）
 # ===============================
 import sys
 import os
-# この2行をスクリプトの一番最初に追加！
+from pathlib import Path
+
+# --- モジュールパス追加（module配下をimport対象に）
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import pandas as pd
-from pathlib import Path
 
-# 描画関数まとめimport
+# --- 描画関数まとめてimport（必要に応じて修正！）
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind,
     plot_700hpa_dindex_500hpa_temp,
@@ -21,11 +22,11 @@ from module.gpv_plotter_gsm import (
     plot_surface_pressure_and_wind,
 )
 
-# Slack送信ユーティリティimport
+# --- Slack送信用ユーティリティ
 from module.slack_utils import send_file_to_slack
 
 # ===============================
-# 経度・緯度線追加関数（全パネル一括）
+# 緯度経度グリッド線を全パネルに追加
 # ===============================
 def add_gridlines(ax):
     """
@@ -41,7 +42,7 @@ def add_gridlines(ax):
 # ===============================
 def make_daily_weather_panel_multi_time(ds, times, save_path):
     """
-    1日n時刻×5要素のパネルを描画し、1枚画像で保存
+    1日n時刻×5要素のパネルを描画し、1枚画像で保存＆Slack送信
     """
     ncols = len(times)
     figsize = (4 * ncols, 18)
@@ -72,11 +73,10 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     for col, time in enumerate(times):
         dsi = ds.sel(time=time)
         plot_300hpa_height_wind(axes[0, col], dsi)
-        plot_700hpa_dindex_500hpa_temp(axes[1, col], dsi)  # ←ここ修正
+        plot_700hpa_dindex_500hpa_temp(axes[1, col], dsi)
         plot_850hpa_temp_wind_700hpa_w(axes[2, col], dsi)
         plot_850hpa_thetae_stream(axes[3, col], dsi)
         plot_surface_pressure_and_wind(axes[4, col], dsi)
-
         # 5段目の下にだけ「時刻+経過時間」ラベルを追加
         axes[4, col].text(
             0.5, -0.18,
@@ -102,7 +102,6 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     plt.close(fig)
 
     # --- Slackへ送信 ---
-    import os
     print("画像ファイルの存在:", os.path.exists(save_path))
     print(">>> Slack送信直前です")
     try:
@@ -111,21 +110,18 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
         print("Slack送信で例外:", e)
     print(">>> Slack送信後です")
 
-# ここで make_daily_weather_panel_multi_time() を呼び出すのがmain処理部分
-# 例: 
-# make_daily_weather_panel_multi_time(ds, times, "weather_map.jpg")
-
-# ...（上は同じ）...
-
+# ===============================
+# main処理：NetCDFファイルを開いてパネル生成・Slack送信
+# ===============================
 if __name__ == "__main__":
     print("==== スクリプト実行開始 ====")
     import xarray as xr
 
-    # [!!!] ここはご自身のNetCDFファイルパスと時刻指定に合わせてください
-    nc_path = "data/your_file.nc"
-    save_path = "weather_map.jpg"
+    # [!!] 適切なNetCDFファイルパス・保存先・時刻配列に変更
+    nc_path = "data/your_file.nc"      # NetCDFファイル
+    save_path = "weather_map.jpg"      # 出力画像ファイル名
     ds = xr.open_dataset(nc_path)
-    times = ds.time.values[:4]  # 例として最初の4時刻
+    times = ds.time.values[:4]         # 例：最初の4時刻
 
     print("==== パネル作成 ====")
     make_daily_weather_panel_multi_time(ds, times, save_path)
