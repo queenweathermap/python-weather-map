@@ -15,11 +15,12 @@ from pathlib import Path
 # ここは「from module.モジュール名」でOK！
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind,
-    plot_700hpa_temp_rh,
+    plot_700hpa_dindex_500hpa_temp,
     plot_850hpa_temp_wind_w,
     plot_850hpa_thetae_stream,
     plot_surface_pressure_and_wind,
 )
+
 
 
 
