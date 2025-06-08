@@ -28,4 +28,4 @@ jobs:
       - name: Run weather map script
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-        run: python -m scripts.gpv_panel_daily_gsm
+        run: python scripts/gpv_panel_daily_gsm.py
