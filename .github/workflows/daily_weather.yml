@@ -26,11 +26,54 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+
+      # =========================
+      # ↓★★★ここが「自動ダウンロード」★★★
+      # =========================
+      - name: Download latest GSM GPV file
+        run: |
+          mkdir -p data
+          BASE_URL="https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
+          # 今日の日付（JSTでUTC+9換算）
+          JST=$(date -u -d '+9 hours' '+%Y%m%d')
+          YEAR=$(date -u -d '+9 hours' '+%Y')
+          MONTH=$(date -u -d '+9 hours' '+%m')
+          DAY=$(date -u -d '+9 hours' '+%d')
+          for H in 18 12 06 00; do
+            FNAME="Z__C_RJTD_${JST}${H}0000_GSM_GPV_Rgl_FD0000_grib2.bin"
+            URL="${BASE_URL}/${YEAR}/${MONTH}/${DAY}/${FNAME}"
+            echo "Trying: $URL"
+            if wget -O "data/$FNAME" "$URL"; then
+              echo "Downloaded: $FNAME"
+              break
+            fi
+          done
+
+      - name: Convert GRIB2 to NetCDF
+        run: |
+          GRIB2_FILE=$(ls data/*.grib2.bin | sort | tail -n 1)
+          NC_FILE="${GRIB2_FILE}.nc"
+          echo "Converting $GRIB2_FILE to $NC_FILE"
+          wgrib2 "$GRIB2_FILE" -netcdf "$NC_FILE"
+          
+      - name: Run weather map script
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: python scripts/gpv_panel_daily_gsm.py
+
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
       - name: Install wgrib2
         run: |
           wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
           tar xzf wgrib2.tgz
-          echo "=== 展開後ファイル一覧 ==="
-          ls -lR
-          echo "=== find . -name 'wgrib2*' ==="
-          find . -name "wgrib2*"
+          sudo mv grib2/wgrib2 /usr/local/bin/wgrib2
+          sudo chmod +x /usr/local/bin/wgrib2
+          wgrib2 -V
+      
+      - name: Run GPV Downloader & Weather Map Panel
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: python scripts/gpv_panel_daily_gsm.py
