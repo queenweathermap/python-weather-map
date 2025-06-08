@@ -77,21 +77,21 @@ jobs:
           wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz
           tar xzf wgrib2.tgz
           echo "====== 展開後のファイル一覧 ======"
-          ls -lR  # ここで展開結果を必ず表示！！
+          ls -lR
           echo "=================================="
-          # wgrib2の実体を分岐してmv
-          if [ -f ./wgrib2 ]; then
-            sudo mv ./wgrib2 /usr/local/bin/
-          elif [ -f wgrib2/wgrib2 ]; then
-            sudo mv wgrib2/wgrib2 /usr/local/bin/
-          elif [ -f ./wgrib2.exe ]; then
-            sudo mv ./wgrib2.exe /usr/local/bin/wgrib2
-          else
-            echo "wgrib2 binary not found"
-            find . -name "wgrib2*"
-            exit 1
-          fi
-          wgrib2 -V
+          # 一時的にmv以降を全部コメントアウト
+          # if [ -f ./wgrib2 ]; then
+          #   sudo mv ./wgrib2 /usr/local/bin/
+          # elif [ -f wgrib2/wgrib2 ]; then
+          #   sudo mv wgrib2/wgrib2 /usr/local/bin/
+          # elif [ -f ./wgrib2.exe ]; then
+          #   sudo mv ./wgrib2.exe /usr/local/bin/wgrib2
+          # else
+          #   echo "wgrib2 binary not found"
+          #   find . -name "wgrib2*"
+          #   exit 1
+          # fi
+          # wgrib2 -V
 
       
       - name: Run GPV Downloader & Weather Map Panel
