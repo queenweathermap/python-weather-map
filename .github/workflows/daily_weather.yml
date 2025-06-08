@@ -33,8 +33,3 @@ jobs:
           sudo mv grib2/wgrib2 /usr/local/bin/wgrib2
           sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V
-      
-      - name: Run GPV Downloader & Weather Map Panel
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-        run: python scripts/gpv_panel_daily_gsm.py
