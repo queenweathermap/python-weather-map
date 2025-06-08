@@ -1,65 +1,36 @@
-# =========================================
-# Daily Weather Map 自動処理ワークフロー
-# （GitHub Actions用: .github/workflows/daily_weather.yml）
-# 
-# - 5時/17時(JST)自動実行＋手動実行可
-# - 依存パッケージ＆wgrib2自動インストール
-# - GRIB2→NetCDF変換（必要に応じて複数ファイル可）
-# - 天気図バッチ実行＆Slack通知
-# =========================================
-
+# ===============================
+# 毎日自動で天気図作成→Slack通知（GitHub Actions用YAML）
+# ===============================
 name: Daily Weather Map
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 5時 JST（UTC+9）
-    - cron: '0 8 * * *'   # 17時 JST（UTC+9）
-  workflow_dispatch:      # 手動実行も可能
+    - cron: '0 20 * * *'   # JST 5時
+    - cron: '0 8 * * *'    # JST 17時
+  workflow_dispatch:
 
 jobs:
   run-weather-batch:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. リポジトリのコードをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. PYTHONPATHを設定（importパス問題回避）
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
-      # 3. Python3.11環境をセットアップ
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 4. Python依存パッケージをインストール
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 5. wgrib2（GRIB2→NetCDF変換ツール）をインストール
       - name: Install wgrib2
         run: sudo apt-get update && sudo apt-get install -y wgrib2
 
-      # 6. GRIB2→NetCDF変換（必要なファイルごとに複数行OK）
-      - name: Convert GRIB2 to NetCDF
-        run: |
-          # 例）必要なGRIB2ファイル名・出力パスに変更してください
-          wgrib2 data/Z__C_RJTD_20240901000000_GSM_GPV_Rgl_FD0000_grib2.bin -netcdf data/Z__C_RJTD_20240901000000_GSM_GPV_Rgl_FD0000_grib2.nc
-          # 他のGRIB2ファイルもここに並べてOK
-
-      # 7. Pythonスクリプトで天気図作成＆Slack通知
       - name: Run weather map script
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: python scripts/gpv_panel_daily_gsm.py
-
-# =========================================
-# 補足
-# ・SLACK_BOT_TOKENはGitHubのリポジトリSecretsに登録しておく
-# ・変換ステップで"INPUT/OUTPUT"パス・ファイル名は都度修正！
-# ・"requirements.txt"はrequests, matplotlib, xarray, cartopy等
-# ・自動でGRIB2取得したい場合はさらにステップ追加可
-# =========================================
