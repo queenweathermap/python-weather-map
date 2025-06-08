@@ -12,7 +12,7 @@ import cartopy.crs as ccrs
 import pandas as pd
 from pathlib import Path
 
-# ここは「from module.モジュール名」でOK！
+# 描画関数まとめimport
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind,
     plot_700hpa_dindex_500hpa_temp,
@@ -20,6 +20,9 @@ from module.gpv_plotter_gsm import (
     plot_850hpa_thetae_stream,
     plot_surface_pressure_and_wind,
 )
+
+# Slack送信ユーティリティimport
+from module.slack_utils import send_file_to_slack
 
 # ===============================
 # 経度・緯度線追加関数（全パネル一括）
@@ -48,7 +51,6 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
         subplot_kw={'projection': ccrs.PlateCarree()},
         constrained_layout=True
     )
-    import numpy as np
     if axes.ndim == 1:
         axes = axes.reshape((5, 1))
     elif axes.shape[0] != 5:
@@ -70,8 +72,8 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     for col, time in enumerate(times):
         dsi = ds.sel(time=time)
         plot_300hpa_height_wind(axes[0, col], dsi)
-        plot_700hpa_temp_rh(axes[1, col], dsi)
-        plot_850hpa_temp_wind_w(axes[2, col], dsi)
+        plot_700hpa_dindex_500hpa_temp(axes[1, col], dsi)  # ←ここ修正
+        plot_850hpa_temp_wind_700hpa_w(axes[2, col], dsi)
         plot_850hpa_thetae_stream(axes[3, col], dsi)
         plot_surface_pressure_and_wind(axes[4, col], dsi)
 
@@ -99,6 +101,16 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
 
+    # --- Slackへ送信 ---
+    import os
+    print("画像ファイルの存在:", os.path.exists(save_path))
     print(">>> Slack送信直前です")
-    send_file_to_slack("weather_map.jpg", channel="C08988S0SRY")
+    try:
+        send_file_to_slack(save_path, channel="C08988S0SRY")
+    except Exception as e:
+        print("Slack送信で例外:", e)
     print(">>> Slack送信後です")
+
+# ここで make_daily_weather_panel_multi_time() を呼び出すのがmain処理部分
+# 例: 
+# make_daily_weather_panel_multi_time(ds, times, "weather_map.jpg")
