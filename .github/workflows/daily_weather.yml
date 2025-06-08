@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Miniconda
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
           miniforge-variant: Mambaforge
@@ -33,4 +33,3 @@ jobs:
 
       - name: Convert GRIB2 to NetCDF
         run: wgrib2 data/your_file.grib2 -netcdf data/your_file.nc
-
