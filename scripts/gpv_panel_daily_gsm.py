@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import pandas as pd
 
+from scripts.gpv_downloader import download_gsm_gpv, grib2_to_nc
+
 # --- 描画関数まとめてimport（必要に応じて修正！）
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind,
@@ -114,15 +116,14 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
 # main処理：NetCDFファイルを開いてパネル生成・Slack送信
 # ===============================
 if __name__ == "__main__":
-    print("==== スクリプト実行開始 ====")
     import xarray as xr
 
-    # [!!] 適切なNetCDFファイルパス・保存先・時刻配列に変更
-    nc_path = "data/your_file.nc"      # NetCDFファイル
-    save_path = "weather_map.jpg"      # 出力画像ファイル名
+    grib2_path, init_time = download_gsm_gpv()         # ← 最新ファイルを自動ダウンロード
+    nc_path = grib2_to_nc(grib2_path)                  # ← grib2→NetCDFに自動変換
+
     ds = xr.open_dataset(nc_path)
-    times = ds.time.values[:4]         # 例：最初の4時刻
+    times = ds.time.values[:4]
 
     print("==== パネル作成 ====")
-    make_daily_weather_panel_multi_time(ds, times, save_path)
+    make_daily_weather_panel_multi_time(ds, times, "weather_map.jpg")
     print("==== 完了 ====")
