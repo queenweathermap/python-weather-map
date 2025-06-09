@@ -1,7 +1,5 @@
-# scripts/gpv_downloader.py
 # ===============================
-# GPV自動ダウンロード & grib2→NetCDF変換ユーティリティ
-# 他スクリプトからimportで再利用可
+# GPV（GSM/MSM）自動ダウンロード & grib2→NetCDF変換ユーティリティ
 # ===============================
 
 import os
@@ -10,18 +8,29 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import subprocess
 
-# --- 取得ファイルパターン例（用途に応じて修正）---
-GPV_PATTERN = "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
+# --- パターンを辞書で管理 ---
+GPV_PATTERNS = {
+    "GSM": "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",
+    "MSM": "MSM_GPV_Rjp_L-pall_FD0000-0100_grib2.bin"
+}
 BASE_DIR = "./data"
 
-
 # ===============================
-# 3. 日付・ディレクトリからファイル名を自動検索
+# 共通：GPVファイルダウンロード（GSM/MSM両対応）
 # ===============================
-def download_available_gsm_gpv(pattern=GPV_PATTERN, base_dir=BASE_DIR):
+def download_gpv(model="GSM", pattern=None, base_dir=BASE_DIR):
     """
-    今日/昨日でダウンロード可能な最新GSM GPVファイルを探索し取得
+    GSM/MSM両対応のGPVファイルダウンロード（最新のファイルを探索・取得）
+    Args:
+        model: "GSM" or "MSM"
+        pattern: ファイル名パターン（省略時はモデルごとに既定）
+        base_dir: 保存先ディレクトリ
+    Returns:
+        (ファイルパス, init_time) or (None, None)
     """
+    model = model.upper()
+    if pattern is None:
+        pattern = GPV_PATTERNS.get(model, GPV_PATTERNS["GSM"])
     now = datetime.utcnow() + timedelta(hours=9)  # JST
     tried = []
     for day_offset in range(0, 2):  # 今日→昨日
@@ -39,33 +48,29 @@ def download_available_gsm_gpv(pattern=GPV_PATTERN, base_dir=BASE_DIR):
             tried.append(url)
             try:
                 urllib.request.urlretrieve(url, out_path)
-                print(f"[OK] GSM GPVダウンロード: {out_path}")
+                print(f"[OK] {model} GPVダウンロード: {out_path}")
                 return out_path, datetime(dt.year, dt.month, dt.day, h)
             except Exception as e:
                 print(f"[NG] {url.split('/')[-1]}: {e}")
-    print("【ERROR】直近2日間でダウンロードできるファイルが見つかりませんでした。")
+    print(f"【ERROR】直近2日間で{model} GPVファイルが見つかりませんでした。")
     print("試行URL：")
     for t in tried:
         print(t)
     return None, None
 
+# ===============================
+# エイリアス関数で互換性も維持
+# ===============================
+def download_gsm_gpv(pattern=None, base_dir=BASE_DIR):
+    """従来のGSM専用APIも提供"""
+    return download_gpv(model="GSM", pattern=pattern, base_dir=base_dir)
 
+def download_msm_gpv(pattern=None, base_dir=BASE_DIR):
+    """MSM専用APIも同じ関数でラップ"""
+    return download_gpv(model="MSM", pattern=pattern, base_dir=base_dir)
 
 # ===============================
-# 4. 今日/昨日のデータでダウンロードURL自動選択
-# ===============================
-def download_gsm_gpv(pattern=GPV_PATTERN, out_dir=BASE_DIR):
-    """
-    最新ダウンロードファイルのパス・初期時刻を返す
-    """
-    out_path, init_time = download_available_gsm_gpv(pattern=pattern, base_dir=out_dir)
-    if out_path is not None and init_time is not None:
-        return out_path, init_time
-    raise FileNotFoundError("GPVファイルが見つかりませんでした")
-
-
-# ===============================
-# 5. grib2→nc変換 (wgrib2必須)
+# grib2→NetCDF変換・そのまま流用可
 # ===============================
 def grib2_to_nc(grib2_path):
     """
@@ -84,58 +89,13 @@ def grib2_to_nc(grib2_path):
     print(f"[INFO] 変換後NetCDF: {nc_path}")
     return nc_path
 
-
-# ===============================
-# 6. xarrayで開いて初期時刻＋hhラベル付きで天気図描画
-# ===============================
-import xarray as xr
-import numpy as np
-import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-
-def plot_simple_panel(nc_path, init_time, save_path="gsm_weather_map.jpg"):
-    ds = xr.open_dataset(nc_path)
-    times = ds.time.values[:4]
-    plt.figure(figsize=(16, 4))
-    print(ds)
-    print(ds.dims)
-    print(ds.coords)
-
-    for col, t in enumerate(times):
-        ax = plt.subplot(1, 4, col+1, projection=ccrs.PlateCarree())
-        if "HGT_100mb" in ds.variables:
-            hgt = ds["HGT_100mb"].sel(time=t)
-            lon = ds.longitude.values
-            lat = ds.latitude.values
-            Lon, Lat = np.meshgrid(lon, lat)
-            cs = ax.contour(Lon, Lat, hgt, transform=ccrs.PlateCarree())
-            ax.coastlines("50m")
-    
-            # ラベル例：イニシャル時刻＋hh
-            t_dt = np.datetime64(t)
-            init_dt = np.datetime64(init_time)
-            fcst_hour = int((t_dt - init_dt) / np.timedelta64(1, 'h'))
-    
-            print(type(t), t)
-            print(type(init_time), init_time)
-    
-            ax.set_title(f"{init_time:%Y%m%d %HUTC}+{fcst_hour:02d}h")
-            plt.suptitle("GSM 300hPa高度パネル（サンプル）")
-            plt.savefig(save_path, dpi=200)
-            plt.close()
-            print(f"→ 画像保存: {save_path}")
-
-# ===============================
-# 7. 一括実行セル（ダウンロード→変換→描画まで！）
-# ===============================
-grib2_path, init_time = download_gsm_gpv()
-nc_path = grib2_to_nc(grib2_path)
-plot_simple_panel(nc_path, init_time)
-
-
-
-# ---- 単体テスト・手動利用時 ----
+# ---- テスト・手動実行時の例 ----
 if __name__ == "__main__":
-    grib2_path, init_time = download_gsm_gpv()
-    nc_path = grib2_to_nc(grib2_path)
-    print(f"取得→変換: {grib2_path} -> {nc_path}")
+    # モデル切り替えも簡単！
+    for model in ["GSM", "MSM"]:
+        grib2_path, init_time = download_gpv(model=model)
+        if grib2_path:
+            nc_path = grib2_to_nc(grib2_path)
+            print(f"取得→変換: {grib2_path} -> {nc_path}")
+        else:
+            print(f"{model} GPVが見つかりません")
