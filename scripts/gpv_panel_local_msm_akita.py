@@ -64,7 +64,7 @@ def make_local_weather_panel(ds, times, save_path):
         plot_700hpa_dindex_500hpa_temp_msm(axes[0, col], dsi)
         plot_850hpa_temp_wind_700hpa_w_msm(axes[1, col], dsi)
         plot_850hpa_thetae_stream_msm(axes[2, col], dsi)
-        plot_925hpa_temp_wind_dindex_gsm(axes[3, col], dsi)
+        plot_925hpa_temp_wind_dindex_msm(axes[3, col], dsi)
         plot_surface_pressure_and_wind_msm(axes[4, col], dsi)
         plot_emagram_msm(axes[5, col], dsi, city_lat=39.72, city_lon=140.10, city_name="秋田")
 
