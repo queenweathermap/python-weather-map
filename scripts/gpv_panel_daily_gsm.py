@@ -16,10 +16,8 @@ import cartopy.crs as ccrs
 import pandas as pd
 import xarray as xr
 
-# --- サブモジュールimport（GPV自動DL&変換ユーティリティ） ---
-from scripts.gpv_downloader import download_gpv, grib2_to_nc
-
-# --- 描画関数・Slack通知ユーティリティ ---
+# --- サブモジュールimport ---
+from scripts.gpv_downloader import download_gpv_all, grib2_to_nc
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind_gsm,
     plot_500hpa_vorticity_gsm,
@@ -32,22 +30,13 @@ from module.gpv_plotter_gsm import (
 )
 from module.slack_utils import send_file_to_slack
 
-# ===============================
-# グリッド線追加
-# ===============================
 def add_gridlines(ax):
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
     gl.top_labels = False
     gl.right_labels = False
     return gl
 
-# ===============================
-# NO DATAパネル生成関数
-# ===============================
 def make_nodata_weather_panel(times, save_path):
-    """
-    すべての時刻でデータが無い場合に「NO DATA」だけを並べたパネルを作る
-    """
     nrows, ncols = 6, len(times)
     figsize = (4 * ncols, 21)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
@@ -69,13 +58,7 @@ def make_nodata_weather_panel(times, save_path):
     except Exception as e:
         print("Slack送信エラー:", e)
 
-# ===============================
-# GSM用：6行×n列パネル作成メイン関数
-# ===============================
 def make_daily_weather_panel_multi_time(ds, times, save_path):
-    """
-    1日n時刻×6要素のパネルを描画し、1枚画像で保存＆Slack送信
-    """
     ncols = len(times)
     figsize = (4 * ncols, 21)
     fig, axes = plt.subplots(
@@ -88,11 +71,9 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     elif axes.shape[0] != 6:
         axes = axes.reshape((6, -1))
 
-    # --- 初期時刻＆ラベル準備 ---
     init_time = pd.Timestamp(times[0])
     init_label = init_time.strftime('%Y%m%d %HUTC')
-    col_labels = []
-    hh_labels = []
+    col_labels, hh_labels = [], []
     for time in times:
         t = pd.Timestamp(time)
         hour_diff = int((t - init_time).total_seconds() // 3600)
@@ -100,9 +81,7 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
         col_labels.append(label)
         hh_labels.append(f"+{hour_diff:02d}")
 
-    # --- 各パネル描画 ---
     for col, time in enumerate(times):
-        # データ有無を判定
         if np.datetime64(time) not in ds.time.values:
             for row in range(6):
                 ax = axes[row, col]
@@ -120,7 +99,6 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
         plot_850hpa_temp_wind_700hpa_w_gsm(axes[3, col], dsi)
         plot_850hpa_thetae_stream_gsm(axes[4, col], dsi)
         plot_surface_pressure_and_wind_gsm(axes[5, col], dsi)
-
         axes[5, col].text(
             0.5, -0.18,
             col_labels[col],
@@ -129,16 +107,12 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
             va='top',
             transform=axes[5, col].transAxes
         )
-
-    # --- 全パネル一括で緯度・経度線追加 ---
     for ax in axes.flatten():
         add_gridlines(ax)
-
     fig.suptitle(
         f"GSM天気図パネル\nInit: {init_label} | Forecasts: {', '.join(hh_labels)}",
         fontsize=11, y=1.04
     )
-
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print("画像ファイルの存在:", os.path.exists(save_path))
@@ -151,27 +125,43 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
 # ===============================
 # 設定（パターン名と保存先ディレクトリ）
 # ===============================
-GSM_PATTERN = "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
+GSM_PATTERNS = [
+    "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",
+    "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",
+]
 BASE_DIR = "./data"
 
-# ===============================
-# メイン処理
-# ===============================
 if __name__ == "__main__":
     # 1. 最新データのダウンロード＆変換
-    grib2_path, init_time = download_gpv(GSM_PATTERN, BASE_DIR)
-    if grib2_path is None:
+    downloaded = download_gpv_all(GSM_PATTERNS, base_dir=BASE_DIR)
+    if not downloaded or len(downloaded) < 2:
+        # データ取得失敗時はNO DATAパネル送信
+        # 適当な時刻ラベルを生成
+        base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+        times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
+        make_nodata_weather_panel(times, "gsm_panel_nodata.jpg")
         print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
-        # ... NO DATAパネル送信など
-        exit(1)
+        sys.exit(1)
 
-    # --- 2. xarrayで開いて対象時刻リスト作成 ---
-    nc_path = grib2_to_nc(grib2_path)
-    ds = xr.open_dataset(nc_path)
-    times = ds.time.values[:12]  # 3時間刻み12本など
+    # 2. NetCDF変換とmerge
+    nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
+    nc_l_pall = [p for p in nc_paths if "L-pall" in p][0]
+    nc_lsurf  = [p for p in nc_paths if "Lsurf"  in p][0]
+    ds_l_pall = xr.open_dataset(nc_l_pall)
+    ds_lsurf  = xr.open_dataset(nc_lsurf)
+    ds = xr.merge([ds_l_pall, ds_lsurf])
 
     # --- 3. パネル作成＆Slack送信 ---
+    times = ds.time.values[:12]  # 3時間刻み12本
     print("==== パネル作成 ====")
     make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
     print("==== 完了 ====")
     print("正常終了")
+
+
+    # エクスポートする関数を指定
+    __all__ = [
+        "download_gpv_all",
+        "download_gpv_single",
+        "grib2_to_nc",
+    ]
