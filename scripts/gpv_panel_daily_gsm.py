@@ -28,7 +28,7 @@ from module.gpv_plotter_gsm import (
     plot_surface_pressure_and_wind_gsm,
     plot_emagram_gsm,
 )
-from module.slack_utils import send_file_to_slack
+# from module.slack_utils import send_file_to_slack
 
 def add_gridlines(ax):
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
