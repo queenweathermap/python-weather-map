@@ -7,10 +7,12 @@
 # ===============================================
 
 from module.plot_300hpa_height_wind import plot_300hpa_height_wind_msm
-from module.plot_700hpa_dindex_500hpa_temp import plot_700hpa_temp_rh_msm
-from module.plot_850hpa_temp_wind_700hPa_w import plot_850hpa_temp_wind_w_msm
+from module.plot_500hpa_vorticity import plot_500hpa_vorticity_msm
+from module.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp_msm
+from module.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w_msm
 from module.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream_msm
 from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+
 
 # MSM用の関数だけimportします
 # 関数名やimport元は、MSM用に合わせて適宜変更してください
