@@ -149,19 +149,21 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
         print("Slack送信エラー:", e)
 
 # ===============================
+# 設定（パターン名と保存先ディレクトリ）
+# ===============================
+GSM_PATTERN = "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
+BASE_DIR = "./data"
+
+# ===============================
 # メイン処理
 # ===============================
 if __name__ == "__main__":
-    # --- 1. 最新データのダウンロード＆変換 ---
-    grib2_path, init_time = download_gsm_gpv()
-    if grib2_path is None or not os.path.exists(grib2_path):
-        # 「NO DATA」パネルだけを出す
-        # timesは想定する時刻リストで生成
-        base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-        times = [base_time + pd.Timedelta(hours=3 * i) for i in range(12)]
-        make_nodata_weather_panel(times, save_path="gsm_panel_nodata.jpg")
-        print("【ERROR】GPVデータ未取得。NO DATAパネルを送信しました。")
-        sys.exit(0)
+    # 1. 最新データのダウンロード＆変換
+    grib2_path, init_time = download_gpv(GSM_PATTERN, BASE_DIR)
+    if grib2_path is None:
+        print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
+        # ... NO DATAパネル送信など
+        exit(1)
 
     # --- 2. xarrayで開いて対象時刻リスト作成 ---
     nc_path = grib2_to_nc(grib2_path)
