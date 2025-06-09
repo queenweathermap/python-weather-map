@@ -103,7 +103,6 @@ def plot_simple_panel(nc_path, init_time, save_path="gsm_weather_map.jpg"):
 
     for col, t in enumerate(times):
         ax = plt.subplot(1, 4, col+1, projection=ccrs.PlateCarree())
-        # 例：300hPa高度 (実際は好きな変数を選ぶ)
         if "HGT_100mb" in ds.variables:
             hgt = ds["HGT_100mb"].sel(time=t)
             lon = ds.longitude.values
@@ -111,13 +110,20 @@ def plot_simple_panel(nc_path, init_time, save_path="gsm_weather_map.jpg"):
             Lon, Lat = np.meshgrid(lon, lat)
             cs = ax.contour(Lon, Lat, hgt, transform=ccrs.PlateCarree())
             ax.coastlines("50m")
-        # ラベル例：イニシャル時刻＋hh
-        fcst_hour = int((np.datetime64(t) - np.datetime64(init_time)) / np.timedelta64(1, 'h'))
-        ax.set_title(f"{init_time:%Y%m%d %HUTC}+{fcst_hour:02d}h")
-    plt.suptitle("GSM 300hPa高度パネル（サンプル）")
-    plt.savefig(save_path, dpi=200)
-    plt.close()
-    print(f"→ 画像保存: {save_path}")
+    
+            # ラベル例：イニシャル時刻＋hh
+            t_dt = np.datetime64(t)
+            init_dt = np.datetime64(init_time)
+            fcst_hour = int((t_dt - init_dt) / np.timedelta64(1, 'h'))
+    
+            print(type(t), t)
+            print(type(init_time), init_time)
+    
+            ax.set_title(f"{init_time:%Y%m%d %HUTC}+{fcst_hour:02d}h")
+            plt.suptitle("GSM 300hPa高度パネル（サンプル）")
+            plt.savefig(save_path, dpi=200)
+            plt.close()
+            print(f"→ 画像保存: {save_path}")
 
 # ===============================
 # 7. 一括実行セル（ダウンロード→変換→描画まで！）
