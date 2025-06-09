@@ -117,8 +117,7 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     try:
         send_file_to_slack(save_path, channel="C08988S0SRY")
     except Exception as e:
-        print("Slack送信で例外:", e)
-    print(">>> Slack送信後です")
+        print("Slack送信エラー:", e)
 
     # --- メイン処理 ---
     if __name__ == "__main__":
@@ -134,3 +133,4 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
         print("==== パネル作成 ====")
         make_daily_weather_panel_multi_time(ds, times, "weather_map.jpg")
         print("==== 完了 ====")
+        print("正常終了")  # ←追加
