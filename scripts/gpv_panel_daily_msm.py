@@ -16,8 +16,10 @@ import cartopy.crs as ccrs
 import pandas as pd
 import xarray as xr
 
-# --- サブモジュールimport ---
-from scripts.gpv_downloader import download_msm_gpv, grib2_to_nc
+# --- サブモジュールimport（GPV自動DL&変換ユーティリティ） ---
+from scripts.gpv_downloader import download_gpv, grib2_to_nc
+
+# --- MSM描画関数・Slack送信ユーティリティ ---
 from module.gpv_plotter_msm import (
     plot_500hpa_vorticity_msm,
     plot_700hpa_dindex_500hpa_temp_msm,
@@ -28,12 +30,24 @@ from module.gpv_plotter_msm import (
 )
 from module.slack_utils import send_file_to_slack
 
+# ===============================
+# 定数（パターン名と保存先ディレクトリ）
+# ===============================
+MSM_PATTERN = "MSM_GPV_Rjp_L-pall_FD0000-0100_grib2.bin"
+BASE_DIR = "./data"
+
+# ===============================
+# グリッド線追加
+# ===============================
 def add_gridlines(ax):
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
     gl.top_labels = False
     gl.right_labels = False
     return gl
 
+# ===============================
+# NO DATAパネル生成関数
+# ===============================
 def make_nodata_weather_panel(times, save_path):
     nrows, ncols = 6, len(times)
     figsize = (4 * ncols, 21)
@@ -56,6 +70,9 @@ def make_nodata_weather_panel(times, save_path):
     except Exception as e:
         print("Slack送信エラー:", e)
 
+# ===============================
+# MSM用：6行×n列パネル作成メイン関数
+# ===============================
 def make_daily_weather_panel_multi_time(ds, times, save_path):
     ncols = len(times)
     figsize = (4 * ncols, 21)
@@ -124,8 +141,12 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     except Exception as e:
         print("Slack送信エラー:", e)
 
+# ===============================
+# メイン処理
+# ===============================
 if __name__ == "__main__":
-    grib2_path, init_time = download_msm_gpv()
+    # 1. 最新データのダウンロード＆変換
+    grib2_path, init_time = download_gpv(MSM_PATTERN, BASE_DIR)
     if grib2_path is None or not os.path.exists(grib2_path):
         base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
         times = [base_time + pd.Timedelta(hours=3 * i) for i in range(12)]
@@ -133,9 +154,12 @@ if __name__ == "__main__":
         print("【ERROR】MSM GPVデータ未取得。NO DATAパネルを送信しました。")
         sys.exit(0)
 
+    # --- 2. xarrayで開いて対象時刻リスト作成 ---
     nc_path = grib2_to_nc(grib2_path)
     ds = xr.open_dataset(nc_path)
-    times = ds.time.values[:12]
+    times = ds.time.values[:12]  # 必要に応じて変更可
+
+    # --- 3. パネル作成＆Slack送信 ---
     print("==== MSMパネル作成 ====")
     make_daily_weather_panel_multi_time(ds, times, "msm_weather_map.jpg")
     print("==== 完了 ====")
