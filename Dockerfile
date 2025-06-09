@@ -6,8 +6,8 @@ RUN apt-get update && \
       wget git bzip2 \
       python3 python3-pip \
       build-essential python3-dev libfreetype6-dev pkg-config \
-      libcrypt1
-     apt-get update && apt-get install -y fonts-ipaex-gothic
+      libcrypt1 \
+      fonts-ipaex-gothic
 
 
 # Miniconda導入・wgrib2インストール（先ほどのままでOK）
