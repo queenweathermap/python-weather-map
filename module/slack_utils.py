@@ -8,7 +8,7 @@ def send_file_to_slack(image_path, channel="C08988S0SRY"):
     """
     bot_token = os.environ.get("SLACK_BOT_TOKEN")
     if not bot_token:
-        print("[ERROR] SLACK_BOT_TOKEN が環境変数にありません")
+        print("[ERROR] SLACK_BOT_TOKENが設定されていません")
         return
     url = "https://slack.com/api/files.upload"
     with open(image_path, "rb") as file_content:
