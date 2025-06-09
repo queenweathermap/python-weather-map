@@ -4,12 +4,10 @@
 # GSM/MSM両対応（引数 model="GSM"/"MSM" で切り替え）
 # -----------------------------------------------
 # 利用例:
-#   from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind
+#   from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_gsm
 #   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
-#   plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None)
+#   plot_surface_pressure_and_wind_gsm(ax, ds)
 #   plt.show()
-# -----------------------------------------------
-# 2025-06-07 by ChatGPT
 # ===============================================
 
 import numpy as np
@@ -18,80 +16,50 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
 
-# ======= 緯度経度2次元配列取得関数 =======
 def get_lon_lat(ds):
-    """
-    データセットから2次元緯度・経度配列を取得（'longitude','latitude'）
-    """
     lon2d = ds["longitude"].values
     lat2d = ds["latitude"].values
     if lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-# ======= メイン描画関数 =======
-def plot_surface_pressure_and_wind_gsm(ax, ds, model="GSM", prop=None, skip=5):
+def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
     """
     地上海面更正気圧・風・降水量の描画（GSM/MSM両対応）
-
-    等圧線: 1hPa刻み（細線）、4hPaごと太線、H/Lマーク
-    風ベクトル: 10m高度
-    降水量: contourf
-
-    Parameters
-    ----------
-    ax : matplotlib.axes
-        描画先Axis（Cartopy地図投影付き）
-    ds : xarray.Dataset
-        GPVデータセット
-    model : str, default "GSM"
-        "GSM" または "MSM"
-    prop : FontProperties, optional
-        フォントプロパティ（ラベル・タイトル用、Noneでデフォルト）
-    skip : int, default 5
-        風ベクトルの間引き間隔
     """
-    # 緯度・経度
     lon2d, lat2d = get_lon_lat(ds)
 
-    # モデルごとの変数取得
-    if model.upper() == "GSM" or model.upper() == "MSM":
-        prmsl = ds.get("PRMSL_meansealevel", None)
-        u10 = ds.get("UGRD_10maboveground", None)
-        v10 = ds.get("VGRD_10maboveground", None)
-        precip = ds.get("APCP_surface", None)
-    else:
-        raise ValueError("model must be 'GSM' or 'MSM'")
+    # モデルごとの変数取得（GSM/MSM共通）
+    prmsl = ds.get("PRMSL_meansealevel", None)
+    u10 = ds.get("UGRD_10maboveground", None)
+    v10 = ds.get("VGRD_10maboveground", None)
+    precip = ds.get("APCP_surface", None)
 
-    # 地図描画
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
     # --- 海面更正気圧：等圧線 ---
     if prmsl is not None:
-        prmsl_hpa = prmsl.values / 100  # hPa変換
-        # 細線
+        prmsl_hpa = prmsl.values / 100  # hPa
         levels_fine = np.arange(900, 1101, 1)
         cs = ax.contour(
             lon2d, lat2d, prmsl_hpa,
             levels=levels_fine, colors='k', linewidths=0.6,
             transform=ccrs.PlateCarree()
         )
-        # 太線
         levels_bold = np.arange(900, 1101, 4)
         cs_bold = ax.contour(
             lon2d, lat2d, prmsl_hpa,
             levels=levels_bold, colors='k', linewidths=2.0,
             transform=ccrs.PlateCarree()
         )
-        # ラベル
         ax.clabel(cs, fmt="%.0f", fontsize=6)
         label_texts = ax.clabel(cs_bold, fmt="%.0f", fontsize=8, colors='k')
         for txt in label_texts:
             txt.set_fontweight('bold')
 
-        # 高低圧中心（H/Lマーク）
+        # H/Lマーク
         prmsl_max = maximum_filter(prmsl_hpa, size=5)
         prmsl_min = minimum_filter(prmsl_hpa, size=5)
         prmsl_flat = prmsl_hpa.flatten()
@@ -122,8 +90,14 @@ def plot_surface_pressure_and_wind_gsm(ax, ds, model="GSM", prop=None, skip=5):
         cb = plt.colorbar(cf, ax=ax, orientation="vertical", shrink=0.6, pad=0.02)
         cb.set_label("降水量 [mm]", fontsize=8, fontproperties=prop)
 
-    # --- タイトル ---
     ax.set_title("海面更正気圧・地上風・降水量", fontsize=10, pad=10, fontproperties=prop)
+
+# ======= ラッパー関数 =======
+def plot_surface_pressure_and_wind_gsm(ax, ds, prop=None, skip=5):
+    return plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=prop, skip=skip)
+
+def plot_surface_pressure_and_wind_msm(ax, ds, prop=None, skip=5):
+    return plot_surface_pressure_and_wind(ax, ds, model="MSM", prop=prop, skip=skip)
 
 # ===============================================
 # END OF FILE
