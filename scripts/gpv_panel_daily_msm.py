@@ -26,7 +26,20 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     fig, axes = plt.subplots(nrows=6, ncols=len(times), figsize=(4*len(times), 18),
                              subplot_kw={"projection": ccrs.PlateCarree()})
     for col, time in enumerate(times):
-        dsi = ds.sel(time=time)
+        # データ有無を判定
+        if np.datetime64(time) not in ds.time.values:
+            # 各段ごとに枠＋NO DATAで空欄パネル
+            for row in range(6):
+                ax = axes[row, col]
+                # 枠だけ残し、白背景
+                ax.set_facecolor("white")
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("gray")
+                    spine.set_linewidth(1)
+                ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+                # パネル中央にNO DATA
+                ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
+            continue
         # plot_300hpa_height_wind_msm(axes[0, col], dsi)  # ← 使わない場合はコメントアウト
         # plot_emagram_msm(axes[5, col], dsi, city_lat=39.72, city_lon=140.10, city_name="秋田")
         plot_500hpa_vorticity_msm(axes[0, col], dsi)
