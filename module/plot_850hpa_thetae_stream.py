@@ -29,7 +29,7 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 # ======= メイン描画関数 =======
-def plot_850hpa_thetae_stream(ax, ds, model="GSM", prop=None):
+def plot_850hpa_thetae_stream_gsm(ax, ds, model="GSM", prop=None):
     """
     850hPa簡易相当温位（1K刻み・15Kごと太線）＋流線（紺色）
     GSM/MSM両対応
