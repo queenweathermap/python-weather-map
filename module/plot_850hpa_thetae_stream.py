@@ -4,9 +4,9 @@
 # GSM/MSM両対応（引数 model="GSM"/"MSM" で切り替え）
 # -----------------------------------------------
 # 利用例:
-#   from module.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
+#   from module.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream_gsm
 #   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
-#   plot_850hpa_thetae_stream(ax, ds, model="GSM", prop=None)
+#   plot_850hpa_thetae_stream_gsm(ax, ds)
 #   plt.show()
 # -----------------------------------------------
 # 2025-06-07 by ChatGPT
@@ -17,43 +17,31 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
-# ======= 緯度経度2次元配列取得関数 =======
 def get_lon_lat(ds):
-    """
-    データセットから2次元緯度・経度配列を取得（'longitude','latitude'）
-    """
     lon2d = ds["longitude"].values
     lat2d = ds["latitude"].values
     if lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-# ======= メイン描画関数 =======
-def plot_850hpa_thetae_stream_gsm(ax, ds, model="GSM", prop=None):
+def plot_850hpa_thetae_stream(ax, ds, model="GSM", prop=None):
     """
-    850hPa簡易相当温位（1K刻み・15Kごと太線）＋流線（紺色）
-    GSM/MSM両対応
-
-    Parameters
-    ----------
-    ax : matplotlib.axes
-        描画先Axis（Cartopy地図投影付き）
-    ds : xarray.Dataset
-        GPVデータセット
-    model : str, default "GSM"
-        "GSM" または "MSM"
-    prop : FontProperties, optional
-        matplotlib.font_manager.FontProperties オブジェクト
+    850hPa簡易相当温位（1K刻み・15Kごと太線）＋流線（GSM/MSM両対応）
     """
-
-    # ======= 緯度・経度 =======
     lon2d, lat2d = get_lon_lat(ds)
 
-    # ======= モデルごとに変数分岐 =======
-    temp = ds["TMP_850mb"].values
-    rh   = ds["RH_850mb"].values if "RH_850mb" in ds.variables else None
-    u    = ds["UGRD_850mb"].values if "UGRD_850mb" in ds.variables else None
-    v    = ds["VGRD_850mb"].values if "VGRD_850mb" in ds.variables else None
+    if model == "GSM":
+        temp = ds["TMP_850mb"].values
+        rh   = ds["RH_850mb"].values if "RH_850mb" in ds.variables else None
+        u    = ds["UGRD_850mb"].values if "UGRD_850mb" in ds.variables else None
+        v    = ds["VGRD_850mb"].values if "VGRD_850mb" in ds.variables else None
+    elif model == "MSM":
+        temp = ds["TMP_850mb"].values
+        rh   = ds["RH_850mb"].values if "RH_850mb" in ds.variables else None
+        u    = ds["UGRD_850mb"].values if "UGRD_850mb" in ds.variables else None
+        v    = ds["VGRD_850mb"].values if "VGRD_850mb" in ds.variables else None
+    else:
+        raise ValueError("model must be 'GSM' or 'MSM'")
 
     # ======= 簡易相当温位計算 =======
     if rh is not None:
@@ -81,9 +69,7 @@ def plot_850hpa_thetae_stream_gsm(ax, ds, model="GSM", prop=None):
         levels=bold_levels, colors="k", linewidths=1.2, linestyles="-",
         transform=ccrs.PlateCarree()
     )
-    # 太線のみラベル
     ax.clabel(cs2, fontsize=7, fmt="%.0f") 
-
 
     # ======= 850hPa流線（紺色） =======
     if u is not None and v is not None:
@@ -100,6 +86,13 @@ def plot_850hpa_thetae_stream_gsm(ax, ds, model="GSM", prop=None):
 
     # ======= タイトル =======
     ax.set_title("850hPa簡易相当温位（1K刻み/15Kごと太線）＋流線", fontsize=10, pad=10, fontproperties=prop)
+
+# ======= ラッパー関数 =======
+def plot_850hpa_thetae_stream_gsm(ax, ds, prop=None):
+    return plot_850hpa_thetae_stream(ax, ds, model="GSM", prop=prop)
+
+def plot_850hpa_thetae_stream_msm(ax, ds, prop=None):
+    return plot_850hpa_thetae_stream(ax, ds, model="MSM", prop=prop)
 
 # ===============================================
 # END OF FILE
