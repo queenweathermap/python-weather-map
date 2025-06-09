@@ -9,7 +9,7 @@ SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")  # GitHub ActionsのSecret�
 if not SLACK_BOT_TOKEN:
     print("[ERROR] SLACK_BOT_TOKENが設定されていません")
     # 必要なら sys.exit(1)
-SLACK_CHANNEL = "#C08988S0SRY"           # チャンネルIDまたは名称
+SLACK_CHANNEL = "C08988S0SRY"           # チャンネルIDまたは名称
 WORKDIR = "/workspace"                    # Docker内絶対パス
 IMG_GSM = "gsm.png"
 IMG_MSM = "msm.png"
