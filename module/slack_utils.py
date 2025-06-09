@@ -2,11 +2,11 @@
 import os
 from slack_sdk import WebClient
 
-def send_file_to_slack(image_path, channel="C08988S0SRY"):  # チャンネルID
+def send_file_to_slack(image_path, channel):
     bot_token = os.environ["SLACK_BOT_TOKEN"]
     client = WebClient(token=bot_token)
     try:
-        response = client.files_upload(
+        response = client.files_upload_v2(
             channels=channel,
             file=image_path,
             title=os.path.basename(image_path),
