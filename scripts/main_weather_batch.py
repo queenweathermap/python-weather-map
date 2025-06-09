@@ -51,16 +51,21 @@ def send_multiple_files_to_slack(file_title_list, channel, slack_token, initial_
         print("[ERROR] 送信する画像がありません。Slack送信スキップ。")
 
 # ========== 3. 送信実行 ==========
-send_multiple_files_to_slack(
-    [
-        (IMG_GSM,   "GSM 日本域"),
-        (IMG_MSM,   "MSM 日本域"),
-        (IMG_AKITA, "MSM 秋田局地"),
-    ],
-    channel=SLACK_CHANNEL,
-    slack_token=SLACK_BOT_TOKEN,
-    initial_comment="本日の自動天気図（GSM/MSM/秋田局地）"
-)
+for img_path, title in [
+    ("gsm.png", "GSM 日本域"),
+    ("msm.png", "MSM 日本域"),
+    ("akita.png", "MSM 秋田局地")
+]:
+    if os.path.exists(img_path):
+        upload_file_external_slack(
+            channel="C08988S0SRY",
+            filepath=img_path,
+            title=title,
+            initial_comment=f"本日の自動天気図（{title}）"
+        )
+    else:
+        print(f"[WARN] 画像が見つかりません: {img_path}")
+
 
 # ========== 4. 不要な画像ファイルを削除（任意）==========
 for f in [IMG_GSM, IMG_MSM, IMG_AKITA]:
