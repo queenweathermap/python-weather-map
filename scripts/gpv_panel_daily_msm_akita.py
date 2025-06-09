@@ -84,6 +84,20 @@ def make_local_weather_panel(ds, times, save_path):
 
     # --- 各時刻・各段パネル描画 ---
     for col, time in enumerate(times):
+        # データ有無を判定
+        if np.datetime64(time) not in ds.time.values:
+            # 各段ごとに枠＋NO DATAで空欄パネル
+            for row in range(6):
+                ax = axes[row, col]
+                # 枠だけ残し、白背景
+                ax.set_facecolor("white")
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("gray")
+                    spine.set_linewidth(1)
+                ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+                # パネル中央にNO DATA
+                ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
+            continue
         # 1行目: 秋田ピンポイント（緯度経度指定）のエマグラム
         dsi_point = ds.sel(
             lat=AKITA_PIN_LAT, lon=AKITA_PIN_LON, time=time, method='nearest'
