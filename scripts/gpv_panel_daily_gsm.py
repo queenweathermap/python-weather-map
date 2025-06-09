@@ -157,11 +157,3 @@ if __name__ == "__main__":
     make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
     print("==== 完了 ====")
     print("正常終了")
-
-
-    # エクスポートする関数を指定
-    __all__ = [
-        "download_gpv_all",
-        "download_gpv_single",
-        "grib2_to_nc",
-    ]
