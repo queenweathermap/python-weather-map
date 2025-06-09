@@ -12,11 +12,12 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib.colors import LinearSegmentedColormap
 from module.gpv_plotter_msm import (
-    plot_300hpa_height_wind,
-    plot_700hpa_temp_rh,
-    plot_850hpa_temp_wind_w,
-    plot_850hpa_thetae_stream,
-    plot_surface_pressure_and_wind
+    plot_300hpa_height_wind,          # 300hPa
+    plot_500hpa_vorticity,          # 500hPa渦度（例）
+    plot_700hpa_dindex_500hpa_temp,  # 700湿数・500温度
+    plot_850hpa_temp_wind_700hpa_w,  # 850hPa温度・風
+    plot_850hpa_thetae_stream,       # 850hPa相当温位
+    plot_surface_pressure_and_wind,  # 地上
 )
 
 def make_daily_weather_panel_multi_time(ds, times, save_path):
