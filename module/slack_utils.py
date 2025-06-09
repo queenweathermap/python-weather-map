@@ -1,4 +1,5 @@
 # module/slack_utils.py
+
 import requests
 import os
 
@@ -48,10 +49,4 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
 
     print("[Slack送信] 完了:", complete_res)
 
-# 使い方
-upload_file_external_slack(
-    channel="C08988S0SRY",
-    filepath="akita.png",
-    title="MSM 秋田局地",
-    initial_comment="本日の自動天気図（秋田局地）"
-)
+# ←ここで何も呼び出さない！
