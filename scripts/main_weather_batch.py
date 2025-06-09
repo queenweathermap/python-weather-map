@@ -5,10 +5,9 @@
 
 import subprocess
 import os
-from slack_sdk import WebClient
+from module.slack_utils import upload_file_external_slack
 
 # ========== 設定 ==========
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")     # GitHub Actions/ローカル共通
 SLACK_CHANNEL   = "C08988S0SRY" 
 
 IMG_GSM   = "gsm.png"
@@ -29,45 +28,22 @@ for script, out_file in image_jobs:
         print(f"[ERROR] {script} 実行失敗:", e)
 
 # ========== 2. Slackに画像を順送りで投稿 ==========
-def send_multiple_files_to_slack(file_title_list, channel, slack_token, initial_comment="本日の天気図です！"):
-    client = WebClient(token=slack_token)
-    sent_any = False
-    for image_path, title in file_title_list:
-        if os.path.exists(image_path):
-            try:
-                response = client.files_upload(
-                    channels=channel,
-                    file=image_path,
-                    title=title,
-                    initial_comment=initial_comment if not sent_any else None
-                )
-                print(f"[Slack送信] {title}: OK")
-                sent_any = True
-            except Exception as e:
-                print(f"Error: {title} Slack送信失敗:", e)
-        else:
-            print(f"[WARN] 画像が見つかりません: {image_path}")
-    if not sent_any:
-        print("[ERROR] 送信する画像がありません。Slack送信スキップ。")
-
-# ========== 3. 送信実行 ==========
 for img_path, title in [
-    ("gsm.png", "GSM 日本域"),
-    ("msm.png", "MSM 日本域"),
-    ("akita.png", "MSM 秋田局地")
+    (IMG_GSM, "GSM 日本域"),
+    (IMG_MSM, "MSM 日本域"),
+    (IMG_AKITA, "MSM 秋田局地"),
 ]:
     if os.path.exists(img_path):
         upload_file_external_slack(
-            channel="C08988S0SRY",
+            channel=SLACK_CHANNEL,
             filepath=img_path,
             title=title,
-            initial_comment=f"本日の自動天気図（{title}）"
+            initial_comment="本日の自動天気図（GSM/MSM/秋田局地）"
         )
     else:
-        print(f"[WARN] 画像が見つかりません: {img_path}")
+        print(f"[WARN] 画像が見つかりません: {img_path}（スキップします）")
 
-
-# ========== 4. 不要な画像ファイルを削除（任意）==========
+# ========== 3. 不要な画像ファイルを削除（任意）==========
 for f in [IMG_GSM, IMG_MSM, IMG_AKITA]:
     try:
         if os.path.exists(f):
