@@ -18,7 +18,7 @@ from module.gpv_plotter_msm import (
     plot_700hpa_dindex_500hpa_temp_msm,
     plot_850hpa_temp_wind_700hpa_w_msm,
     plot_850hpa_thetae_stream_msm,
-    plot_925hpa_temp_wind_dindex_gsm,      # ※GSM/両対応ならこのままでOK
+    plot_925hpa_temp_wind_dindex_msm,
     plot_surface_pressure_and_wind_msm,
     plot_emagram_msm,
 )
