@@ -31,7 +31,7 @@ def get_lon_lat(ds):
 
 
 # ======= メイン描画関数 =======
-def plot_850hpa_temp_wind_700hpa_w(ax, ds, model="GSM", prop=None, skip=5):
+def plot_850hpa_temp_wind_700hpa_w_gsm(ax, ds, model="GSM", prop=None, skip=5):
     """
     850hPa温度・風＋700hPa鉛直流（GSM/MSM両対応）
     """
