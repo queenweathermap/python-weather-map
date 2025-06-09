@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import numpy as np
 import matplotlib.pyplot as plt
-plt.rcParams['font.family'] = 'IPAexGothic'
+plt.rcParams['font.family'] = 'IPAGothic'
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
