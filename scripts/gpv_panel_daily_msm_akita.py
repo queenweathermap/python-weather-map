@@ -9,6 +9,7 @@
 
 import sys
 import os
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'IPAGothic'
@@ -16,8 +17,8 @@ import cartopy.crs as ccrs
 import pandas as pd
 import xarray as xr
 
-# --- MSM GPVデータ取得・変換 ---
-from scripts.gpv_downloader import download_msm_gpv, grib2_to_nc
+# --- 共通DL/変換ユーティリティ ---
+from scripts.gpv_downloader import download_gpv, grib2_to_nc
 
 # --- MSMパネル描画 ---
 from module.gpv_plotter_msm import (
@@ -30,7 +31,11 @@ from module.gpv_plotter_msm import (
 )
 from module.slack_utils import send_file_to_slack
 
-# --- 秋田局地範囲 ---
+# ===============================
+# 定数（ファイルパターン・保存先・範囲）
+# ===============================
+MSM_PATTERN = "MSM_GPV_Rjp_L-pall_FD0000-0100_grib2.bin"
+BASE_DIR = "./data"
 AKITA_LAT_RANGE = (38.8, 40.8)
 AKITA_LON_RANGE = (139.2, 141.0)
 AKITA_PIN_LAT = 39.72
@@ -43,9 +48,7 @@ def add_gridlines(ax):
     return gl
 
 def make_nodata_weather_panel(times, save_path):
-    """
-    データが全くない場合の「NO DATAパネル」自動生成＆Slack送信
-    """
+    """全データ未取得時のNO DATAパネル作成＆Slack送信"""
     nrows, ncols = 6, len(times)
     figsize = (4 * ncols, 21)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
@@ -101,13 +104,13 @@ def make_local_weather_panel(ds, times, save_path):
                 ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
             continue
 
-        # 1行目：秋田ピンポイントのエマグラム（投影をクリア）
+        # 1行目：秋田ピンポイントのエマグラム
         dsi_point = ds.sel(lat=AKITA_PIN_LAT, lon=AKITA_PIN_LON, time=time, method='nearest')
         ax_emagram = axes[0, col]
         ax_emagram.cla()
         plot_emagram_msm(ax_emagram, dsi_point, city_lat=AKITA_PIN_LAT, city_lon=AKITA_PIN_LON, city_name="秋田")
 
-        # 2〜6行目：秋田周辺
+        # 2〜6行目：秋田周辺の水平断面
         dsi = ds.sel(
             lat=slice(AKITA_LAT_RANGE[0], AKITA_LAT_RANGE[1]),
             lon=slice(AKITA_LON_RANGE[0], AKITA_LON_RANGE[1]),
@@ -129,7 +132,7 @@ def make_local_weather_panel(ds, times, save_path):
             transform=ax_emagram.transAxes
         )
 
-    # 全パネルグリッド線（1〜5段目のみ）
+    # 2〜6段目のみグリッド線
     for row in range(1, 6):
         for col in range(ncols):
             add_gridlines(axes[row, col])
@@ -147,9 +150,12 @@ def make_local_weather_panel(ds, times, save_path):
     except Exception as e:
         print("Slack送信エラー:", e)
 
+# ===============================
+# メイン処理
+# ===============================
 if __name__ == "__main__":
-    # --- MSM GPVデータの自動取得＆NetCDF変換 ---
-    grib2_path, init_time = download_msm_gpv()
+    # 1. 最新データのダウンロード＆変換
+    grib2_path, init_time = download_gpv(MSM_PATTERN, BASE_DIR)
     if grib2_path is None or not os.path.exists(grib2_path):
         base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
         times = [base_time + pd.Timedelta(hours=3 * i) for i in range(12)]
@@ -157,6 +163,7 @@ if __name__ == "__main__":
         print("【ERROR】秋田局地 MSM GPVデータ未取得。NO DATAパネルを送信しました。")
         sys.exit(0)
 
+    # 2. xarrayで開いて対象時刻リスト作成
     nc_path = grib2_to_nc(grib2_path)
     ds = xr.open_dataset(nc_path)
     times = ds.time.values[:12]
