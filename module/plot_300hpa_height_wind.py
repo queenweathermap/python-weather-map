@@ -32,7 +32,9 @@ def get_lon_lat(ds):
 
 
 # ======= メイン描画関数 =======
-def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
+def plot_300hpa_height_wind_gsm(ax, ds):
+    return plot_300hpa_height_wind(ax, ds)
+
     """
     300hPa等高度線＋等風速線＋風ベクトル（GSM/MSM両対応）
     
