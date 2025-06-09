@@ -21,7 +21,7 @@ subprocess.run(["python3", "scripts/gpv_panel_daily_msm.py", IMG_MSM], check=Tru
 subprocess.run(["python3", "scripts/gpv_panel_daily_msm_akita.py", IMG_AKITA], check=True)
 
 # ========== 2. Slackにまとめて投稿 ==========
-client = WebClient(token=SLACK_TOKEN)
+client = WebClient(token=SLACK_BOT_TOKEN)
 try:
     response = client.files_upload_v2(
         channels=SLACK_CHANNEL,
