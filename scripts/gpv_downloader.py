@@ -105,7 +105,7 @@ def plot_simple_panel(nc_path, init_time, save_path="gsm_weather_map.jpg"):
         ax = plt.subplot(1, 4, col+1, projection=ccrs.PlateCarree())
         # 例：300hPa高度 (実際は好きな変数を選ぶ)
         if "HGT_100mb" in ds.variables:
-            hgt = ds["HGT_100mb"].sel(lev=30000, method="nearest").sel(time=t)
+            hgt = ds["HGT_100mb"].sel(time=t)
             lon = ds.longitude.values
             lat = ds.latitude.values
             Lon, Lat = np.meshgrid(lon, lat)
