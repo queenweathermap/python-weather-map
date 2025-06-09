@@ -1,4 +1,5 @@
 numpy
+metpy
 pandas
 matplotlib
 cartopy
