@@ -30,7 +30,7 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 # ======= メイン描画関数 =======
-def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
+def plot_surface_pressure_and_wind_gsm(ax, ds, model="GSM", prop=None, skip=5):
     """
     地上海面更正気圧・風・降水量の描画（GSM/MSM両対応）
 
