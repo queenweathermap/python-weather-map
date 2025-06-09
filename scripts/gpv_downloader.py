@@ -1,7 +1,7 @@
 # scripts/gpv_downloader.py
 # ===============================
 # 気象庁GPV自動ダウンロード&GRIB2→NetCDF変換モジュール
-# 複数ファイルパターン/ミラーURL/リトライ対応・拡張可
+# GSMはFD、MSMはFH分割対応／ファイルパターン拡張可
 # ===============================
 
 import os
@@ -10,40 +10,34 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# --- ミラーURL（必要ならここに追加でOK！） ---
-# --- 代表的な気象庁GPVファイルパターン ---
-GPV_PATTERNS = [
-    # GSM（日本域 0.1度, 気圧面/地上/土壌/積雪等）
-    "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",   # 気圧面
-    "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",    # 地上
-    "GSM_GPV_Rjp_Gll0p1deg_Lsoil_FD0000-0100_grib2.bin",    # 土壌
-    "GSM_GPV_Rjp_Gll0p1deg_Lsnow_FD0000-0100_grib2.bin",    # 積雪
-
-    # MSM（日本域 0.05度, 気圧面/地上/土壌/積雪等）
-    "MSM_GPV_Rjp_L-pall_FD0000-0100_grib2.bin",             # 気圧面
-    "MSM_GPV_Rjp_Lsurf_FD0000-0100_grib2.bin",              # 地上
-    "MSM_GPV_Rjp_Lsoil_FD0000-0100_grib2.bin",              # 土壌
-    "MSM_GPV_Rjp_Lsnow_FD0000-0100_grib2.bin",              # 積雪
-
-    # MSM（領域限定/短時間予報/アンサンブルなどがあればここに追加）
-    # "MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",  # 例: 先取り短時間
-    # "MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin",
+# --- 主要ミラーURL（今は京大のみ。他があれば追加でOK） ---
+GPV_MIRROR_URLS = [
+    "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 ]
 
-# --- ファイルパターン例（必要なだけ増やせる） ---
-GPV_PATTERNS = [
-    "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",
-    "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",
-    "MSM_GPV_Rjp_L-pall_FD0000-0100_grib2.bin",
-    # 必要に応じて他もここに追加
+# --- ファイルパターンリスト ---
+GSM_PATTERNS = [
+    "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",    # 気圧面
+    "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",     # 地上
+    # 土壌や積雪も必要なら追加
+]
+# MSM（3分割）
+MSM_PATTERNS = [
+    "MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",
+    "MSM_GPV_Rjp_L-pall_FH18-33_grib2.bin",
+    "MSM_GPV_Rjp_L-pall_FH36-39_grib2.bin",
+    "MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin",
+    "MSM_GPV_Rjp_Lsurf_FH18-33_grib2.bin",
+    "MSM_GPV_Rjp_Lsurf_FH36-39_grib2.bin",
+    # 他（アンサンブル・局地など）も追加可
 ]
 
-def download_gpv_all(patterns=GPV_PATTERNS, base_dir="./data", mirrors=GPV_MIRROR_URLS, hours=[18,12,6,0], days=2):
+def download_gpv_all(patterns, base_dir="./data", mirrors=GPV_MIRROR_URLS, hours=[18,12,6,0], days=2):
     """
-    patterns: ファイル名パターンのリスト
-    mirrors: 参照するミラーURLリスト
-    hours: 検索する時刻（JST基準）
-    days: 今日から何日前まで試行するか
+    patterns: ダウンロードしたいファイル名パターンのリスト（GSM・MSM対応）
+    mirrors: ミラーURLリスト
+    hours: JST基準の時刻（00, 06, 12, 18時）
+    days: 何日前まで探索するか
     """
     os.makedirs(base_dir, exist_ok=True)
     downloaded = []
@@ -66,6 +60,7 @@ def download_gpv_single(pattern, base_dir, mirrors, hours, days):
         ymd = dt.strftime("%Y%m%d")
         y, m, d = dt.strftime("%Y"), dt.strftime("%m"), dt.strftime("%d")
         for h in hours:
+            # 例: Z__C_RJTD_20240609000000_MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin
             fname = f"Z__C_RJTD_{ymd}{h:02d}0000_{pattern}"
             for url_base in mirrors:
                 url = f"{url_base}/{y}/{m}/{d}/{fname}"
@@ -88,3 +83,9 @@ def grib2_to_nc(grib2_path):
     if result.returncode != 0:
         raise RuntimeError("grib2→nc変換に失敗")
     return str(nc_path)
+
+# 使い方（GSM例）
+# gsm_files = download_gpv_all(GSM_PATTERNS, base_dir="./data")
+
+# MSMの場合（分割DLして統合する。分割されたNetCDFを後でxr.concatで連結！）
+# msm_files = download_gpv_all(MSM_PATTERNS, base_dir="./data")
