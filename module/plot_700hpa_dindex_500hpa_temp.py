@@ -30,7 +30,7 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 # ======= メイン描画関数 =======
-def plot_700hpa_dindex_500hpa_temp(ax, ds, model="GSM"):
+def plot_700hpa_dindex_500hpa_temp_gsm(ax, ds, model="GSM"):
     """
     700hPa湿数＋500hPa等温線の描画（GSM/MSM両対応）
 
