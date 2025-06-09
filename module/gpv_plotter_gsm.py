@@ -10,7 +10,9 @@ from module.plot_500hpa_vorticity import plot_500hpa_vorticity_gsm
 from module.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp_gsm
 from module.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w_gsm
 from module.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream_gsm
+# from module.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex_gsm
 from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_gsm
+# from module.plot_emagram import plot_emagram_gsm
 
 # GSM用関数は必ず「_gsm」付きでimport＆定義してください
 # 必要なものは随時ここに追加！
