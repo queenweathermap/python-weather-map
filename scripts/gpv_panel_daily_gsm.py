@@ -81,6 +81,20 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
 
     # --- 各パネル描画 ---
     for col, time in enumerate(times):
+        # データ有無を判定
+        if np.datetime64(time) not in ds.time.values:
+            # 各段ごとに枠＋NO DATAで空欄パネル
+            for row in range(6):
+                ax = axes[row, col]
+                # 枠だけ残し、白背景
+                ax.set_facecolor("white")
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("gray")
+                    spine.set_linewidth(1)
+                ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+                # パネル中央にNO DATA
+                ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
+            continue  # 次のcolへ
         dsi = ds.sel(time=time)
         plot_300hpa_height_wind_gsm(axes[0, col], dsi)
         plot_500hpa_vorticity_gsm(axes[1, col], dsi)
