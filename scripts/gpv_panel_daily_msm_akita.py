@@ -99,18 +99,21 @@ def make_local_weather_panel(ds, times, save_path):
                 ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
             continue
 
-        # 1行目：秋田ピンポイントのエマグラム
-        dsi_point = ds.sel(lat=AKITA_PIN_LAT, lon=AKITA_PIN_LON, time=time, method='nearest')
+        # 1行目：秋田ピンポイントのエマグラム（投影をクリア）
+        dsi_point = ds.sel(
+            latitude=AKITA_PIN_LAT, longitude=AKITA_PIN_LON, time=time, method='nearest'
+        )
         ax_emagram = axes[0, col]
         ax_emagram.cla()
         plot_emagram_msm(ax_emagram, dsi_point, city_lat=AKITA_PIN_LAT, city_lon=AKITA_PIN_LON, city_name="秋田")
-
+        
         # 2〜6行目：秋田周辺の水平断面
         dsi = ds.sel(
-            lat=slice(AKITA_LAT_RANGE[0], AKITA_LAT_RANGE[1]),
-            lon=slice(AKITA_LON_RANGE[0], AKITA_LON_RANGE[1]),
+            latitude=slice(AKITA_LAT_RANGE[0], AKITA_LAT_RANGE[1]),
+            longitude=slice(AKITA_LON_RANGE[0], AKITA_LON_RANGE[1]),
             time=time
         )
+
         plot_700hpa_dindex_500hpa_temp_msm(axes[1, col], dsi)
         plot_850hpa_temp_wind_700hpa_w_msm(axes[2, col], dsi)
         plot_850hpa_thetae_stream_msm(axes[3, col], dsi)
