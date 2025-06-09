@@ -23,6 +23,7 @@ from scripts.gpv_downloader import download_msm_gpv, grib2_to_nc
 
 # --- MSM各種パネル描画関数 ---
 from module.gpv_plotter_msm import (
+    plot_emagram_msm,  # エマグラム
     plot_300hpa_height_wind_msm,      # 300hPa
     plot_500hpa_vorticity_msm,           # 500hPa渦度
     plot_700hpa_dindex_500hpa_temp_msm,  # 700hPa湿数・500hPa温度
@@ -30,7 +31,6 @@ from module.gpv_plotter_msm import (
     plot_850hpa_thetae_stream_msm,       # 850hPa相当温位
     plot_925hpa_temp_wind_dindex_msm,    # 925hPa温度。風・湿数
     plot_surface_pressure_and_wind_msm,  # 地上
-    plot_emagram_msm,  # エマグラム
 )
 
 # --- Slack送信用 ---
@@ -81,31 +81,30 @@ def make_local_weather_panel(ds, times, save_path):
         col_labels.append(label)
         hh_labels.append(f"+{hour_diff:02d}")
 
+
     # --- 各時刻・各段パネル描画 ---
     for col, time in enumerate(times):
-        # 1〜5段目: 秋田周辺の水平断面
+        # 1行目: 秋田ピンポイント（緯度経度指定）のエマグラム
+        dsi_point = ds.sel(
+            lat=AKITA_PIN_LAT, lon=AKITA_PIN_LON, time=time, method='nearest'
+        )
+        ax_emagram = axes[0, col]
+        ax_emagram.cla()  # Cartopy投影をクリアして普通の軸にする
+        plot_emagram_msm(ax_emagram, dsi_point,
+                         city_lat=AKITA_PIN_LAT, city_lon=AKITA_PIN_LON, city_name="秋田")
+    
+        # 2〜6行目: 秋田周辺の水平断面
         dsi = ds.sel(
             lat=slice(AKITA_LAT_RANGE[0], AKITA_LAT_RANGE[1]),
             lon=slice(AKITA_LON_RANGE[0], AKITA_LON_RANGE[1]),
             time=time
         )
-        plot_700hpa_dindex_500hpa_temp_msm(axes[0, col], dsi)
-        plot_850hpa_temp_wind_700hpa_w_msm(axes[1, col], dsi)
-        plot_850hpa_thetae_stream_msm(axes[2, col], dsi)
-        plot_925hpa_temp_wind_dindex_msm(axes[3, col], dsi)
-        plot_surface_pressure_and_wind_msm(axes[4, col], dsi)
+        plot_700hpa_dindex_500hpa_temp_msm(axes[1, col], dsi)
+        plot_850hpa_temp_wind_700hpa_w_msm(axes[2, col], dsi)
+        plot_850hpa_thetae_stream_msm(axes[3, col], dsi)
+        plot_925hpa_temp_wind_dindex_msm(axes[4, col], dsi)
+        plot_surface_pressure_and_wind_msm(axes[5, col], dsi)
 
-        # 6段目: 秋田ピンポイント（緯度経度指定）のエマグラム
-        dsi_point = ds.sel(
-            lat=AKITA_PIN_LAT, lon=AKITA_PIN_LON, time=time, method='nearest'
-        )
-        # エマグラムは投影不要（普通のaxがほしい）
-        # Cartopy Axesのまま描画する場合、内部でgca置き換え/ax.clear()して2重描画に注意
-        # ⇒一度ax.cla()でリセットし通常matplotlib軸として再利用
-        ax_emagram = axes[5, col]
-        ax_emagram.cla()  # 既存カートピープロジェクションをクリア
-        plot_emagram_msm(ax_emagram, dsi_point,
-                         city_lat=AKITA_PIN_LAT, city_lon=AKITA_PIN_LON, city_name="秋田")
 
         # 6段目に時刻ラベル
         ax_emagram.text(
