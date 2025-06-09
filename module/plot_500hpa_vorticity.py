@@ -26,7 +26,7 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 # ======= メイン描画関数 =======
-def plot_500hpa_vorticity(ax, ds, prop=None):
+def plot_500hpa_vorticity_gsm(ax, ds, prop=None):
     """
     500hPa等高度線＋渦度塗りつぶしの描画（格子間隔は平均値使用でshapeエラー回避）
     """
