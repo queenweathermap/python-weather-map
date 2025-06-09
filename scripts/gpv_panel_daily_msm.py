@@ -23,7 +23,7 @@ from module.gpv_plotter_msm import (
     plot_925hpa_temp_wind_dindex_msm,
     plot_surface_pressure_and_wind_msm,
 )
-from module.slack_utils import send_file_to_slack
+# from module.slack_utils import send_file_to_slack
 
 # ===============================
 # MSMパターンリストと保存先
