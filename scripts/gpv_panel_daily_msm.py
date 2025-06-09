@@ -12,7 +12,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
 from module.gpv_plotter_msm import (
-    # plot_300hpa_height_wind_msm,         # 300hPa
+    # plot_300hpa_height_wind_msm,      # 300hPa
     plot_500hpa_vorticity_msm,           # 500hPa渦度
     plot_700hpa_dindex_500hpa_temp_msm,  # 700hPa湿数・500hPa温度
     plot_850hpa_temp_wind_700hpa_w_msm,  # 850hPa温度・風・700hPa鉛直流
