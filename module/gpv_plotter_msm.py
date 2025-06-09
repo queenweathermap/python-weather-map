@@ -28,7 +28,9 @@ from metpy.plots import SkewT
 from metpy.units import units
 import pandas as pd
 
-def plot_emagram_msm(ax, dsi, city_lat, city_lon, city_name):
+def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
+    from metpy.plots import SkewT
+    skew = SkewT(ax, rotation=0)
     """
     MSM GPVデータからエマグラムを描画（Wyoming風）
     ax : matplotlib axes
