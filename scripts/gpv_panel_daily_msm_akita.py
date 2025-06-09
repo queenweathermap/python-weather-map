@@ -74,6 +74,16 @@ def make_local_weather_panel(ds, times, save_path):
     figsize = (4 * ncols, 21)
     fig = plt.figure(figsize=figsize)
     axes = np.empty((nrows, ncols), dtype=object)
+    
+    # ←★ここでラベル生成
+    init_time = pd.Timestamp(times[0])
+    col_labels, hh_labels = [], []
+    for time in times:
+        t = pd.Timestamp(time)
+        hour_diff = int((t - init_time).total_seconds() // 3600)
+        label = f"{t.strftime('%Y%m%d %HUTC')} (+" + f"{hour_diff:02d}h)"
+        col_labels.append(label)
+        hh_labels.append(f"+{hour_diff:02d}")
 
     # 2〜6段目: Cartopy投影Axes（地図描画）だけ普通に確保
     for row in range(1, nrows):
