@@ -74,10 +74,10 @@ def make_local_weather_panel(ds, times, save_path):
     figsize = (4 * ncols, 21)
     fig = plt.figure(figsize=figsize)
     axes = np.empty((nrows, ncols), dtype=object)
-    # 1段目だけ普通のAxes（エマグラム用）
+    # 1段目: エマグラム用の通常Axes
     for col in range(ncols):
         axes[0, col] = fig.add_subplot(nrows, ncols, 1 + col)
-    # 2〜6段目は PlateCarree（Cartopy）で作成
+    # 2〜6段目: Cartopy投影Axes（地図描画）
     for row in range(1, nrows):
         for col in range(ncols):
             axes[row, col] = fig.add_subplot(nrows, ncols, row * ncols + col + 1, projection=ccrs.PlateCarree())
