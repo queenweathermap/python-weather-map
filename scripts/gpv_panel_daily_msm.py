@@ -1,9 +1,6 @@
 # scripts/gpv_panel_daily_msm.py
 # ===============================
 # MSM天気図 6行×n列パネル生成 ＋ Slack自動通知
-#  - GPV自動DL/変換も統合
-#  - GitHub Actions/ローカル両対応
-#  - データ未取得時はNO DATAパネル自動生成
 # ===============================
 
 import sys
@@ -16,10 +13,8 @@ import cartopy.crs as ccrs
 import pandas as pd
 import xarray as xr
 
-# --- サブモジュールimport（GPV自動DL&変換ユーティリティ） ---
-from scripts.gpv_downloader import download_gpv, grib2_to_nc
-
-# --- MSM描画関数・Slack送信ユーティリティ ---
+# --- サブモジュールimport ---
+from scripts.gpv_downloader import download_gpv_all, grib2_to_nc
 from module.gpv_plotter_msm import (
     plot_500hpa_vorticity_msm,
     plot_700hpa_dindex_500hpa_temp_msm,
@@ -31,23 +26,22 @@ from module.gpv_plotter_msm import (
 from module.slack_utils import send_file_to_slack
 
 # ===============================
-# 定数（パターン名と保存先ディレクトリ）
+# MSMパターンリストと保存先
 # ===============================
-MSM_PATTERN = "MSM_GPV_Rjp_L-pall_FD0000-0100_grib2.bin"
+MSM_PATTERNS = [
+    "MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",
+    "MSM_GPV_Rjp_L-pall_FH18-33_grib2.bin",
+    "MSM_GPV_Rjp_L-pall_FH36-39_grib2.bin",
+    # 必要なら地上や他層も追加
+]
 BASE_DIR = "./data"
 
-# ===============================
-# グリッド線追加
-# ===============================
 def add_gridlines(ax):
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
     gl.top_labels = False
     gl.right_labels = False
     return gl
 
-# ===============================
-# NO DATAパネル生成関数
-# ===============================
 def make_nodata_weather_panel(times, save_path):
     nrows, ncols = 6, len(times)
     figsize = (4 * ncols, 21)
@@ -70,9 +64,6 @@ def make_nodata_weather_panel(times, save_path):
     except Exception as e:
         print("Slack送信エラー:", e)
 
-# ===============================
-# MSM用：6行×n列パネル作成メイン関数
-# ===============================
 def make_daily_weather_panel_multi_time(ds, times, save_path):
     ncols = len(times)
     figsize = (4 * ncols, 21)
@@ -88,8 +79,7 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
 
     init_time = pd.Timestamp(times[0])
     init_label = init_time.strftime('%Y%m%d %HUTC')
-    col_labels = []
-    hh_labels = []
+    col_labels, hh_labels = [], []
     for time in times:
         t = pd.Timestamp(time)
         hour_diff = int((t - init_time).total_seconds() // 3600)
@@ -126,12 +116,10 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
 
     for ax in axes.flatten():
         add_gridlines(ax)
-
     fig.suptitle(
         f"MSM天気図パネル\nInit: {init_label} | Forecasts: {', '.join(hh_labels)}",
         fontsize=11, y=1.04
     )
-
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print("画像ファイルの存在:", os.path.exists(save_path))
@@ -145,21 +133,24 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
 # メイン処理
 # ===============================
 if __name__ == "__main__":
-    # 1. 最新データのダウンロード＆変換
-    grib2_path, init_time = download_gpv(MSM_PATTERN, BASE_DIR)
-    if grib2_path is None or not os.path.exists(grib2_path):
+    # 1. 最新データのダウンロード＆分割NetCDF変換
+    downloaded = download_gpv_all(MSM_PATTERNS, base_dir=BASE_DIR)
+    if not downloaded or len(downloaded) < 3:
+        # どれか一つでも無い場合はNO DATA
         base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-        times = [base_time + pd.Timedelta(hours=3 * i) for i in range(12)]
-        make_nodata_weather_panel(times, save_path="msm_panel_nodata.jpg")
+        times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
+        make_nodata_weather_panel(times, "msm_panel_nodata.jpg")
         print("【ERROR】MSM GPVデータ未取得。NO DATAパネルを送信しました。")
-        sys.exit(0)
+        sys.exit(1)
 
-    # --- 2. xarrayで開いて対象時刻リスト作成 ---
-    nc_path = grib2_to_nc(grib2_path)
-    ds = xr.open_dataset(nc_path)
-    times = ds.time.values[:12]  # 必要に応じて変更可
+    # 2. NetCDF変換し結合
+    nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
+    # NetCDFを全部読み込んで「時刻結合」
+    ds_list = [xr.open_dataset(nc) for nc in nc_paths]
+    ds = xr.concat(ds_list, dim="time")
 
     # --- 3. パネル作成＆Slack送信 ---
+    times = ds.time.values[:12]  # MSMも12時刻
     print("==== MSMパネル作成 ====")
     make_daily_weather_panel_multi_time(ds, times, "msm_weather_map.jpg")
     print("==== 完了 ====")
