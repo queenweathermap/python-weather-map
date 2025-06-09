@@ -76,7 +76,8 @@ def make_local_weather_panel(ds, times, save_path):
     axes = np.empty((nrows, ncols), dtype=object)
     # 1段目: エマグラム用の通常Axes
     for col in range(ncols):
-        axes[0, col] = fig.add_subplot(nrows, ncols, 1 + col)
+        axes[0, col] = fig.add_subplot(nrows, ncols, 1 + col, projection='skewx')
+
     # 2〜6段目: Cartopy投影Axes（地図描画）
     for row in range(1, nrows):
         for col in range(ncols):
