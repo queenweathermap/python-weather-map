@@ -1,27 +1,17 @@
+# module/slack_utils.py
 import os
-import requests
+from slack_sdk import WebClient
 
-def send_file_to_slack(image_path, channel="C08988S0SRY"):
-    """
-    指定画像をSlackチャンネル（ID指定推奨）に送信
-    環境変数 SLACK_BOT_TOKEN 必須
-    """
-    bot_token = os.environ.get("SLACK_BOT_TOKEN")
-    if not bot_token:
-        print("[ERROR] SLACK_BOT_TOKENが設定されていません")
-        return
-    url = "https://slack.com/api/files.upload"
-    with open(image_path, "rb") as file_content:
-        response = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {bot_token}"},
-            data={
-                "channels": channel,
-                "initial_comment": "天気図をお届けします！"
-            },
-            files={"file": file_content},
+def send_file_to_slack(image_path, channel="C08988S0SRY"):  # チャンネルID
+    bot_token = os.environ["SLACK_BOT_TOKEN"]
+    client = WebClient(token=bot_token)
+    try:
+        response = client.files_upload(
+            channels=channel,
+            file=image_path,
+            title=os.path.basename(image_path),
+            initial_comment="天気図をお届けします！"
         )
-    print("[Slack送信] status:", response.status_code, response.text)
-    # エラー時追加ログ
-    if not response.ok or not response.json().get("ok", False):
-        print("[ERROR] Slack送信失敗:", response.text)
+        print("[Slack送信] status:", response.status_code if hasattr(response, "status_code") else "OK", response)
+    except Exception as e:
+        print("Error:  Slack送信失敗:", e)
