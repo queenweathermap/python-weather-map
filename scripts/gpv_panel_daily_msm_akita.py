@@ -74,24 +74,13 @@ def make_local_weather_panel(ds, times, save_path):
     figsize = (4 * ncols, 21)
     fig = plt.figure(figsize=figsize)
     axes = np.empty((nrows, ncols), dtype=object)
-    # 1段目: エマグラム用の通常Axes
-    for col in range(ncols):
-        axes[0, col] = fig.add_subplot(nrows, ncols, 1 + col, projection='skewx')
 
-    # 2〜6段目: Cartopy投影Axes（地図描画）
+    # 2〜6段目: Cartopy投影Axes（地図描画）だけ普通に確保
     for row in range(1, nrows):
         for col in range(ncols):
             axes[row, col] = fig.add_subplot(nrows, ncols, row * ncols + col + 1, projection=ccrs.PlateCarree())
 
-    init_time = pd.Timestamp(times[0])
-    col_labels, hh_labels = [], []
-    for time in times:
-        t = pd.Timestamp(time)
-        hour_diff = int((t - init_time).total_seconds() // 3600)
-        label = f"{t.strftime('%Y%m%d %HUTC')} (+" + f"{hour_diff:02d}h)"
-        col_labels.append(label)
-        hh_labels.append(f"+{hour_diff:02d}")
-
+    # 各colの1段目にエマグラムを描画
     for col, time in enumerate(times):
         # データ有無チェック
         if np.datetime64(time) not in ds.time.values:
@@ -109,9 +98,7 @@ def make_local_weather_panel(ds, times, save_path):
         dsi_point = ds.sel(
             latitude=AKITA_PIN_LAT, longitude=AKITA_PIN_LON, time=time, method='nearest'
         )
-        ax_emagram = axes[0, col]
-        ax_emagram.cla()
-        plot_emagram_msm(ax_emagram, dsi_point, city_lat=AKITA_PIN_LAT, city_lon=AKITA_PIN_LON, city_name="秋田")
+        plot_emagram_msm(fig, col, dsi_point, city_lat=AKITA_PIN_LAT, city_lon=AKITA_PIN_LON, city_name="秋田", nrows=nrows, ncols=ncols)
 
         # 2〜6行目：秋田周辺の水平断面
         dsi = ds.sel(
@@ -124,20 +111,13 @@ def make_local_weather_panel(ds, times, save_path):
         plot_850hpa_thetae_stream_msm(axes[3, col], dsi)
         plot_925hpa_temp_wind_dindex_msm(axes[4, col], dsi)
         plot_surface_pressure_and_wind_msm(axes[5, col], dsi)
-
-        ax_emagram.text(
-            0.5, -0.18,
-            col_labels[col],
-            fontsize=9,
-            ha='center',
-            va='top',
-            transform=ax_emagram.transAxes
-        )
+        # 必要ならラベルやカスタマイズも
 
     # 2〜6段目のみグリッド線
     for row in range(1, nrows):
         for col in range(ncols):
             add_gridlines(axes[row, col])
+
 
     fig.suptitle(
         f"【秋田局地版・MSM】天気図パネル（エマグラム含む）\nInit: {init_time.strftime('%Y%m%d %HUTC')} | Forecasts: {', '.join(hh_labels)}",
