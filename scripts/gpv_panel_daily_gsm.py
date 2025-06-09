@@ -20,14 +20,13 @@ from scripts.gpv_downloader import download_gsm_gpv, grib2_to_nc
 
 # --- 描画関数・Slack通知ユーティリティ ---
 from module.gpv_plotter_gsm import (
-    plot_300hpa_height_wind,          # 300hPa
-    plot_500hpa_vorticity,          # 500hPa渦度（例）
-    plot_700hpa_dindex_500hpa_temp,  # 700湿数・500温度
-    plot_850hpa_temp_wind_700hpa_w,  # 850hPa温度・風
-    plot_850hpa_thetae_stream,       # 850hPa相当温位
-    plot_surface_pressure_and_wind,  # 地上
+    plot_300hpa_height_wind_gsm,
+    plot_500hpa_vorticity_gsm,
+    plot_700hpa_dindex_500hpa_temp_gsm,
+    plot_850hpa_temp_wind_700hpa_w_gsm,
+    plot_850hpa_thetae_stream_gsm,
+    plot_surface_pressure_and_wind_gsm,
 )
-
 
 # --- Slack送信用ユーティリティ
 from module.slack_utils import send_file_to_slack
@@ -46,27 +45,25 @@ def add_gridlines(ax):
 
 
 # ===============================
-# GSM用：5行×n列パネル作成メイン関数
+# GSM用：6行×n列パネル作成メイン関数
 # ===============================
 def make_daily_weather_panel_multi_time(ds, times, save_path):
     """
-    1日n時刻×5要素のパネルを描画し、1枚画像で保存＆Slack送信
+    1日n時刻×6要素のパネルを描画し、1枚画像で保存＆Slack送信
     """
     ncols = len(times)
-    figsize = (4 * ncols, 18)
+    figsize = (4 * ncols, 21)  # ← 6段用に高さも拡大
 
     fig, axes = plt.subplots(
-        nrows=5, ncols=ncols, figsize=figsize,
+        nrows=6, ncols=ncols, figsize=figsize,
         subplot_kw={'projection': ccrs.PlateCarree()},
         constrained_layout=True
     )
     if axes.ndim == 1:
-        axes = axes.reshape((5, 1))
-    elif axes.shape[0] != 5:
-        axes = axes.reshape((5, -1))
+        axes = axes.reshape((6, 1))
+    elif axes.shape[0] != 6:
+        axes = axes.reshape((6, -1))
 
-
-    
     # --- 初期時刻＆ラベル準備 ---
     init_time = pd.Timestamp(times[0])
     init_label = init_time.strftime('%Y%m%d %HUTC')
@@ -82,25 +79,26 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     # --- 各パネル描画 ---
     for col, time in enumerate(times):
         dsi = ds.sel(time=time)
-        plot_300hpa_height_wind(axes[0, col], dsi)
-        plot_700hpa_dindex_500hpa_temp(axes[1, col], dsi)
-        plot_850hpa_temp_wind_700hpa_w(axes[2, col], dsi)
-        plot_850hpa_thetae_stream(axes[3, col], dsi)
-        plot_surface_pressure_and_wind(axes[4, col], dsi)
-        # 5段目の下にだけ「時刻+経過時間」ラベルを追加
-        axes[4, col].text(
+        plot_300hpa_height_wind_gsm(axes[0, col], dsi)
+        plot_500hpa_vorticity_gsm(axes[1, col], dsi)
+        plot_700hpa_dindex_500hpa_temp_gsm(axes[2, col], dsi)
+        plot_850hpa_temp_wind_700hpa_w_gsm(axes[3, col], dsi)
+        plot_850hpa_thetae_stream_gsm(axes[4, col], dsi)
+        plot_surface_pressure_and_wind_gsm(axes[5, col], dsi)  # ← 6段目を追加
+
+        # 6段目の下に「時刻+経過時間」ラベル
+        axes[5, col].text(
             0.5, -0.18,
             col_labels[col],
             fontsize=9,
             ha='center',
             va='top',
-            transform=axes[4, col].transAxes
+            transform=axes[5, col].transAxes
         )
 
     # --- 全パネル一括で緯度・経度線追加 ---
     for ax in axes.flatten():
         add_gridlines(ax)
-
 
     # --- パネル全体タイトル ---
     fig.suptitle(
@@ -120,7 +118,6 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     except Exception as e:
         print("Slack送信で例外:", e)
     print(">>> Slack送信後です")
-
 
     # --- メイン処理 ---
     if __name__ == "__main__":
