@@ -1,12 +1,12 @@
 # ===============================================
-# plot_300hpa.py
+# plot_300hpa_height_wind.py
 # 300hPa等高度線＋等風速線＋風ベクトル描画モジュール
 # GSM/MSM両対応（引数 model="GSM"/"MSM" で切り替え）
 # -----------------------------------------------
 # 利用方法例:
-#   from module.plot_300hPa import plot_300hpa_height_wind
+#   from module.plot_300hpa_height_wind import plot_300hpa_height_wind_gsm
 #   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
-#   plot_300hpa_height_wind(ax, ds, model="GSM")
+#   plot_300hpa_height_wind_gsm(ax, ds)
 #   plt.show()
 # -----------------------------------------------
 # 2025-06-07 by ChatGPT
@@ -18,7 +18,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
 
-# ======= 共通：緯度経度2次元配列を取得する関数（ユーザー実装に合わせて編集） =======
+# ======= 共通：緯度経度2次元配列を取得 =======
 def get_lon_lat(ds):
     """
     データセットから2次元緯度・経度配列を取得（変数名は'ds["longitude"]', 'ds["latitude"]'）
@@ -30,27 +30,8 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-
 # ======= メイン描画関数 =======
-def plot_300hpa_height_wind_gsm(ax, ds):
-    return plot_300hpa_height_wind(ax, ds)
-
-    """
-    300hPa等高度線＋等風速線＋風ベクトル（GSM/MSM両対応）
-    
-    Parameters
-    ----------
-    ax : matplotlib.axes
-        描画先のAxis（Cartopyの地図投影付き）
-    ds : xarray.Dataset
-        GPVデータセット
-    model : str, default "GSM"
-        "GSM" または "MSM"
-    skip : int, default 5
-        風ベクトルの間引き間隔
-    """
-
-    # ======= 共通：経度・緯度取得 =======
+def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
     lon2d, lat2d = get_lon_lat(ds)
 
     # ======= モデルごとに変数名などを分岐 =======
@@ -58,7 +39,6 @@ def plot_300hpa_height_wind_gsm(ax, ds):
         hgt = ds["HGT_300mb"].values
         u = ds["UGRD_300mb"].values
         v = ds["VGRD_300mb"].values
-        # 気温データ（あれば使う）
         temp = ds["TMP_300mb"].values if "TMP_300mb" in ds.variables else None
     elif model == "MSM":
         hgt = ds["HGT_300mb"].values
@@ -152,6 +132,13 @@ def plot_300hpa_height_wind_gsm(ax, ds):
 
     # ======= タイトル =======
     ax.set_title("300hPa等高度線・風", fontsize=10, pad=10)
+
+# ======= ラッパー関数 =======
+def plot_300hpa_height_wind_gsm(ax, ds):
+    return plot_300hpa_height_wind(ax, ds, model="GSM")
+
+def plot_300hpa_height_wind_msm(ax, ds):
+    return plot_300hpa_height_wind(ax, ds, model="MSM")
 
 # ===============================================
 # END OF FILE
