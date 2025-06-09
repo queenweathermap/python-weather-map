@@ -112,7 +112,7 @@ def plot_simple_panel(nc_path, init_time, save_path="gsm_weather_map.jpg"):
             cs = ax.contour(Lon, Lat, hgt, transform=ccrs.PlateCarree())
             ax.coastlines("50m")
         # ラベル例：イニシャル時刻＋hh
-        fcst_hour = int((np.datetime64(t) - np.datetime64(init_time)).astype('timedelta64[h]'))
+        fcst_hour = int((np.datetime64(t) - np.datetime64(init_time)) / np.timedelta64(1, 'h'))
         ax.set_title(f"{init_time:%Y%m%d %HUTC}+{fcst_hour:02d}h")
     plt.suptitle("GSM 300hPa高度パネル（サンプル）")
     plt.savefig(save_path, dpi=200)
