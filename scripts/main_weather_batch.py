@@ -5,7 +5,7 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 # ========== 設定 ==========
-SLACK_TOKEN = os.environ["SLACK_TOKEN"]   # GitHub ActionsのSecretから供給
+SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]  # GitHub ActionsのSecretから供給
 SLACK_CHANNEL = "#your-channel"           # チャンネルIDまたは名称
 WORKDIR = "/workspace"                    # Docker内絶対パス
 IMG_GSM = "gsm.png"
