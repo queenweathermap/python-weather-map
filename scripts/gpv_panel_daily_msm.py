@@ -28,14 +28,14 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     for col, time in enumerate(times):
         dsi = ds.sel(time=time)
         # plot_300hpa_height_wind_msm(axes[0, col], dsi)  # ← 使わない場合はコメントアウト
+        # plot_emagram_msm(axes[5, col], dsi, city_lat=39.72, city_lon=140.10, city_name="秋田")
         plot_500hpa_vorticity_msm(axes[0, col], dsi)
         plot_700hpa_dindex_500hpa_temp_msm(axes[1, col], dsi)
         plot_850hpa_temp_wind_700hpa_w_msm(axes[2, col], dsi)
         plot_850hpa_thetae_stream_msm(axes[3, col], dsi)
         plot_925hpa_temp_wind_dindex_msm(axes[4, col], dsi)
         plot_surface_pressure_and_wind_msm(axes[5, col], dsi) 
-        # === 6段目は地上天気図 or エマグラムで選択 ===
-        # plot_emagram_msm(axes[5, col], dsi, city_lat=39.72, city_lon=140.10, city_name="秋田")
+
 
     plt.tight_layout()
     fig.savefig(save_path, dpi=300, bbox_inches="tight")
