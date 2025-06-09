@@ -23,13 +23,16 @@ from scripts.gpv_downloader import download_msm_gpv, grib2_to_nc
 
 # --- MSM各種パネル描画関数 ---
 from module.gpv_plotter_msm import (
-    plot_700hpa_dindex_500hpa_temp_msm,   # 700hPa湿数・500hPa温度
-    plot_850hpa_temp_wind_700hpa_w_msm,   # 850hPa温度・風・鉛直流
-    plot_850hpa_thetae_stream_msm,        # 850hPa相当温位
-    plot_925hpa_temp_wind_dindex_msm,     # 925hPa温度・風・湿数
-    plot_surface_pressure_and_wind_msm,   # 地上
-    plot_emagram_msm,                     # 秋田エマグラム（MSM予想値）
+    plot_300hpa_height_wind_msm,      # 300hPa
+    plot_500hpa_vorticity_msm,           # 500hPa渦度
+    plot_700hpa_dindex_500hpa_temp_msm,  # 700hPa湿数・500hPa温度
+    plot_850hpa_temp_wind_700hpa_w_msm,  # 850hPa温度・風・700hPa鉛直流
+    plot_850hpa_thetae_stream_msm,       # 850hPa相当温位
+    plot_925hpa_temp_wind_dindex_msm,    # 925hPa温度。風・湿数
+    plot_surface_pressure_and_wind_msm,  # 地上
+    plot_emagram_msm,  # エマグラム
 )
+
 # --- Slack送信用 ---
 from module.slack_utils import send_file_to_slack
 
