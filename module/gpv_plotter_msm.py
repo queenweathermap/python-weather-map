@@ -1,7 +1,6 @@
 # ===============================================
 # gpv_plotter_msm.py
 # MSMモデル用の可視化関数をまとめてimportするモジュール
-# -----------------------------------------------
 # 他のスクリプトからは「from module.gpv_plotter_msm import ...」で
 # 必要な描画関数を一括で使えるようにします。
 # ===============================================
@@ -13,14 +12,6 @@ from module.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
 from module.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream_msm
 from module.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex_msm
 from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
-from module.plot_emagram import plot_emagram_msm
-
-
-# MSM用の関数だけimportします
-# 関数名やimport元は、MSM用に合わせて適宜変更
-# ========================================
-# MSM用：エマグラム（SkewT/Emagram）描画関数
-# ========================================
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -28,13 +19,14 @@ from metpy.plots import SkewT
 from metpy.units import units
 import pandas as pd
 
+# ========================================
+# MSM用：エマグラム（SkewT/Emagram）描画関数
+# ========================================
 def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
-    from metpy.plots import SkewT
-    skew = SkewT(ax, rotation=0)
     """
     MSM GPVデータからエマグラムを描画（Wyoming風）
-    ax : matplotlib axes
-    dsi : xarray DataArray（lat/lon=ピンポイント or level次元付き）
+    ax : matplotlib axes（projection='skewx'で作成したものを渡すこと）
+    dsi_point : xarray DataArray（lat/lon=ピンポイント or level次元付き）
     city_lat, city_lon : 地点情報
     city_name : 地名（例：秋田）
 
@@ -47,7 +39,6 @@ def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
     """
 
     # ==== 1. 気圧面リスト・鉛直データを自動取得 ====
-    # MSM GPVは 1000, 925, 850, 700, 500, 300, 200, 100 hPa など
     pressure_list = []
     temp_list = []
     dewpoint_list = []
@@ -62,11 +53,11 @@ def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
         hgt_key  = f"HGT_{level}mb"
 
         try:
-            temp = float(dsi[pres_key])
-            rh   = float(dsi[rh_key])
-            u    = float(dsi[u_key])
-            v    = float(dsi[v_key])
-            hgt  = float(dsi[hgt_key]) if hgt_key in dsi else np.nan
+            temp = float(dsi_point[pres_key])
+            rh   = float(dsi_point[rh_key])
+            u    = float(dsi_point[u_key])
+            v    = float(dsi_point[v_key])
+            hgt  = float(dsi_point[hgt_key]) if hgt_key in dsi_point else np.nan
         except Exception:
             continue  # その面がなければskip
 
@@ -86,7 +77,6 @@ def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
     dewpoint   = np.array(dewpoint_list) * units.degC
     u_wind     = np.array(u_list) * units.meter / units.second
     v_wind     = np.array(v_list) * units.meter / units.second
-    # height   = np.array(height_list)  # [m] あれば使う
 
     # ==== 3. SkewT（エマグラム）描画 ====
     skew = SkewT(ax, rotation=0)
@@ -95,7 +85,6 @@ def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
     skew.plot_barbs(pressure, u_wind.to("knots"), v_wind.to("knots"))
 
     # ==== 4. SSI等（安定指数）を計算して右にテキストで追記 ====
-    # （ここではダミー値。MetPyで計算することも可能）
     ssi_dict = {
         "SHOW": np.nan, "LIFT": np.nan, "SWET": np.nan,
         "KINX": np.nan, "CTOT": np.nan, "VTOT": np.nan,
@@ -105,12 +94,12 @@ def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
     y_text = 1020
     dy = 60
     for i, (k, v) in enumerate(ssi_dict.items()):
-        val_str = f"{v:.1f}" if v is not np.nan else "---"
+        val_str = f"{v:.1f}" if not np.isnan(v) else "---"
         ax.text(x_text, y_text - i * dy, f"{k}: {val_str}", fontsize=8, ha='left', va='top')
 
     # ==== 5. 地点・時刻情報 ====
     try:
-        tstr = pd.to_datetime(dsi['time'].values).strftime('%Y-%m-%d %HZ')
+        tstr = pd.to_datetime(dsi_point['time'].values).strftime('%Y-%m-%d %HZ')
     except Exception:
         tstr = ""
 
@@ -125,5 +114,3 @@ def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
     ax.legend(fontsize=7, loc="upper right")
 
     return ax
-
-
