@@ -17,7 +17,7 @@ import pandas as pd
 import xarray as xr
 
 # --- サブモジュールimport（GPV自動DL&変換ユーティリティ） ---
-from scripts.gpv_downloader import download_gsm_gpv, grib2_to_nc
+from scripts.gpv_downloader import download_gpv, grib2_to_nc
 
 # --- 描画関数・Slack通知ユーティリティ ---
 from module.gpv_plotter_gsm import (
