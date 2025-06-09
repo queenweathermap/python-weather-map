@@ -89,3 +89,11 @@ def grib2_to_nc(grib2_path):
 
 # MSMの場合（分割DLして統合する。分割されたNetCDFを後でxr.concatで連結！）
 # msm_files = download_gpv_all(MSM_PATTERNS, base_dir="./data")
+
+    # エクスポートする関数を指定
+    __all__ = [
+        "download_gpv_all",
+        "download_gpv_single",
+        "grib2_to_nc",
+    ]
+
