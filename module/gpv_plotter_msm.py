@@ -79,7 +79,7 @@ def plot_emagram_msm(ax, dsi_point, city_lat, city_lon, city_name):
     v_wind     = np.array(v_list) * units.meter / units.second
 
     # ==== 3. SkewT（エマグラム）描画 ====
-    skew = SkewT(ax, rotation=0)
+    skew = SkewT(fig, rotation=0)
     skew.plot(pressure, temperature, 'k', linewidth=1.5, label="T")
     skew.plot(pressure, dewpoint, 'gray', linewidth=1.0, label="Td")
     skew.plot_barbs(pressure, u_wind.to("knots"), v_wind.to("knots"))
