@@ -1,41 +1,26 @@
-import subprocess
-import os
+# scripts/main_weather_batch.py
+import subprocess, os
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
 
-# ====== 設定 ======
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-if not SLACK_BOT_TOKEN:
-    print("ERROR! SLACK_BOT_TOKENが設定されていません")
-    exit(1)
-
-SLACK_CHANNEL = "C08988S0SRY"
+SLACK_CHANNEL   = "C08988S0SRY"
 IMG_GSM = "gsm.png"
 IMG_MSM = "msm.png"
 IMG_AKITA = "akita.png"
 
-# 1. 各天気図生成スクリプトを実行
+# 1. 各天気図生成スクリプト
 subprocess.run(["python3", "scripts/gpv_panel_daily_gsm.py", IMG_GSM], check=True)
 subprocess.run(["python3", "scripts/gpv_panel_daily_msm.py", IMG_MSM], check=True)
 subprocess.run(["python3", "scripts/gpv_panel_daily_msm_akita.py", IMG_AKITA], check=True)
 
-# 2. Slackにまとめて送信
+# 2. Slackで3枚同時送信
 client = WebClient(token=SLACK_BOT_TOKEN)
-try:
-    response = client.files_upload_v2(
-        channels=SLACK_CHANNEL,
-        initial_comment="本日の自動天気図 (GSM/日本域・MSM/日本域・MSM/秋田市)",
-        files=[
-            {"file": open(IMG_GSM, "rb"), "title": "GSM 日本域"},
-            {"file": open(IMG_MSM, "rb"), "title": "MSM 日本域"},
-            {"file": open(IMG_AKITA, "rb"), "title": "MSM 秋田市"},
-        ]
-    )
-    print("[Slack送信] status:", response.status_code if hasattr(response, "status_code") else "OK", response)
-except SlackApiError as e:
-    print(f"Slack upload error: {e}")
-
-# 3. 画像ファイル削除
-for f in [IMG_GSM, IMG_MSM, IMG_AKITA]:
-    if os.path.exists(f):
-        os.remove(f)
+client.files_upload_v2(
+    channels=SLACK_CHANNEL,
+    initial_comment="本日の自動天気図（GSM/日本域・MSM/日本域・MSM/秋田市）",
+    files=[
+        {"file": open(IMG_GSM, "rb"),   "title": "GSM 日本域"},
+        {"file": open(IMG_MSM, "rb"),   "title": "MSM 日本域"},
+        {"file": open(IMG_AKITA, "rb"), "title": "MSM 秋田市"},
+    ]
+)
