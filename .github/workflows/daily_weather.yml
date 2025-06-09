@@ -1,8 +1,5 @@
 # .github/workflows/weather_map.yml
-# ===============================
-# GitHub Actions用：天気図自動作成＆Slack通知ワークフロー
-# 毎日JST 5時/17時 & 手動実行対応
-# ===============================
+
 name: Daily Weather Map
 
 on:
@@ -23,8 +20,8 @@ jobs:
 
       - name: Run weather batch in Docker
         env:
-          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           docker run --rm \
-            -e SLACK_TOKEN="${SLACK_TOKEN}" \
+            -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN}" \
             weather-map-app
