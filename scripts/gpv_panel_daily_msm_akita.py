@@ -72,11 +72,16 @@ def make_local_weather_panel(ds, times, save_path):
     ncols = len(times)
     nrows = 6
     figsize = (4 * ncols, 21)
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols, figsize=figsize,
-        subplot_kw={'projection': ccrs.PlateCarree()},
-        constrained_layout=True
-    )
+    fig = plt.figure(figsize=figsize)
+    axes = np.empty((nrows, ncols), dtype=object)
+    # 1段目だけ普通のAxes（エマグラム用）
+    for col in range(ncols):
+        axes[0, col] = fig.add_subplot(nrows, ncols, 1 + col)
+    # 2〜6段目は PlateCarree（Cartopy）で作成
+    for row in range(1, nrows):
+        for col in range(ncols):
+            axes[row, col] = fig.add_subplot(nrows, ncols, row * ncols + col + 1, projection=ccrs.PlateCarree())
+
     init_time = pd.Timestamp(times[0])
     col_labels, hh_labels = [], []
     for time in times:
@@ -89,7 +94,7 @@ def make_local_weather_panel(ds, times, save_path):
     for col, time in enumerate(times):
         # データ有無チェック
         if np.datetime64(time) not in ds.time.values:
-            for row in range(6):
+            for row in range(nrows):
                 ax = axes[row, col]
                 ax.set_facecolor("white")
                 for spine in ax.spines.values():
@@ -99,21 +104,20 @@ def make_local_weather_panel(ds, times, save_path):
                 ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
             continue
 
-        # 1行目：秋田ピンポイントのエマグラム（投影をクリア）
+        # 1行目：秋田ピンポイントのエマグラム
         dsi_point = ds.sel(
             latitude=AKITA_PIN_LAT, longitude=AKITA_PIN_LON, time=time, method='nearest'
         )
         ax_emagram = axes[0, col]
         ax_emagram.cla()
         plot_emagram_msm(ax_emagram, dsi_point, city_lat=AKITA_PIN_LAT, city_lon=AKITA_PIN_LON, city_name="秋田")
-        
+
         # 2〜6行目：秋田周辺の水平断面
         dsi = ds.sel(
             latitude=slice(AKITA_LAT_RANGE[0], AKITA_LAT_RANGE[1]),
             longitude=slice(AKITA_LON_RANGE[0], AKITA_LON_RANGE[1]),
             time=time
         )
-
         plot_700hpa_dindex_500hpa_temp_msm(axes[1, col], dsi)
         plot_850hpa_temp_wind_700hpa_w_msm(axes[2, col], dsi)
         plot_850hpa_thetae_stream_msm(axes[3, col], dsi)
@@ -130,7 +134,7 @@ def make_local_weather_panel(ds, times, save_path):
         )
 
     # 2〜6段目のみグリッド線
-    for row in range(1, 6):
+    for row in range(1, nrows):
         for col in range(ncols):
             add_gridlines(axes[row, col])
 
@@ -146,6 +150,7 @@ def make_local_weather_panel(ds, times, save_path):
         send_file_to_slack(save_path, channel="C08988S0SRY")
     except Exception as e:
         print("Slack送信エラー:", e)
+
 
 # ===============================
 # メイン処理
