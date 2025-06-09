@@ -20,12 +20,14 @@ from scripts.gpv_downloader import download_gsm_gpv, grib2_to_nc
 
 # --- 描画関数・Slack通知ユーティリティ ---
 from module.gpv_plotter_gsm import (
-    plot_300hpa_height_wind,
-    plot_700hpa_dindex_500hpa_temp,
-    plot_850hpa_temp_wind_700hpa_w,
-    plot_850hpa_thetae_stream,
-    plot_surface_pressure_and_wind,
+    plot_300hpa_height_wind,          # 300hPa
+    plot_500hpa_vorticity,          # 500hPa渦度（例）
+    plot_700hpa_dindex_500hpa_temp,  # 700湿数・500温度
+    plot_850hpa_temp_wind_700hpa_w,  # 850hPa温度・風
+    plot_850hpa_thetae_stream,       # 850hPa相当温位
+    plot_surface_pressure_and_wind,  # 地上
 )
+
 
 # --- Slack送信用ユーティリティ
 from module.slack_utils import send_file_to_slack
