@@ -8,7 +8,7 @@ RUN apt-get update && \
       build-essential python3-dev libfreetype6-dev pkg-config \
       libcrypt1 \
       fonts-ipafont-gothic
-
+      
 # Miniconda導入・wgrib2インストール
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
 RUN bash /tmp/miniconda.sh -b -p /opt/conda
