@@ -1,5 +1,3 @@
-# module/slack_utils.py
-
 import requests
 import os
 import json
@@ -7,17 +5,17 @@ import json
 def upload_file_external_slack(channel, filepath, title="天気図", initial_comment="天気図をお届けします！"):
     bot_token = os.environ["SLACK_BOT_TOKEN"]
 
-    # --- 1. getUploadURLExternal ---
+    # 1. アップロードURL取得（json.dumpsで送るのが重要）
     url = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8"
+        "Content-Type": "application/json; charset=utf-8",
     }
     data = {
-        "filename": str(os.path.basename(filepath)),   # 念のためstr変換
-        "length": int(os.path.getsize(filepath)),      # 念のためint変換
+        "filename": str(os.path.basename(filepath)),  # strで明示
+        "length": int(os.path.getsize(filepath)),     # intで明示
     }
-    # 必ずjson.dumpsで送ること！（Slackの外部アップロードはこれでしか通らない場合あり）
+    print(f"[INFO] 送信準備OK: {filepath} (size={data['length']})")
     res = requests.post(url, headers=headers, data=json.dumps(data))
     try:
         res_json = res.json()
@@ -32,20 +30,18 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
     upload_url = res_json["upload_url"]
     file_id = res_json["file_id"]
 
-    print(f"[INFO] アップロードURL取得OK: {upload_url} (file_id: {file_id})")
-
-    # --- 2. PUTでファイル送信 ---
+    # 2. PUTでファイル送信
     with open(filepath, "rb") as f:
         upload_res = requests.put(upload_url, data=f)
     if upload_res.status_code != 200:
         print("Upload failed:", upload_res.status_code, upload_res.text)
         return
 
-    # --- 3. completeUploadExternalでSlackに公開 ---
+    # 3. completeUploadExternalでSlackに公開
     complete_url = "https://slack.com/api/files.completeUploadExternal"
     complete_headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8"
+        "Content-Type": "application/json; charset=utf-8",
     }
     complete_data = {
         "files": [
