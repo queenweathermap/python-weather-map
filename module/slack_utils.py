@@ -13,8 +13,8 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
         "Authorization": f"Bearer {bot_token}"
     }
     data = {
-        "filename": os.path.basename(filepath),
-        "length": os.path.getsize(filepath),
+    "filename": os.path.basename(filepath),
+    "length": int(os.path.getsize(filepath)),
     }
     print(f"headers={headers}")
     print(f"data={data}")
