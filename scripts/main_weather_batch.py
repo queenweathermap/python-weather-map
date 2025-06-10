@@ -34,6 +34,7 @@ for img_path, title in [
     (IMG_AKITA, "MSM 秋田局地"),
 ]:
     if os.path.exists(img_path):
+        print(f"[INFO] 送信準備OK: {img_path} (size={os.path.getsize(img_path)})")
         upload_file_external_slack(
             channel=SLACK_CHANNEL,
             filepath=img_path,
@@ -42,6 +43,7 @@ for img_path, title in [
         )
     else:
         print(f"[WARN] 画像が見つかりません: {img_path}（スキップします）")
+
 
 # ========== 3. 不要な画像ファイルを削除（任意）==========
 for f in [IMG_GSM, IMG_MSM, IMG_AKITA]:
