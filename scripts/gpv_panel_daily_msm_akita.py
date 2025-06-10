@@ -131,7 +131,8 @@ def make_local_weather_panel(ds, times, save_path):
             ax_emagram,
             dsi_point,
             AKITA_PIN_LAT,
-            AKITA_PIN_LON
+            AKITA_PIN_LON,
+            "秋田"
         )
         # 2〜6行目：秋田周辺の水平断面
         dsi = ds.sel(
