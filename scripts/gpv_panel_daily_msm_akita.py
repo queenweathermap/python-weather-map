@@ -125,13 +125,13 @@ def make_local_weather_panel(ds, times, save_path):
         dsi_point = ds.sel(
             latitude=AKITA_PIN_LAT, longitude=AKITA_PIN_LON, time=time, method='nearest'
         )
-        # SkewTだけ add_subplotで生成（projection不要）
+        # SkewTだけ add_subplotで生成 (projection不要)
         ax_emagram = fig.add_subplot(nrows, ncols, 1 + col)
         plot_emagram_msm(
             ax_emagram,
-            ds,                # ←「ds」全体を渡す
-            lat=AKITA_PIN_LAT, # 秋田の緯度
-            lon=AKITA_PIN_LON  # 秋田の経度
+            dsi_point,
+            AKITA_PIN_LAT,
+            AKITA_PIN_LON
         )
         # 2〜6行目：秋田周辺の水平断面
         dsi = ds.sel(
