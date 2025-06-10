@@ -1,7 +1,7 @@
 import os
 import requests
 
-def upload_file_legacy(channel, filepath, title="天気図", initial_comment="天気図をお届けします！"):
+def upload_file_external_slack(channel, filepath, title="天気図", initial_comment="天気図をお届けします！"):
     bot_token = os.environ["SLACK_BOT_TOKEN"]
 
     url = "https://slack.com/api/files.upload"
