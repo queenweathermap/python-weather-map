@@ -10,23 +10,17 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
 
     url = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
-        "Authorization": f"Bearer {bot_token}",
-        # "Content-Type": "application/json; charset=utf-8"  ←★絶対つけない！
+        "Authorization": f"Bearer {bot_token}"
+        # "Content-Type": "application/json; charset=utf-8"  # ← 付けない
     }
     data = {
-        "filename": os.path.basename(filepath),
-        "length": os.path.getsize(filepath),
+        "filename": str(os.path.basename(filepath)),
+        "length": int(os.path.getsize(filepath)),
     }
     print(f"headers={headers}")
     print(f"data={data}")
     res = requests.post(url, headers=headers, json=data)
     print(f"res.text={res.text}")
-    print(f"[INFO] 送信準備OK: {filepath} (size={data['length']})")
-    print(f"[DEBUG] headers={headers}")
-    print(f"[DEBUG] data={data}")
-
-    # ★ Content-Typeを指定せずjson引数だけで投げる！
-    res = requests.post(url, headers=headers, json=data)
     res_json = res.json()
     print(f"[DEBUG] res_json={res_json}")
 
@@ -46,7 +40,7 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
         return
 
     complete_url = "https://slack.com/api/files.completeUploadExternal"
-    complete_headers = headers  # これもContent-Typeつけない
+    complete_headers = headers
     complete_data = {
         "files": [
             {
