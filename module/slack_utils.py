@@ -5,17 +5,19 @@ import json
 def upload_file_external_slack(channel, filepath, title="天気図", initial_comment="天気図をお届けします！"):
     bot_token = os.environ["SLACK_BOT_TOKEN"]
 
-    # 1. アップロードURL取得（json.dumpsで送るのが重要）
+    # 1. getUploadURLExternal
     url = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8",
+        "Content-Type": "application/json; charset=utf-8"
     }
     data = {
-        "filename": str(os.path.basename(filepath)),  # strで明示
-        "length": int(os.path.getsize(filepath)),     # intで明示
+        "filename": str(os.path.basename(filepath)),   # ← strで明示
+        "length": int(os.path.getsize(filepath)),      # ← intで明示
     }
     print(f"[INFO] 送信準備OK: {filepath} (size={data['length']})")
+    print(f"[INFO] ヘッダ: {headers}")
+    print(f"[INFO] データ: {data}")
     res = requests.post(url, headers=headers, data=json.dumps(data))
     try:
         res_json = res.json()
@@ -41,7 +43,7 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
     complete_url = "https://slack.com/api/files.completeUploadExternal"
     complete_headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8",
+        "Content-Type": "application/json; charset=utf-8"
     }
     complete_data = {
         "files": [
