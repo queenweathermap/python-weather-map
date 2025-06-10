@@ -1,29 +1,28 @@
 import requests
 import os
-import json
 
 def upload_file_external_slack(channel, filepath, title="天気図", initial_comment="天気図をお届けします！"):
     bot_token = os.environ["SLACK_BOT_TOKEN"]
 
-    # 1. getUploadURLExternal
+    if not os.path.exists(filepath):
+        print(f"[ERROR] ファイルが存在しません: {filepath}")
+        return
+
     url = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
         "Authorization": f"Bearer {bot_token}",
         "Content-Type": "application/json; charset=utf-8"
     }
     data = {
-        "filename": str(os.path.basename(filepath)),   # ← strで明示
-        "length": int(os.path.getsize(filepath)),      # ← intで明示
+        "filename": os.path.basename(filepath),
+        "length": os.path.getsize(filepath),
     }
-    print(f"[INFO] 送信準備OK: {filepath} (size={data['length']})")
-    print(f"[INFO] ヘッダ: {headers}")
-    print(f"[INFO] データ: {data}")
-    res = requests.post(url, headers=headers, data=json.dumps(data))
-    try:
-        res_json = res.json()
-    except Exception as e:
-        print("Failed to decode Slack response:", e, res.text)
-        return
+    print(f"[DEBUG] headers={headers}")
+    print(f"[DEBUG] data={data}")
+
+    res = requests.post(url, headers=headers, json=data)  # ←ここ!!
+    res_json = res.json()
+    print(f"[DEBUG] res_json={res_json}")
 
     if not res_json.get("ok"):
         print("Error: to get upload URL:", res_json)
@@ -32,19 +31,16 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
     upload_url = res_json["upload_url"]
     file_id = res_json["file_id"]
 
-    # 2. PUTでファイル送信
     with open(filepath, "rb") as f:
         upload_res = requests.put(upload_url, data=f)
+    print(f"[DEBUG] upload_res={upload_res.status_code}")
+
     if upload_res.status_code != 200:
         print("Upload failed:", upload_res.status_code, upload_res.text)
         return
 
-    # 3. completeUploadExternalでSlackに公開
     complete_url = "https://slack.com/api/files.completeUploadExternal"
-    complete_headers = {
-        "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8"
-    }
+    complete_headers = headers
     complete_data = {
         "files": [
             {
@@ -55,12 +51,12 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
         "channel_id": channel,
         "initial_comment": initial_comment
     }
-    complete_res = requests.post(complete_url, headers=complete_headers, data=json.dumps(complete_data))
-    try:
-        complete_json = complete_res.json()
-    except Exception as e:
-        print("Failed to decode completeUpload response:", e, complete_res.text)
-        return
+    print(f"[DEBUG] complete_data={complete_data}")
+
+    complete_res = requests.post(complete_url, headers=complete_headers, json=complete_data)  # ←ここもjsonでOK
+    complete_json = complete_res.json()
+    print(f"[DEBUG] complete_json={complete_json}")
+
     if not complete_json.get("ok"):
         print("Failed to complete upload:", complete_json)
         return
