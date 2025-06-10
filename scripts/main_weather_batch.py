@@ -10,9 +10,9 @@ from module.slack_utils import upload_file_external_slack
 # ========== 設定 ==========
 SLACK_CHANNEL   = "C08988S0SRY" 
 
-IMG_GSM   = "gsm.png"
-IMG_MSM   = "msm.png"
-IMG_AKITA = "akita.png"
+IMG_GSM   = "gsm_weather_map.jpg"
+IMG_MSM   = "msm_weather_map.jpg"
+IMG_AKITA = "akita_local_msm_map.jpg"
 
 # ========== 1. 画像生成スクリプト実行 ==========
 image_jobs = [
