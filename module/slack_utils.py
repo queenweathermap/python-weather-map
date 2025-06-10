@@ -11,12 +11,13 @@ def upload_file_external_slack(channel, filepath, title="天気図", initial_com
     data = {
         "channels": channel,
         "title": title,
-        "initial_comment": initial_comment,
+        "initial_comment": initial_comment
     }
     files = {
         "file": (os.path.basename(filepath), open(filepath, "rb"))
     }
-    print("[INFO] files.upload 送信準備OK:", filepath)
+
+    print(f"[INFO] files.upload 送信準備OK:", filepath)
     response = requests.post(url, headers=headers, data=data, files=files)
     print("[DEBUG] response.text:", response.text)
     res_json = response.json()
