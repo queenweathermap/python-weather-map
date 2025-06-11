@@ -1,6 +1,6 @@
 # .github/workflows/weather_map.yml
 # ===============================================
-# Daily Weather Map（LINE通知版：メール/Slackコメントアウト）
+# Daily Weather Map（LINE通知版：メール/Slackはコメントアウト保存）
 # ===============================================
 
 name: Daily Weather Map
@@ -23,26 +23,26 @@ jobs:
 
       - name: Run weather batch in Docker
         env:
-          # Slack通知用（将来有効化する場合のみコメント解除）
+          # Slack通知用（今後復活する場合はコメント解除）
           # SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          # メール通知用（将来有効化する場合のみコメント解除）
+          # メール通知用（今後復活する場合はコメント解除）
           # MAIL_HOST: ${{ secrets.MAIL_HOST }}
           # MAIL_PORT: ${{ secrets.MAIL_PORT }}
           # MAIL_USER: ${{ secrets.MAIL_USER }}
           # MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
-          # LINE通知用（Messaging APIトークン/送り先ID）
+          # LINE通知用（Messaging APIの設定値）
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TO_USER_ID: ${{ secrets.LINE_TO_USER_ID }}
         run: |
           docker run --rm \
-            # Slack連携
+            # Slack通知（使うときはコメントアウト解除）
             # -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN}" \
-            # メール連携
+            # メール通知（使うときはコメントアウト解除）
             # -e MAIL_HOST="${MAIL_HOST}" \
             # -e MAIL_PORT="${MAIL_PORT}" \
             # -e MAIL_USER="${MAIL_USER}" \
             # -e MAIL_PASSWORD="${MAIL_PASSWORD}" \
-            # LINE連携（Messaging API）
+            # LINE通知（Messaging API版）
             -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
             -e LINE_TO_USER_ID="${LINE_TO_USER_ID}" \
             weather-map-app
