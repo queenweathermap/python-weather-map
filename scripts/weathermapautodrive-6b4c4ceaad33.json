@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "weathermapautodrive",
+  "private_key_id": "6b4c4ceaad330019fdbc923369ac09d23a2a7fa6",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDCawBswT2kgnDC\ni5Nnspr6gYawi59Pvxb/DS8KkHqw1D2F3yDexC+lyCnK5jF5S3NQBp56YCWOPp8A\nPiNqhkuPzD1GOpdfcHX4+kPufnO3audA7aL3+TzrXQ/nZf1uzEUmnK4AQXj6m4dn\ne9dCwwbqgVH+sjoScwWMZ1MJlpyvAjF6QMSG4bYEy7l+8Dw+QpHeaGFBjrSir+kO\nA6wunHHJ0shKJIwhrnkzAbOSKdnCcHq7ApVKq5115tDToKzgnc8+5rLGVZixij4E\nW6U1ZrlcF8rwtYEjUpFjn4RwaO6d6B1OTdBeQSKGWz0mFGFUmubrg54KU+ig4hXq\n6D11Yl0pAgMBAAECggEABCckz5iSyxkQig37tIHGRDbF7FmrKe5XHNRzWQqBiGtG\n3igdlmHtR6Feh9ZCH8kVZJP483xqyPP8UapszL7OIztLDXKSdF2ICO0QTD+jaVCt\nXGpxv6dxXkYIYS/BSbTaKaCRVJw8FpRXFduOxf8O/oLhKsDeszFa9hG988I7GhTh\nysOUi5W6AWXEhIuNoMRKBQEsPsnfJxugTd3HifqnIArZSJA+eDXq8d/lc50Yl5lp\nu3BCwDXc2akB8/D2mZ7HjKUNhHowXIpKkR0zw4eWHcRJd//maGWyjtgY5zniy6xz\nl6xp+w3NP+Ad+s/Gx9waP2gjtpbM2JFe51yN11zotQKBgQDm+iNJpR3gcOGL3MG3\nhEuyUK1AYIiICTtMEDWO39zs5NSHsljl+4i727uxWKjtG94oCglFt9ugEpmY+HIm\nwLnna4UM+ZVmzxl/Htt3Z7unwuEe9xHCxxm7Nelq6tpMGeFhWuoj+NUFJ/1Sd4Wv\nbwhwORtxPmo+LeGoaPnwN8pofQKBgQDXevEndsCxmzXDkuY1TZ1tzT4P3TVNzxdt\ndlxfZcju2Jfolqms3MrPf4DFhp6WbFPAg/WK62BC9woN8WpgCtJN0afuRWAcqRFv\nxxSFwEE819kq/EzKolz2FNfmeQ3Ur9bGKyHnd+qiZzbyVGMYL78YIx63XmM5Vsj+\nU7f7uiRTHQKBgAJHv+dvON9JXgCqekMcjD7DayJykYZ+SNaUZmL1tNGl5K8+RIBo\nvk3UeoLitDA7ETNl/fdxPDrVVCzdbwsQ5gTx28tn/2CXdNH7dQE1xfV/CAftOoCo\nxIlDm/1ROjx8GOyEIEGgqEG3xll1Ep3Lw9KPzcSNcDES9OJbvvPvKRFlAoGAdRYF\n0dbST++xoCrDUnVxNMfQkFg37aa46S7mdKPfMgGZUbYETrzOqz9yHmLO65fDTpml\no63QabLI0Ni8X6Ghss1Yfb1Ow2QO6Hj5qs/T4xa6l4PuyjC9aK3cvwxKOqatgpLP\nYnIjmcmR7s1x5yOSp6/1sdfk/LQulRuynmL/9/UCgYBF7d5Skjrldm88qI/G5Smf\nDU4duQV0XmjVy3fMNa9FDFBP/rWyfnEk9oZAoH0rC9ehyra8C5uUfcS61/cUOcht\ndQsPf8vltfYJ3u2McoWS/IWfTMkDAAgu+S987CrLLk8/3PLFpdQKkVf3CjyjEJYG\n91m0vxraLueVxYPkrEiOSg==\n-----END PRIVATE KEY-----\n",
+  "client_email": "weather-map-bot@weathermapautodrive.iam.gserviceaccount.com",
+  "client_id": "112382084739955029874",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/weather-map-bot%40weathermapautodrive.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
