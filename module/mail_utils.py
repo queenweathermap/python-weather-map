@@ -1,8 +1,12 @@
+import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-import os
+from dotenv import load_dotenv
+
+# .env読込（既にどこかで読んでいれば不要）
+load_dotenv()
 
 def send_mail(
     to_addr,
@@ -11,35 +15,37 @@ def send_mail(
     attachment_path=None,
     from_addr=None,
     smtp_server=None,
-    smtp_port=465,
+    smtp_port=None,
     smtp_user=None,
-    smtp_password=None
+    smtp_password=None,
 ):
-    from_addr = from_addr or os.environ["MAIL_FROM"]
-    smtp_server = smtp_server or os.environ["MAIL_SMTP_SERVER"]
-    smtp_user = smtp_user or os.environ["MAIL_USER"]
-    smtp_password = smtp_password or os.environ["MAIL_PASS"]
-    smtp_port = int(os.environ.get("MAIL_PORT", smtp_port))
+    from_addr = from_addr or os.environ.get("MAIL_FROM")
+    smtp_server = smtp_server or os.environ.get("MAIL_SMTP_SERVER")
+    smtp_port = int(smtp_port or os.environ.get("MAIL_PORT", 587))
+    smtp_user = smtp_user or os.environ.get("MAIL_USER")
+    smtp_password = smtp_password or os.environ.get("MAIL_PASS")
 
     msg = MIMEMultipart()
     msg["From"] = from_addr
     msg["To"] = to_addr
     msg["Subject"] = subject
-
     msg.attach(MIMEText(body, "plain"))
 
     if attachment_path:
         with open(attachment_path, "rb") as f:
-            att = MIMEApplication(f.read())
-            att.add_header("Content-Disposition", "attachment", filename=os.path.basename(attachment_path))
-            msg.attach(att)
+            part = MIMEApplication(f.read())
+            part.add_header(
+                "Content-Disposition",
+                "attachment",
+                filename=os.path.basename(attachment_path),
+            )
+            msg.attach(part)
 
-    with smtplib.SMTP(smtp_server, smtp_port) as smtp:
-        smtp.starttls()
-        smtp.login(smtp_user, smtp_password)
-        smtp.send_message(msg)
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.send_message(msg)
     print("✅ メール送信完了")
 
-# 使い方例
-# from module.mail_utils import send_mail
-# send_mail("宛先アドレス", "件名", "本文", "ファイルパス")
+# 例:
+# send_mail("recipient@example.com", "テスト件名", "本文テスト", "添付ファイルパス.jpg")
