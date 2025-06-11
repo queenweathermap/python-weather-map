@@ -21,7 +21,7 @@ jobs:
       - name: Build Docker image
         run: docker build -t weather-map-app .
 
-      - name: Run weather batch in Docker
+            - name: Run weather batch in Docker
         env:
           # Slack通知用（今後復活する場合はコメント解除）
           # SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -33,16 +33,9 @@ jobs:
           # LINE通知用（Messaging APIの設定値）
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        # Slackやメール連携したい場合は-eオプションを追記
         run: |
           docker run --rm \
-            # Slack通知（使うときはコメントアウト解除）
-            # -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN}" \
-            # メール通知（使うときはコメントアウト解除）
-            # -e MAIL_HOST="${MAIL_HOST}" \
-            # -e MAIL_PORT="${MAIL_PORT}" \
-            # -e MAIL_USER="${MAIL_USER}" \
-            # -e MAIL_PASSWORD="${MAIL_PASSWORD}" \
-            # LINE通知（Messaging API版）
             -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
             -e LINE_USER_ID="${LINE_USER_ID}" \
             weather-map-app
