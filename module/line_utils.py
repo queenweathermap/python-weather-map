@@ -25,8 +25,8 @@ from linebot import LineBotApi
 from linebot.models import TextSendMessage, ImageSendMessage
 
 # -- 環境変数からアクセストークン/送信先を取得 --
-CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
-TO_USER_ID = os.environ["LINE_TO_USER_ID"]
+LINE_CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
+LINE_USER_ID = os.environ["LINE_USER_ID"]
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 
