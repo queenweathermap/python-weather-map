@@ -1,7 +1,8 @@
+# 認証情報などは絶対に公開しない
 __pycache__/
 *.pyc
 .env
 data/
 *.jpg
 *.nc
-# 他にもGit管理しないファイルをここに追加
+service_account.json
