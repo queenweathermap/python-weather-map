@@ -1,2 +1,7 @@
+__pycache__/
+*.pyc
+.env
 data/
-
+*.jpg
+*.nc
+# 他にもGit管理しないファイルをここに追加
