@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t weather-map-app .
+        run: docker build --no-cache -t weather-map-app .
 
       - name: Run weather batch in Docker
         env:
@@ -30,7 +30,6 @@ jobs:
             -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
             -e LINE_USER_ID="${LINE_USER_ID}" \
             weather-map-app
-
 
 
 # Slack通知用（今後復活する場合はコメント解除）
