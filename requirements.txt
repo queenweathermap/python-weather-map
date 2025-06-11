@@ -6,5 +6,6 @@ cartopy
 xarray
 scipy
 python-dotenv
+line-bot-sdk
 requests
 slack_sdk
