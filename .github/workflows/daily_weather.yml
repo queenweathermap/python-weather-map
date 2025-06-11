@@ -32,11 +32,12 @@ jobs:
             weather-map-app
 
 
-          # Slack通知用（今後復活する場合はコメント解除）
-          # SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          # メール通知用（今後復活する場合はコメント解除）
-          # MAIL_HOST: ${{ secrets.MAIL_HOST }}
-          # MAIL_PORT: ${{ secrets.MAIL_PORT }}
-          # MAIL_USER: ${{ secrets.MAIL_USER }}
-          # MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
-          # LINE通知用（Messaging APIの設定値）
+
+# Slack通知用（今後復活する場合はコメント解除）
+# SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+# メール通知用（今後復活する場合はコメント解除）
+# MAIL_HOST: ${{ secrets.MAIL_HOST }}
+# MAIL_PORT: ${{ secrets.MAIL_PORT }}
+# MAIL_USER: ${{ secrets.MAIL_USER }}
+# MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+# LINE通知用（Messaging APIの設定値）
