@@ -1,4 +1,4 @@
-# .github/workflows/weather_map.yml
+# .github/workflows/daily_weather.yml
 # ===============================================
 # Daily Weather Map（LINE通知版：メール/Slackはコメントアウト保存）
 # ===============================================
