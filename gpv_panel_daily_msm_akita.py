@@ -142,6 +142,16 @@ if __name__ == "__main__":
         ds = xr.merge(ds_list_aligned, compat="override")  # ← ★ここ重要！！
         print("xr.merge OK")
         times = ds.time.values[:12]
+
+        # --- ここを追加 ---
+        if len(times) == 0:
+            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+            times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
+            make_nodata_weather_panel(times, save_path="akita_panel_nodata.jpg")
+            print("【ERROR】秋田局地 MSM GPVに有効データ無し。NO DATAパネル生成")
+            sys.exit(1)
+        # --- ここまで ---
+
         print("times:", times)
         make_local_weather_panel(ds, times, "akita_local_msm_map.jpg")
         print("画像生成完了")
@@ -150,4 +160,4 @@ if __name__ == "__main__":
         print("=== 重大エラー発生 ===")
         print(type(e), e)
         traceback.print_exc()
-        sys.exit(1)  # ← ここも忘れずに
+        sys.exit(1)
