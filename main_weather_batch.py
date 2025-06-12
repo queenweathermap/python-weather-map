@@ -1,6 +1,6 @@
 # main_weather_batch.py
 # ===============================================
-# 毎日定時：GSM/MSM/秋田局地 天気図画像を自動生成＆LINE通知バッチ
+# 毎日定時：GSM/MSM/秋田局地 天気図画像を自動生成＆LINE通知＆Driveアップロードバッチ
 # ===============================================
 
 import subprocess
@@ -8,12 +8,13 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-# LINE通知用ユーティリティ
-from module.line_utils import send_line_text
-# from module.slack_utils import upload_file_external_slack  # Slack通知
-# from module.mail_utils import send_mail                   # メール通知
+# ======= 外部ユーティリティimport（新ディレクトリ構成対応） =======
+from module.utils.line_utils import send_line_text
+from module.utils.drive_utils import upload_to_drive
+# from module.utils.slack_utils import upload_file_external_slack  # Slack通知（必要に応じて）
+# from module.utils.mail_utils import send_mail                   # メール通知（必要に応じて）
 
-# --- .envの読み込み（LINE用トークン等はline_utils側で取得）
+# --- .envの読み込み（LINE/Drive用トークン等は各ユーティリティ側で取得） ---
 load_dotenv()
 
 # ================================================
@@ -27,8 +28,8 @@ IMG_MSM   = os.path.join(DESKTOP_DIR, f"msm_{init_time}.jpg")
 IMG_AKITA = os.path.join(DESKTOP_DIR, f"akita_{init_time}.jpg")
 
 image_jobs = [
-    ("scripts/gpv_panel_daily_gsm.py",   IMG_GSM),
-    ("scripts/gpv_panel_daily_msm.py",   IMG_MSM),
+    ("scripts/gpv_panel_daily_gsm.py",      IMG_GSM),
+    ("scripts/gpv_panel_daily_msm.py",      IMG_MSM),
     ("scripts/gpv_panel_daily_msm_akita.py", IMG_AKITA),
 ]
 
@@ -39,20 +40,33 @@ for script, out_file in image_jobs:
         print(f"[ERROR] {script} 実行失敗:", e)
 
 # ================================================
-# 2. 画像存在チェックのみ（公開URLやDrive処理は不要）
+# 2. 画像存在チェックとDrive自動アップロード
 # ================================================
 images_info = [
-    (IMG_GSM, "GSM 日本域"),
-    (IMG_MSM, "MSM 日本域"),
+    (IMG_GSM,   "GSM 日本域"),
+    (IMG_MSM,   "MSM 日本域"),
     (IMG_AKITA, "MSM 秋田局地"),
 ]
 
 exist_files = [img_path for img_path, _ in images_info if os.path.exists(img_path)]
 
+# Drive共有URL取得リスト
+drive_urls = []
+for img_path in exist_files:
+    try:
+        url = upload_to_drive(img_path)
+        drive_urls.append((os.path.basename(img_path), url))
+    except Exception as e:
+        print(f"[ERROR] Driveアップロード失敗: {img_path} {e}")
+
 # ================================================
-# 3. LINEテキスト通知（画像のファイル名一覧を記載）
+# 3. LINEテキスト通知（ファイル名とDrive共有URLを記載）
 # ================================================
-if exist_files:
+if drive_urls:
+    msg = "本日の自動天気図（GSM/MSM/秋田局地）画像を\nGoogle Driveにアップロードしました。\n\n"
+    msg += "\n".join(f"- {name}\n{url}" for name, url in drive_urls)
+    send_line_text(msg)
+elif exist_files:
     filenames = [os.path.basename(f) for f in exist_files]
     msg = "本日の自動天気図（GSM/MSM/秋田局地）画像を\nMac/iPhoneのiCloudデスクトップに保存しました。\n\n"
     msg += "\n".join(f"- {name}" for name in filenames)
@@ -63,7 +77,7 @@ else:
 # ================================================
 # 4. .nc等の一時ファイル削除（必要に応じて追加）
 # ================================================
-# 画像（jpg）はiCloudに残しておきます
+# 画像（jpg）はiCloudやDriveに残しておきます
 # もし他に削除したいファイルがあれば、ここで処理
 
 print("==== 正常終了 ====")
