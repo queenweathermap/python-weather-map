@@ -8,8 +8,9 @@
 #  - Slack送信はmain_weather_batch.py側に完全移譲
 # ===============================================
 
-import sys
 import os
+import sys
+import traceback
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
@@ -182,27 +183,28 @@ if __name__ == "__main__":
     print("正常終了")
     
 if __name__ == "__main__":
-    import traceback
     try:
-        print("1. データダウンロード＆変換")
+        print("==== GSMパネル処理開始 ====")
+        # ↓ここから本来の処理を全部書く
         downloaded = download_gpv_all(GSM_PATTERNS, base_dir=BASE_DIR)
         print("downloaded:", downloaded)
         if not downloaded or len(downloaded) < 2:
             ...
-        print("2. NetCDF変換・結合")
+            sys.exit(1)
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
         print("nc_paths:", nc_paths)
-        ...
-        print("3. xarray結合")
+        nc_l_pall = [p for p in nc_paths if "L-pall" in p][0]
+        nc_lsurf  = [p for p in nc_paths if "Lsurf" in p][0]
         ds_l_pall = xr.open_dataset(nc_l_pall)
-        ds_lsurf  = xr.open_dataset(nc_lsurf)
+        ds_lsurf = xr.open_dataset(nc_lsurf)
+        print("open_dataset完了")
         ds = xr.merge([ds_l_pall, ds_lsurf])
-        print("ds:", ds)
-        ...
-        print("4. パネル生成")
+        print("xr.merge完了")
         times = ds.time.values[:12]
+        print("times:", times)
         make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
-        print("5. 完了")
+        print("画像生成完了")
+        print("==== 完了 ====")
         print("正常終了")
     except Exception as e:
         print("=== 重大エラー発生 ===")
