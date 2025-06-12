@@ -1,51 +1,42 @@
 # ===============================================
 # module/plot_surface_pressure_wind_precip.py
 # 地上海面更正気圧・風・降水量 描画モジュール
+# GSM/MSM両対応
 # ===============================================
-
 import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
-import xarray as xr
 
 def get_lon_lat(ds):
-    if isinstance(ds, xr.DataArray):
-        ds = ds.to_dataset()
-    lon = ds["longitude"].values
-    lat = ds["latitude"].values
-    if lon.ndim == 1 and lat.ndim == 1:
-        lon2d, lat2d = np.meshgrid(lon, lat)
-    else:
-        lon2d, lat2d = lon, lat
+    lon2d = ds["longitude"].values
+    lat2d = ds["latitude"].values
+    if lon2d.ndim == 1 and lat2d.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def _get_var(ds, var):
-    if isinstance(ds, xr.DataArray):
-        return ds.values
-    elif isinstance(ds, xr.Dataset):
-        if var in ds.variables:
-            return ds[var].values
-        elif hasattr(ds, "name") and ds.name == var:
-            return ds.values
-        else:
-            return None
+def get_var(ds, var):
+    import xarray as xr
+    if isinstance(ds, xr.Dataset):
+        return ds[var] if var in ds.variables else None
+    elif isinstance(ds, xr.DataArray):
+        return ds
     else:
         return None
 
 def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
     lon2d, lat2d = get_lon_lat(ds)
-    prmsl = _get_var(ds, "PRMSL_meansealevel")
-    u10   = _get_var(ds, "UGRD_10maboveground")
-    v10   = _get_var(ds, "VGRD_10maboveground")
-    precip = _get_var(ds, "APCP_surface")
+    prmsl = get_var(ds, "PRMSL_meansealevel")
+    u10 = get_var(ds, "UGRD_10maboveground")
+    v10 = get_var(ds, "VGRD_10maboveground")
+    precip = get_var(ds, "APCP_surface")
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
     if prmsl is not None:
-        prmsl_hpa = prmsl / 100
+        prmsl_hpa = prmsl.values / 100  # hPa
         levels_fine = np.arange(900, 1101, 1)
         cs = ax.contour(
             lon2d, lat2d, prmsl_hpa,
@@ -62,8 +53,7 @@ def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
         label_texts = ax.clabel(cs_bold, fmt="%.0f", fontsize=8, colors='k')
         for txt in label_texts:
             txt.set_fontweight('bold')
-        prmsl_max = maximum_filter(prmsl_hpa, size=5)
-        prmsl_min = minimum_filter(prmsl_hpa, size=5)
+
         prmsl_flat = prmsl_hpa.flatten()
         hmax_indices = np.argpartition(prmsl_flat, -2)[-2:]
         hmin_indices = np.argpartition(prmsl_flat, 2)[:2]
@@ -73,20 +63,23 @@ def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
             ax.text(lon2d[j, i], lat2d[j, i], 'H', color='blue', fontsize=14, weight='bold', ha='center', va='center')
         for j, i in zip(*hmin_coords):
             ax.text(lon2d[j, i], lat2d[j, i], 'L', color='red', fontsize=14, weight='bold', ha='center', va='center')
+
     if u10 is not None and v10 is not None:
         ax.quiver(
             lon2d[::skip, ::skip], lat2d[::skip, ::skip],
-            u10[::skip, ::skip], v10[::skip, ::skip],
+            u10.values[::skip, ::skip], v10.values[::skip, ::skip],
             transform=ccrs.PlateCarree(), scale=500, width=0.002, alpha=0.8
         )
+
     if precip is not None:
         cf = ax.contourf(
-            lon2d, lat2d, precip,
+            lon2d, lat2d, precip.values,
             levels=np.arange(0, 51, 5), cmap="Blues", alpha=0.4,
             transform=ccrs.PlateCarree()
         )
         cb = plt.colorbar(cf, ax=ax, orientation="vertical", shrink=0.6, pad=0.02)
         cb.set_label("降水量 [mm]", fontsize=8, fontproperties=prop)
+
     ax.set_title("海面更正気圧・地上風・降水量", fontsize=10, pad=10, fontproperties=prop)
 
 def plot_surface_pressure_and_wind_gsm(ax, ds, prop=None, skip=5):
@@ -95,4 +88,6 @@ def plot_surface_pressure_and_wind_gsm(ax, ds, prop=None, skip=5):
 def plot_surface_pressure_and_wind_msm(ax, ds, prop=None, skip=5):
     return plot_surface_pressure_and_wind(ax, ds, model="MSM", prop=prop, skip=skip)
 
+# ===============================================
 # END OF FILE
+# ===============================================
