@@ -1,7 +1,6 @@
 # gpv_downloader.py
 # ===============================
-# 気象庁GPV自動ダウンロード&GRIB2→NetCDF変換モジュール
-# GSMはFD、MSMはFH分割対応／ファイルパターン拡張可
+# 気象庁GPV自動DL & GRIB2→NetCDF変換
 # ===============================
 
 import os
@@ -14,14 +13,10 @@ GPV_MIRROR_URLS = [
     "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 ]
 
-# --- GSM用パターン（FD） ---
 GSM_PATTERNS = [
-    "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",    # 気圧面
-    "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",     # 地上
-    # 土壌や積雪も必要なら追加
+    "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",
+    "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",
 ]
-
-# --- MSM用パターン（FH分割） ---
 MSM_PATTERNS = [
     "MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",
     "MSM_GPV_Rjp_L-pall_FH18-33_grib2.bin",
@@ -66,17 +61,13 @@ def download_gpv_single(pattern, base_dir, mirrors, hours, days):
 
 def grib2_to_nc(grib2_path):
     from pathlib import Path
-    import subprocess
-
     grib2_path = Path(grib2_path)
     nc_path = grib2_path.with_suffix(grib2_path.suffix + ".nc")
     cmd = f"wgrib2 {grib2_path} -netcdf {nc_path}"
     print(f"[grib2_to_nc] 実行コマンド: {cmd}")
     try:
         result = subprocess.run(
-            cmd,
-            shell=True,
-            check=True,
+            cmd, shell=True, check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             encoding="utf-8"
@@ -91,9 +82,3 @@ def grib2_to_nc(grib2_path):
         print("stderr:", e.stderr)
         raise RuntimeError("grib2→nc変換に失敗しました（上記参照）") from e
     return str(nc_path)
-
-# 利用例（mainから呼び出し）
-# files = download_gpv_all(GSM_PATTERNS, base_dir="./data")
-# for grib2_path, init_time in files:
-#     nc_path = grib2_to_nc(grib2_path)
-#     # ...続き
