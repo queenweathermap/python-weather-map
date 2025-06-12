@@ -37,18 +37,20 @@ image_jobs = [
 ]
 
 for script, out_file in image_jobs:
+    print(f"=== {script} 開始 ===")
     try:
-        subprocess.run(["python3", script, out_file], check=True)
-    except Exception as e:
-        print(f"[ERROR] {script} 実行失敗:", e)
-
-    try:
-    subprocess.run([...], check=True)
+        result = subprocess.run(["python3", script, out_file], check=True, capture_output=True, text=True)
+        print(f"[INFO] {script} 実行完了：標準出力\n{result.stdout}")
     except subprocess.CalledProcessError as e:
-        print("=== GSMパネル実行エラー ===")
-        print("コマンド:", e.cmd)
-        print("リターンコード:", e.returncode)
-        print("出力:", e.output if hasattr(e, "output") else "なし")
+        print(f"[ERROR] {script} 実行失敗:")
+        print("  コマンド:", e.cmd)
+        print("  リターンコード:", e.returncode)
+        print("  標準出力:", e.stdout)
+        print("  標準エラー:", e.stderr)
+    except Exception as e:
+        print(f"[ERROR] {script} その他の例外:", e)
+
+
 
 # ================================================
 # 2. 画像存在チェックとDrive自動アップロード
