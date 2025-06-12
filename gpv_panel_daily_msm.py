@@ -131,7 +131,7 @@ if __name__ == "__main__":
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
         ds_list_aligned = align_datasets_common(ds_list)
-        ds = xr.merge(ds_list_aligned)
+        ds = xr.merge(ds_list_aligned, compat="override")  # ←★ここを修正
         print("xr.merge OK")
         times = ds.time.values[:12]
         print("times:", times)
