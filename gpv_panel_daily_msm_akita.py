@@ -1,4 +1,4 @@
-# scripts/gpv_panel_daily_msm_akita.py
+# gpv_panel_daily_msm_akita.py
 # ========================================================
 # MSM秋田局地天気図パネル（6段×12列）自動生成スクリプト
 #  - MSM GPVデータ分割ダウンロード＆grib2→NetCDF変換
