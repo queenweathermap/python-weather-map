@@ -1,4 +1,4 @@
-# scripts/gpv_panel_daily_gsm.py
+# gpv_panel_daily_gsm.py
 # ===============================================
 # GSM天気図 6行×n列パネル生成スクリプト
 #  - GPVデータの自動ダウンロード＆grib2→NetCDF変換
