@@ -12,6 +12,8 @@ from .plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w_msm
 from .plot_850hpa_thetae_stream import plot_850hpa_thetae_stream_msm
 from .plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex_msm
 from .plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+from .plot_emagram import plot_emagram_msm_panel
+
 
 import numpy as np
 import matplotlib.pyplot as plt
