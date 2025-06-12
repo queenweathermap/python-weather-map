@@ -156,6 +156,9 @@ BASE_DIR = "./data"
 # ===============================
 # メイン処理（直接実行時のみ動作）
 # ===============================
+# ===============================
+# メイン処理（直接実行時のみ動作）
+# ===============================
 if __name__ == "__main__":
     import traceback, sys
     try:
@@ -164,23 +167,33 @@ if __name__ == "__main__":
         print("downloaded:", downloaded)
         if not downloaded or len(downloaded) < 2:
             print("NO DATA: downloaded is None or <2")
-            # ↓NO DATA画像生成の処理もここにちゃんと書くこと！
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
             times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
             make_nodata_weather_panel(times, "gsm_panel_nodata.jpg")
             print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
             sys.exit(1)
+
         print("2. NetCDF変換開始")
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
         print("nc_paths:", nc_paths)
         nc_l_pall = [p for p in nc_paths if "L-pall" in p][0]
         nc_lsurf  = [p for p in nc_paths if "Lsurf"  in p][0]
         print("nc_l_pall:", nc_l_pall, "nc_lsurf:", nc_lsurf)
-        ds_l_pall = xr.open_dataset(nc_l_pall)
-        ds_lsurf  = xr.open_dataset(nc_lsurf)
-        print("open_dataset OK")
+
+        # 🔽 ここから修正ポイント
+        ds_l_pall = xr.open_dataset(nc_l_pall, engine="netcdf4")
+        ds_lsurf  = xr.open_dataset(nc_lsurf, engine="netcdf4")
+
+        # time, latitude, longitude が揃っているかチェックし、ずれていたら合わせる
+        for dim in ['time', 'latitude', 'longitude']:
+            if dim in ds_l_pall and dim in ds_lsurf:
+                # assign_coordsで強制的に同じ座標配列にする
+                ds_lsurf = ds_lsurf.assign_coords({dim: ds_l_pall[dim]})
+
         ds = xr.merge([ds_l_pall, ds_lsurf])
         print("xr.merge OK")
+        # 🔼 修正ポイントここまで
+
         times = ds.time.values[:12]
         print("times:", times)
         make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
