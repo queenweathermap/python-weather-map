@@ -19,7 +19,6 @@ def get_lon_lat(ds):
 def _get_var(ds, var):
     return np.asarray(ds[var]) if var in ds else None
 
-hgt = _get_var(ds, "HGT_300mb")
 
 def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
     lon2d, lat2d = get_lon_lat(ds)
