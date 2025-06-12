@@ -8,6 +8,7 @@
 #   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
 #   plot_850hpa_thetae_stream_gsm(ax, ds)
 #   plt.show()
+#   相当温位の正式な気象式にもいつか対応（今は簡易式でOK）
 # -----------------------------------------------
 # 2025-06-07 by ChatGPT
 # ===============================================
