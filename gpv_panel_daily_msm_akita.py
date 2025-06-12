@@ -2,7 +2,6 @@
 # ========================================================
 # MSM秋田局地天気図パネル（6段×12列）自動生成スクリプト
 # ========================================================
-
 import os
 import sys
 import traceback
@@ -135,23 +134,18 @@ if __name__ == "__main__":
             make_nodata_weather_panel(times, save_path="akita_panel_nodata.jpg")
             print("【ERROR】秋田局地 MSM GPVデータ未取得。NO DATAパネル生成")
             sys.exit(1)
-
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
         ds_list_aligned = align_datasets_common(ds_list)
-        ds = xr.merge(ds_list_aligned, compat="override")  # ← ★ここ重要！！
+        ds = xr.merge(ds_list_aligned, compat="override")
         print("xr.merge OK")
-        times = ds.time.values[:12]
-
-        # --- ここを追加 ---
-        if len(times) == 0:
+        if len(ds.time) == 0:
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
             times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
             make_nodata_weather_panel(times, save_path="akita_panel_nodata.jpg")
             print("【ERROR】秋田局地 MSM GPVに有効データ無し。NO DATAパネル生成")
             sys.exit(1)
-        # --- ここまで ---
-
+        times = ds.time.values[:12]
         print("times:", times)
         make_local_weather_panel(ds, times, "akita_local_msm_map.jpg")
         print("画像生成完了")
