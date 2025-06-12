@@ -10,6 +10,7 @@
 #   plt.show()
 # -----------------------------------------------
 # 2025-06-07 by ChatGPT
+# 修正版 2025-06-12
 # ===============================================
 
 import numpy as np
@@ -17,55 +18,66 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
+import xarray as xr
 
 # ======= 共通：緯度経度2次元配列を取得 =======
 def get_lon_lat(ds):
     """
-    データセットから2次元緯度・経度配列を取得（変数名は'ds["longitude"]', 'ds["latitude"]'）
+    xarray.DatasetまたはDataArrayから2次元緯度・経度配列を取得
     """
-    lon2d = ds["longitude"].values
-    lat2d = ds["latitude"].values
-    # 1次元ならmeshgridで2次元に
-    if lon2d.ndim == 1 and lat2d.ndim == 1:
-        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
+    # DataArray単体でも、Datasetでも対応
+    if isinstance(ds, xr.DataArray):
+        ds = ds.to_dataset()
+    lon = ds["longitude"].values
+    lat = ds["latitude"].values
+    if lon.ndim == 1 and lat.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon, lat)
+    else:
+        lon2d, lat2d = lon, lat
     return lon2d, lat2d
+
+# ======= 安全に値を取得するヘルパー =======
+def _get_var(ds, var):
+    """
+    ds: xarray.Dataset または xarray.DataArray
+    var: str
+    """
+    if isinstance(ds, xr.DataArray):
+        # 変数名が合っていればDataArrayでそのまま
+        return ds.values
+    elif isinstance(ds, xr.Dataset):
+        if var in ds.variables:
+            return ds[var].values
+        else:
+            # 直接dsの名前がvarと一致（DataArrayに変換されている場合）
+            if hasattr(ds, "name") and ds.name == var:
+                return ds.values
+            else:
+                return None
+    else:
+        return None
 
 # ======= メイン描画関数 =======
 def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
-    import xarray as xr
-
     lon2d, lat2d = get_lon_lat(ds)
 
-    # ======= モデルごとに変数名などを分岐 =======
-    def _get_var(ds, var):
-        # dsがDatasetならキーで取り出す/DataArrayならそのまま返す
-        if isinstance(ds, xr.Dataset):
-            return ds[var].values if var in ds.variables else None
-        elif isinstance(ds, xr.DataArray):
-            return ds.values
-        else:
-            return None
-
-
-    hgt = _get_var(ds, "HGT_300mb")
-    u   = _get_var(ds, "UGRD_300mb")
-    v   = _get_var(ds, "VGRD_300mb")
+    hgt  = _get_var(ds, "HGT_300mb")
+    u    = _get_var(ds, "UGRD_300mb")
+    v    = _get_var(ds, "VGRD_300mb")
     temp = _get_var(ds, "TMP_300mb")
 
     if hgt is None or u is None or v is None:
-        raise ValueError("必要な300hPa変数が含まれていません")
+        raise ValueError("必要な300hPa変数（HGT_300mb/UGRD_300mb/VGRD_300mb）が含まれていません")
 
     # 風速（ノットに換算）
     wspd = np.sqrt(u**2 + v**2) * 1.94384
-
-
 
     # ======= 地図・海岸線などの共通描画 =======
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
-    # ======= （オプション）等温線 =======
+    # ======= 等温線（オプション） =======
     if temp is not None:
         temp_c = temp - 273.15 if np.nanmax(temp) > 100 else temp  # K→℃
         t_levels = np.arange(-60, 6, 6)
@@ -107,7 +119,7 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
         )
         ax.clabel(cs_east, fmt="%d", fontsize=7, colors="black")
 
-    # ======= 風ベクトル（透明度80%） =======
+    # ======= 風ベクトル =======
     ax.quiver(
         lon2d[::skip, ::skip], lat2d[::skip, ::skip],
         u[::skip, ::skip], v[::skip, ::skip],
