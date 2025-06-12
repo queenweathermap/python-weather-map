@@ -42,6 +42,14 @@ for script, out_file in image_jobs:
     except Exception as e:
         print(f"[ERROR] {script} 実行失敗:", e)
 
+    try:
+    subprocess.run([...], check=True)
+    except subprocess.CalledProcessError as e:
+        print("=== GSMパネル実行エラー ===")
+        print("コマンド:", e.cmd)
+        print("リターンコード:", e.returncode)
+        print("出力:", e.output if hasattr(e, "output") else "なし")
+
 # ================================================
 # 2. 画像存在チェックとDrive自動アップロード
 # ================================================
@@ -61,6 +69,8 @@ for img_path in exist_files:
         drive_urls.append((os.path.basename(img_path), url))
     except Exception as e:
         print(f"[ERROR] Driveアップロード失敗: {img_path} {e}")
+        
+
 
 # ================================================
 # 3. LINEテキスト通知（ファイル名とDrive共有URLを記載）
