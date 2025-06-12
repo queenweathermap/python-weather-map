@@ -181,9 +181,18 @@ if __name__ == "__main__":
         print("【ERROR】秋田局地 MSM GPVデータ未取得。NO DATAパネルを生成しました。")
         sys.exit(1)
 
+
     # 2. NetCDF変換・結合
     nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
-    ds_list = [xr.open_dataset(nc) for nc in nc_paths]
+    ds_list = [xr.open_dataset(nc, engine="netcdf4") for nc in nc_paths]
+
+    # 基準（最初のファイル）の time/latitude/longitude に揃える
+    base_ds = ds_list[0]
+    for i in range(1, len(ds_list)):
+        for dim in ['time', 'latitude', 'longitude']:
+            if dim in base_ds and dim in ds_list[i]:
+                ds_list[i] = ds_list[i].assign_coords({dim: base_ds[dim]})
+
     ds = xr.concat(ds_list, dim="time")
 
     # 3. パネル作成
