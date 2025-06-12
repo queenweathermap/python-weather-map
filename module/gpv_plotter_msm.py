@@ -1,5 +1,5 @@
 # ===============================================
-# gpv_plotter_msm.py
+# module/gpv_plotter_msm.py
 # MSMモデル用の可視化関数をまとめてimportするモジュール
 # 他のスクリプトからは「from module.gpv_plotter_msm import ...」で
 # 必要な描画関数を一括で使えるようにします。
