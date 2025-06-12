@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
         # ★ 共通部分に揃えてから merge
         ds_list_aligned = align_datasets_common(ds_list)
-        ds =  = xr.merge(ds_list_aligned, compat="override")
+        ds = xr.merge(ds_list_aligned, compat="override")
         print("xr.merge OK")
         times = ds.time.values[:12]
         print("times:", times)
