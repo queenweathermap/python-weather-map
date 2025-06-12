@@ -1,8 +1,15 @@
 # ===============================================
 # module/plot_surface_pressure_wind_precip.py
 # 地上海面更正気圧・風・降水量 描画モジュール
-# GSM/MSM両対応
+# GSM/MSM両対応（引数 model="GSM"/"MSM" で切り替え）
+# -----------------------------------------------
+# 利用例:
+#   from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_gsm
+#   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
+#   plot_surface_pressure_and_wind_gsm(ax, ds)
+#   plt.show()
 # ===============================================
+
 import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
@@ -16,25 +23,18 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def get_var(ds, var):
-    import xarray as xr
-    if isinstance(ds, xr.Dataset):
-        return ds[var] if var in ds.variables else None
-    elif isinstance(ds, xr.DataArray):
-        return ds
-    else:
-        return None
-
 def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
     lon2d, lat2d = get_lon_lat(ds)
-    prmsl = get_var(ds, "PRMSL_meansealevel")
-    u10 = get_var(ds, "UGRD_10maboveground")
-    v10 = get_var(ds, "VGRD_10maboveground")
-    precip = get_var(ds, "APCP_surface")
+    prmsl = ds.get("PRMSL_meansealevel", None)
+    u10 = ds.get("UGRD_10maboveground", None)
+    v10 = ds.get("VGRD_10maboveground", None)
+    precip = ds.get("APCP_surface", None)
+
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
+    # 海面更正気圧
     if prmsl is not None:
         prmsl_hpa = prmsl.values / 100  # hPa
         levels_fine = np.arange(900, 1101, 1)
@@ -54,6 +54,9 @@ def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
         for txt in label_texts:
             txt.set_fontweight('bold')
 
+        # H/Lマーク
+        prmsl_max = maximum_filter(prmsl_hpa, size=5)
+        prmsl_min = minimum_filter(prmsl_hpa, size=5)
         prmsl_flat = prmsl_hpa.flatten()
         hmax_indices = np.argpartition(prmsl_flat, -2)[-2:]
         hmin_indices = np.argpartition(prmsl_flat, 2)[:2]
@@ -64,6 +67,7 @@ def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
         for j, i in zip(*hmin_coords):
             ax.text(lon2d[j, i], lat2d[j, i], 'L', color='red', fontsize=14, weight='bold', ha='center', va='center')
 
+    # 10m風ベクトル
     if u10 is not None and v10 is not None:
         ax.quiver(
             lon2d[::skip, ::skip], lat2d[::skip, ::skip],
@@ -71,6 +75,7 @@ def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
             transform=ccrs.PlateCarree(), scale=500, width=0.002, alpha=0.8
         )
 
+    # 降水量
     if precip is not None:
         cf = ax.contourf(
             lon2d, lat2d, precip.values,
