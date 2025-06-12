@@ -177,26 +177,26 @@ if __name__ == "__main__":
         nc_l_pall = [p for p in nc_paths if "L-pall" in p][0]
         nc_lsurf  = [p for p in nc_paths if "Lsurf"  in p][0]
         print("nc_l_pall:", nc_l_pall, "nc_lsurf:", nc_lsurf)
-
-        # 🔽 ここから修正ポイント
-        ds_l_pall = xr.open_dataset(nc_l_pall, engine="netcdf4")
-        ds_lsurf  = xr.open_dataset(nc_lsurf, engine="netcdf4")
-
+        
+        # 🔽 ここから修正
+        ds_l_pall = xr.open_dataset(nc_l_pall)      # engine指定を削除
+        ds_lsurf  = xr.open_dataset(nc_lsurf)       # engine指定を削除
+        
         # time, latitude, longitude が揃っているかチェックし、ずれていたら合わせる
         for dim in ['time', 'latitude', 'longitude']:
             if dim in ds_l_pall and dim in ds_lsurf:
-                # assign_coordsで強制的に同じ座標配列にする
                 ds_lsurf = ds_lsurf.assign_coords({dim: ds_l_pall[dim]})
-
+        
         ds = xr.merge([ds_l_pall, ds_lsurf])
         print("xr.merge OK")
-        # 🔼 修正ポイントここまで
-
+        # 🔼 修正ここまで
+        
         times = ds.time.values[:12]
         print("times:", times)
         make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
         print("画像生成完了")
         print("=== 完了 ===")
+        
     except Exception as e:
         print("=== 重大エラー発生 ===")
         print(type(e), e)
