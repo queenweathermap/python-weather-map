@@ -10,23 +10,14 @@ import cartopy.feature as cfeature
 import xarray as xr
 
 def get_lon_lat(ds):
-    if isinstance(ds, xr.DataArray):
-        ds = ds.to_dataset()
-    lon = ds["longitude"].values
-    lat = ds["latitude"].values
-    if lon.ndim == 1 and lat.ndim == 1:
-        lon2d, lat2d = np.meshgrid(lon, lat)
-    else:
-        lon2d, lat2d = lon, lat
+    lon2d = np.asarray(ds["longitude"])
+    lat2d = np.asarray(ds["latitude"])
+    if lon2d.ndim == 1 and lat2d.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def get_var(ds, var):
-    import xarray as xr
-    if isinstance(ds, xr.DataArray):
-        return np.asarray(ds)
-    if var in ds.variables:
-        return np.asarray(ds[var])
-    return None
+def _get_var(ds, var):
+    return np.asarray(ds[var]) if var in ds else None
 
 def plot_850hpa_thetae_stream(ax, ds, model="GSM", prop=None):
     lon2d, lat2d = get_lon_lat(ds)
