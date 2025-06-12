@@ -7,6 +7,7 @@
 #   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
 #   plot_925hpa_temp_wind_dindex_gsm(ax, ds)
 #   plt.show()
+#  湿数カラーマップGreensはシンプルでOKですが、気象分野でよく使う黄〜緑のグラデ（たとえば700hPa湿数と同系色）に揃えたい場合はmatplotlib.colors.LinearSegmentedColormapで自作してもよい（お好みで）
 # ===============================================
 
 import numpy as np
