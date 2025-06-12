@@ -1,4 +1,4 @@
-# scripts/gpv_downloader.py
+# gpv_downloader.py
 # ===============================
 # 気象庁GPV自動ダウンロード&GRIB2→NetCDF変換モジュール
 # GSMはFD、MSMはFH分割対応／ファイルパターン拡張可
