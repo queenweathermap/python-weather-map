@@ -82,7 +82,9 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
                 ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
                 ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
             continue
-        dsi = ds.sel(time=time)
+        dsi = ds.sel(time=time)  # ←ここで「その時刻のDataset」になっている
+    
+        # 各plot関数では「Dataset」でも「DataArray」でもOKなようにisinstanceで分岐
         plot_500hpa_vorticity_msm(axes[0, col], dsi)
         plot_700hpa_dindex_500hpa_temp_msm(axes[1, col], dsi)
         plot_850hpa_temp_wind_700hpa_w_msm(axes[2, col], dsi)
@@ -97,6 +99,7 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
             va='top',
             transform=axes[5, col].transAxes
         )
+
     for ax in axes.flatten():
         add_gridlines(ax)
     fig.suptitle(
