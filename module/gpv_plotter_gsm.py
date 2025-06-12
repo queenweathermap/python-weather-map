@@ -1,5 +1,5 @@
 # ===============================================
-# gpv_plotter_gsm.py
+# module/gpv_plotter_gsm.py
 # GSMモデル用の可視化関数まとめimportモジュール
 # 他スクリプトから「from module.gpv_plotter_gsm import ...」で
 # 必要な描画関数だけをまとめて利用できます
