@@ -17,12 +17,11 @@ def get_lon_lat(ds):
 
 def get_var(ds, var):
     import xarray as xr
-    if isinstance(ds, xr.Dataset):
-        return ds[var].values if var in ds.variables else None
-    elif isinstance(ds, xr.DataArray):
-        return ds.values
-    else:
-        return None
+    if isinstance(ds, xr.DataArray):
+        return np.asarray(ds)
+    if var in ds.variables:
+        return np.asarray(ds[var])
+    return None
 
 def plot_500hpa_vorticity(ax, ds, model="GSM", prop=None):
     import metpy.calc as mpcalc
