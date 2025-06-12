@@ -27,12 +27,15 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}      # ← ここ追加！
         run: |
           docker run --rm \
             -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
             -e LINE_USER_ID="${LINE_USER_ID}" \
             -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
+            -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \        # ← ここ追加！
             weather-map-app
+
 
 # Slack通知用（今後復活する場合はコメント解除）
 # SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
