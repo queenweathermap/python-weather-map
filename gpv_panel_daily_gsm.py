@@ -180,3 +180,32 @@ if __name__ == "__main__":
     make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
     print("==== 完了 ====")
     print("正常終了")
+    
+if __name__ == "__main__":
+    import traceback
+    try:
+        print("1. データダウンロード＆変換")
+        downloaded = download_gpv_all(GSM_PATTERNS, base_dir=BASE_DIR)
+        print("downloaded:", downloaded)
+        if not downloaded or len(downloaded) < 2:
+            ...
+        print("2. NetCDF変換・結合")
+        nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
+        print("nc_paths:", nc_paths)
+        ...
+        print("3. xarray結合")
+        ds_l_pall = xr.open_dataset(nc_l_pall)
+        ds_lsurf  = xr.open_dataset(nc_lsurf)
+        ds = xr.merge([ds_l_pall, ds_lsurf])
+        print("ds:", ds)
+        ...
+        print("4. パネル生成")
+        times = ds.time.values[:12]
+        make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
+        print("5. 完了")
+        print("正常終了")
+    except Exception as e:
+        print("=== 重大エラー発生 ===")
+        print(type(e), e)
+        traceback.print_exc()
+        sys.exit(1)
