@@ -10,19 +10,16 @@ import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
 
 def get_lon_lat(ds):
-    lon2d = ds["longitude"].values
-    lat2d = ds["latitude"].values
+    lon2d = np.asarray(ds["longitude"])
+    lat2d = np.asarray(ds["latitude"])
     if lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def get_var(ds, var):
-    import xarray as xr
-    if isinstance(ds, xr.DataArray):
-        return np.asarray(ds)
-    if var in ds.variables:
-        return np.asarray(ds[var])
-    return None
+def _get_var(ds, var):
+    return np.asarray(ds[var]) if var in ds else None
+
+hgt = _get_var(ds, "HGT_300mb")
 
 def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
     lon2d, lat2d = get_lon_lat(ds)
