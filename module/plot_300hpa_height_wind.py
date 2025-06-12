@@ -18,18 +18,17 @@ def get_lon_lat(ds):
 
 def get_var(ds, var):
     import xarray as xr
-    if isinstance(ds, xr.Dataset):
-        return ds[var].values if var in ds.variables else None
-    elif isinstance(ds, xr.DataArray):
-        return ds.values
-    else:
-        return None
+    if isinstance(ds, xr.DataArray):
+        return np.asarray(ds)
+    if var in ds.variables:
+        return np.asarray(ds[var])
+    return None
 
 def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
     lon2d, lat2d = get_lon_lat(ds)
-    hgt  = get_var(ds, "HGT_300mb")
-    u    = get_var(ds, "UGRD_300mb")
-    v    = get_var(ds, "VGRD_300mb")
+    hgt = get_var(ds, "HGT_300mb")
+    u   = get_var(ds, "UGRD_300mb")
+    v   = get_var(ds, "VGRD_300mb")
     temp = get_var(ds, "TMP_300mb")
     if hgt is None or u is None or v is None:
         raise ValueError("必要な300hPa変数が含まれていません")
