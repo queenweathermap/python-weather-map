@@ -2,7 +2,6 @@
 # ===============================================
 # 毎日定時：GSM/MSM/秋田局地 天気図画像を自動生成＆LINE通知＆Driveアップロードバッチ
 # ===============================================
-print("環境変数一覧", dict(os.environ))
 
 import subprocess
 import os
@@ -17,6 +16,9 @@ from module.utils.drive_utils import upload_to_drive
 
 # --- .envの読み込み（LINE/Drive用トークン等は各ユーティリティ側で取得） ---
 load_dotenv()
+
+print("環境変数一覧", dict(os.environ))
+
 
 # ================================================
 # 1. ファイル名（日時付き）・保存場所（iCloud Desktop）を指定
