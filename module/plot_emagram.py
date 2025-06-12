@@ -1,8 +1,15 @@
 # ===============================================
 # module/plot_emagram.py
 # エマグラム（気温・露点温度・風バーブ）描画モジュール
-# GSM/MSM両対応、複数時刻の一括パネル
+# GSM/MSM両対応、複数時刻の一括パネル出力対応
+# -----------------------------------------------
+# 利用例:
+#   from module.plot_emagram import plot_emagram_gsm_panel
+#   fig = plot_emagram_gsm_panel(ds, lat=39.72, lon=140.10, times=ds.time.values[:6])
+#   fig.savefig("emagram_panel.jpg")
+# 2025-06-13 by ChatGPT
 # ===============================================
+
 import numpy as np
 import matplotlib.pyplot as plt
 from metpy.plots import SkewT
@@ -64,9 +71,7 @@ def plot_emagram_panel(ds, lat=39.72, lon=140.10, times=None, model_name="GSM"):
     for i, t in enumerate(times):
         tlist = ds.time.values
         time_idx = np.where(tlist == np.datetime64(t))[0][0]
-        import pandas as pd
-        pd_time = t if hasattr(t, "strftime") else str(t)
-        title = f"{model_name}\n{pd.to_datetime(str(t)).strftime('%Y-%m-%d %H:%M')}"
+        title = f"{model_name}\n{str(t)[:16]}"
         plot_emagram_skewt(axes[i], ds, lat, lon, time_idx=time_idx, title=title)
     fig.suptitle(f"{model_name} エマグラム\nLat: {lat:.2f}, Lon: {lon:.2f}", fontsize=13, y=1.05)
     return fig
