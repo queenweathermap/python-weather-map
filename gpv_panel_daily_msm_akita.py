@@ -139,7 +139,7 @@ if __name__ == "__main__":
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
         ds_list_aligned = align_datasets_common(ds_list)
-        ds = xr.merge(ds_list_aligned)
+        ds = xr.merge(ds_list_aligned, compat="override")  # ← ★ここ重要！！
         print("xr.merge OK")
         times = ds.time.values[:12]
         print("times:", times)
@@ -150,4 +150,4 @@ if __name__ == "__main__":
         print("=== 重大エラー発生 ===")
         print(type(e), e)
         traceback.print_exc()
-        sys.exi
+        sys.exit(1)  # ← ここも忘れずに
