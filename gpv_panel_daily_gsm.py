@@ -157,55 +157,35 @@ BASE_DIR = "./data"
 # メイン処理（直接実行時のみ動作）
 # ===============================
 if __name__ == "__main__":
-    # 1. データダウンロード＆grib2→NetCDF変換
-    downloaded = download_gpv_all(GSM_PATTERNS, base_dir=BASE_DIR)
-    if not downloaded or len(downloaded) < 2:
-        # データ取得失敗時はNO DATAパネル生成
-        base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-        times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
-        make_nodata_weather_panel(times, "gsm_panel_nodata.jpg")
-        print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
-        sys.exit(1)
-
-    # 2. NetCDF変換・結合
-    nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
-    nc_l_pall = [p for p in nc_paths if "L-pall" in p][0]
-    nc_lsurf  = [p for p in nc_paths if "Lsurf"  in p][0]
-    ds_l_pall = xr.open_dataset(nc_l_pall)
-    ds_lsurf  = xr.open_dataset(nc_lsurf)
-    ds = xr.merge([ds_l_pall, ds_lsurf])
-
-    # 3. 天気図パネル生成
-    times = ds.time.values[:12]  # 3時間刻みで12本
-    print("==== パネル作成 ====")
-    make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
-    print("==== 完了 ====")
-    print("正常終了")
-    
-if __name__ == "__main__":
+    import traceback, sys
     try:
-        print("==== GSMパネル処理開始 ====")
-        # ↓ここから本来の処理を全部書く
+        print("1. データダウンロード開始")
         downloaded = download_gpv_all(GSM_PATTERNS, base_dir=BASE_DIR)
         print("downloaded:", downloaded)
         if not downloaded or len(downloaded) < 2:
-            ...
+            print("NO DATA: downloaded is None or <2")
+            # ↓NO DATA画像生成の処理もここにちゃんと書くこと！
+            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+            times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
+            make_nodata_weather_panel(times, "gsm_panel_nodata.jpg")
+            print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
             sys.exit(1)
+        print("2. NetCDF変換開始")
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
         print("nc_paths:", nc_paths)
         nc_l_pall = [p for p in nc_paths if "L-pall" in p][0]
-        nc_lsurf  = [p for p in nc_paths if "Lsurf" in p][0]
+        nc_lsurf  = [p for p in nc_paths if "Lsurf"  in p][0]
+        print("nc_l_pall:", nc_l_pall, "nc_lsurf:", nc_lsurf)
         ds_l_pall = xr.open_dataset(nc_l_pall)
-        ds_lsurf = xr.open_dataset(nc_lsurf)
-        print("open_dataset完了")
+        ds_lsurf  = xr.open_dataset(nc_lsurf)
+        print("open_dataset OK")
         ds = xr.merge([ds_l_pall, ds_lsurf])
-        print("xr.merge完了")
+        print("xr.merge OK")
         times = ds.time.values[:12]
         print("times:", times)
         make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
         print("画像生成完了")
-        print("==== 完了 ====")
-        print("正常終了")
+        print("=== 完了 ===")
     except Exception as e:
         print("=== 重大エラー発生 ===")
         print(type(e), e)
