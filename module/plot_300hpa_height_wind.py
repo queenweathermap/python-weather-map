@@ -32,24 +32,33 @@ def get_lon_lat(ds):
 
 # ======= メイン描画関数 =======
 def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
+    import xarray as xr
+
     lon2d, lat2d = get_lon_lat(ds)
 
     # ======= モデルごとに変数名などを分岐 =======
-    if model == "GSM":
-        hgt = ds["HGT_300mb"].values
-        u = ds["UGRD_300mb"].values
-        v = ds["VGRD_300mb"].values
-        temp = ds["TMP_300mb"].values if "TMP_300mb" in ds.variables else None
-    elif model == "MSM":
-        hgt = ds["HGT_300mb"].values
-        u = ds["UGRD_300mb"].values
-        v = ds["VGRD_300mb"].values
-        temp = ds["TMP_300mb"].values if "TMP_300mb" in ds.variables else None
-    else:
-        raise ValueError("model must be 'GSM' or 'MSM'")
+    def _get_var(ds, var):
+        # Dataset: ds["XXX"] or DataArray: ds
+        if isinstance(ds, xr.Dataset):
+            return ds[var].values if var in ds else None
+        elif isinstance(ds, xr.DataArray):
+            # dsがまさにその変数なら
+            return ds.values
+        else:
+            return None
+
+    hgt = _get_var(ds, "HGT_300mb")
+    u   = _get_var(ds, "UGRD_300mb")
+    v   = _get_var(ds, "VGRD_300mb")
+    temp = _get_var(ds, "TMP_300mb")
+
+    if hgt is None or u is None or v is None:
+        raise ValueError("必要な300hPa変数が含まれていません")
 
     # 風速（ノットに換算）
     wspd = np.sqrt(u**2 + v**2) * 1.94384
+
+
 
     # ======= 地図・海岸線などの共通描画 =======
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
