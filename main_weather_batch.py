@@ -31,9 +31,9 @@ IMG_MSM   = os.path.join(DESKTOP_DIR, f"msm_{init_time}.jpg")
 IMG_AKITA = os.path.join(DESKTOP_DIR, f"akita_{init_time}.jpg")
 
 image_jobs = [
-    ("scripts/gpv_panel_daily_gsm.py",      IMG_GSM),
-    ("scripts/gpv_panel_daily_msm.py",      IMG_MSM),
-    ("scripts/gpv_panel_daily_msm_akita.py", IMG_AKITA),
+    ("gpv_panel_daily_gsm.py",      IMG_GSM),
+    ("gpv_panel_daily_msm.py",      IMG_MSM),
+    ("gpv_panel_daily_msm_akita.py", IMG_AKITA),
 ]
 
 for script, out_file in image_jobs:
