@@ -164,7 +164,7 @@ if __name__ == "__main__":
 
     # 2. NetCDF結合
     nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
-    ds_list = [xr.open_dataset(nc, engine="netcdf4") for nc in nc_paths]
+    ds_list = [xr.open_dataset(nc) for nc in nc_paths]
 
     # time, latitude, longitude を基準ファイル（最初のファイル）にそろえる
     base_ds = ds_list[0]
