@@ -9,30 +9,22 @@
 #   ds_merged = xr.concat(aligned, dim="time", compat="override")
 # ==============================================
 
+
+import numpy as np
 import xarray as xr
 
-def align_datasets_common(ds_list, dims=("time", "latitude", "longitude")):
+def align_datasets_common(ds_list, dims=('time', 'latitude', 'longitude')):
     """
-    複数xarray.Datasetの指定次元・変数の「共通部分」だけでリストを返す。
-    - ds_list: [xr.Dataset, xr.Dataset, ...]
-    - dims:    共通部分を取りたい次元（デフォルト：time, latitude, longitude）
+    ds_list（xarray.Datasetのリスト）から、指定dimsの共通部分のみ抽出したリストを返す。
     """
-    # 1. 各次元の共通値を列挙
-    common_coords = {}
+    # まず各次元の共通部分を求める
+    common = {}
     for dim in dims:
-        values = set(ds_list[0][dim].values)
-        for ds in ds_list[1:]:
-            values &= set(ds[dim].values)
-        common_coords[dim] = sorted(list(values))
-    # 2. 共通変数名を取得
-    common_vars = set(ds_list[0].data_vars)
-    for ds in ds_list[1:]:
-        common_vars &= set(ds.data_vars)
-    common_vars = list(common_vars)
-
-    # 3. 全データセットを「共通部分だけ」でselし、変数も限定
-    ds_list_aligned = [
-        ds[common_vars].sel(**{dim: common_coords[dim] for dim in dims})
-        for ds in ds_list
-    ]
+        arrs = [ds[dim].values for ds in ds_list if dim in ds.dims or dim in ds.coords]
+        common[dim] = arrs[0]
+        for arr in arrs[1:]:
+            common[dim] = np.intersect1d(common[dim], arr)
+    # 各データセットに対して共通部分のみsubset
+    ds_list_aligned = [ds.sel({dim: common[dim] for dim in dims}) for ds in ds_list]
     return ds_list_aligned
+
