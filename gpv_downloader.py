@@ -65,12 +65,31 @@ def download_gpv_single(pattern, base_dir, mirrors, hours, days):
     return None, None
 
 def grib2_to_nc(grib2_path):
+    from pathlib import Path
+    import subprocess
+
     grib2_path = Path(grib2_path)
     nc_path = grib2_path.with_suffix(grib2_path.suffix + ".nc")
     cmd = f"wgrib2 {grib2_path} -netcdf {nc_path}"
-    result = subprocess.run(cmd, shell=True)
-    if result.returncode != 0:
-        raise RuntimeError("grib2→nc変換に失敗")
+    print(f"[grib2_to_nc] 実行コマンド: {cmd}")
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8"
+        )
+        print("[grib2_to_nc] stdout:", result.stdout)
+        print("[grib2_to_nc] stderr:", result.stderr)
+    except subprocess.CalledProcessError as e:
+        print("=== grib2→NetCDF変換でエラー ===")
+        print("コマンド:", e.cmd)
+        print("リターンコード:", e.returncode)
+        print("stdout:", e.stdout)
+        print("stderr:", e.stderr)
+        raise RuntimeError("grib2→nc変換に失敗しました（上記参照）") from e
     return str(nc_path)
 
 # 利用例（mainから呼び出し）
