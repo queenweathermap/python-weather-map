@@ -20,18 +20,13 @@ def get_lon_lat(ds):
         lon2d, lat2d = lon, lat
     return lon2d, lat2d
 
-def _get_var(ds, var):
+def get_var(ds, var):
+    import xarray as xr
     if isinstance(ds, xr.DataArray):
-        return ds.values
-    elif isinstance(ds, xr.Dataset):
-        if var in ds.variables:
-            return ds[var].values
-        elif hasattr(ds, "name") and ds.name == var:
-            return ds.values
-        else:
-            return None
-    else:
-        return None
+        return np.asarray(ds)
+    if var in ds.variables:
+        return np.asarray(ds[var])
+    return None
 
 def plot_850hpa_thetae_stream(ax, ds, model="GSM", prop=None):
     lon2d, lat2d = get_lon_lat(ds)
