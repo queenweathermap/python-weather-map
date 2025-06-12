@@ -164,8 +164,17 @@ if __name__ == "__main__":
 
     # 2. NetCDF結合
     nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
-    ds_list = [xr.open_dataset(nc) for nc in nc_paths]
+    ds_list = [xr.open_dataset(nc, engine="netcdf4") for nc in nc_paths]
+
+    # time, latitude, longitude を基準ファイル（最初のファイル）にそろえる
+    base_ds = ds_list[0]
+    for i in range(1, len(ds_list)):
+        for dim in ['time', 'latitude', 'longitude']:
+            if dim in base_ds and dim in ds_list[i]:
+                ds_list[i] = ds_list[i].assign_coords({dim: base_ds[dim]})
+
     ds = xr.concat(ds_list, dim="time")
+
 
     # 3. 天気図パネル画像生成
     times = ds.time.values[:12]
