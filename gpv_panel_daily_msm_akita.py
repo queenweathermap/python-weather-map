@@ -20,7 +20,7 @@ import xarray as xr
 # --- MSM用描画関数（秋田局地版） ---
 from gpv_downloader import download_gpv_all, grib2_to_nc
 from module.gpv_plotter_msm import (
-    plot_emagram_msm,
+    plot_emagram_msm_panel,
     plot_700hpa_dindex_500hpa_temp_msm,
     plot_850hpa_temp_wind_700hpa_w_msm,
     plot_850hpa_thetae_stream_msm,
