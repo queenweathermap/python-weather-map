@@ -3,7 +3,7 @@
 # Daily Weather Map（LINE通知版：メール/Slackはコメントアウト保存）
 # ===============================================
 
-# .github/workflows/daily_weather.yml
+
 name: Daily Weather Map
 
 on:
