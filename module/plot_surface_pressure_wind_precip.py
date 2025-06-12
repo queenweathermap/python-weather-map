@@ -8,6 +8,7 @@
 #   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
 #   plot_surface_pressure_and_wind_gsm(ax, ds)
 #   plt.show()
+#   カラーマップ/レベル調整必要に応じてnp.arange(0, 51, 5)やcmapをお好みで調整OK（現状でも一般気象向き）
 # ===============================================
 
 import numpy as np
