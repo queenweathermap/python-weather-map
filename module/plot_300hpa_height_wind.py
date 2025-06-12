@@ -38,14 +38,14 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
 
     # ======= モデルごとに変数名などを分岐 =======
     def _get_var(ds, var):
-        # Dataset: ds["XXX"] or DataArray: ds
+        # dsがDatasetならキーで取り出す/DataArrayならそのまま返す
         if isinstance(ds, xr.Dataset):
-            return ds[var].values if var in ds else None
+            return ds[var].values if var in ds.variables else None
         elif isinstance(ds, xr.DataArray):
-            # dsがまさにその変数なら
             return ds.values
         else:
             return None
+
 
     hgt = _get_var(ds, "HGT_300mb")
     u   = _get_var(ds, "UGRD_300mb")
