@@ -3,6 +3,7 @@
 # Daily Weather Map（LINE通知版：メール/Slackはコメントアウト保存）
 # ===============================================
 
+# .github/workflows/daily_weather.yml
 name: Daily Weather Map
 
 on:
@@ -25,12 +26,13 @@ jobs:
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
           docker run --rm \
             -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
             -e LINE_USER_ID="${LINE_USER_ID}" \
+            -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
             weather-map-app
-
 
 # Slack通知用（今後復活する場合はコメント解除）
 # SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
