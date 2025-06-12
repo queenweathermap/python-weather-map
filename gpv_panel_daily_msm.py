@@ -1,4 +1,4 @@
-# scripts/gpv_panel_daily_msm.py
+# gpv_panel_daily_msm.py
 # ===============================================
 # MSM天気図 6行×n列パネル生成スクリプト
 #  - MSM GPVデータ自動ダウンロード＆grib2→NetCDF変換
