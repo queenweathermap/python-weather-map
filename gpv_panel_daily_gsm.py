@@ -28,7 +28,7 @@ from module.gpv_plotter_gsm import (
     plot_850hpa_thetae_stream_gsm,
     plot_925hpa_temp_wind_dindex_gsm,
     plot_surface_pressure_and_wind_gsm,
-    plot_emagram_gsm,
+    plot_emagram_gsm_panel,
 )
 # --- ※Slack送信importは不要・完全削除 ---
 
