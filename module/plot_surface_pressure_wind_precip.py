@@ -1,5 +1,5 @@
 # ===============================================
-# plot_surface_pressure_wind_precip.py
+# module/plot_surface_pressure_wind_precip.py
 # 地上海面更正気圧・風・降水量 描画モジュール
 # GSM/MSM両対応（引数 model="GSM"/"MSM" で切り替え）
 # -----------------------------------------------
