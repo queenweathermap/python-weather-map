@@ -27,7 +27,12 @@ from module.gpv_plotter_msm import (
     plot_925hpa_temp_wind_dindex_msm,
     plot_surface_pressure_and_wind_msm,
 )
-# --- Slack送信import不要（完全削除） ---
+# --- 通知やDrive連携のimport（必要なら追加） ---
+# from module.utils.drive_utils import upload_to_drive
+# from module.utils.line_utils import send_line_text
+# from module.utils.mail_utils import send_mail
+# from module.utils.slack_utils import upload_file_external_slack
+
 
 # ===============================================
 # MSM分割ファイルパターン（秋田局地も標準MSMを使用）
