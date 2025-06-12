@@ -19,7 +19,7 @@ import pandas as pd
 import xarray as xr
 
 # --- サブモジュール読み込み（描画関数群など） ---
-from scripts.gpv_downloader import download_gpv_all, grib2_to_nc
+from gpv_downloader import download_gpv_all, grib2_to_nc
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind_gsm,
     plot_500hpa_vorticity_gsm,
