@@ -33,7 +33,7 @@ jobs:
             -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
             -e LINE_USER_ID="${LINE_USER_ID}" \
             -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
-            -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \        # ← ここ追加！
+            -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \
             weather-map-app
 
 
