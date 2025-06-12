@@ -1,35 +1,18 @@
 # ===============================================
 # module/plot_emagram.py
 # エマグラム（気温・露点温度・風バーブ）描画モジュール
-# GSM/MSM両対応、複数時刻の一括パネル出力
-# -----------------------------------------------
-# 利用例:
-#   from module.plot_emagram import plot_emagram_gsm_panel
-#   fig = plot_emagram_gsm_panel(ds, lat=39.72, lon=140.10, times=ds.time.values[:6])
-#   fig.savefig("emagram_panel.jpg")
-# -----------------------------------------------
-# 2025-06-13 by ChatGPT
+# GSM/MSM両対応、複数時刻の一括パネル
 # ===============================================
-
 import numpy as np
 import matplotlib.pyplot as plt
 from metpy.plots import SkewT
 from metpy.units import units
 
-# ===============================================
-# 1地点・1時刻の鉛直プロファイル抽出（RH→Td自動補間）
-# ===============================================
 def extract_profile_gpv(ds, lat, lon, time_idx=0):
-    """
-    指定時刻・地点の気温・露点温度・風プロファイルを抽出
-    露点温度は RH から「気温 - (100 - RH) / 5」で近似
-    """
-    # 最近傍グリッド
     lat_arr = ds["latitude"].values
     lon_arr = ds["longitude"].values
     ilat = np.abs(lat_arr - lat).argmin()
     ilon = np.abs(lon_arr - lon).argmin()
-    # 気圧面リスト
     levels = []
     temp = []
     dew = []
@@ -43,7 +26,7 @@ def extract_profile_gpv(ds, lat, lon, time_idx=0):
         if key_tmp in ds.variables and key_rh in ds.variables:
             t = ds[key_tmp][time_idx, ilat, ilon] - 273.15
             rh = ds[key_rh][time_idx, ilat, ilon]
-            td = t - (100 - rh) / 5  # 露点温度の近似
+            td = t - (100 - rh) / 5
             temp.append(t)
             dew.append(td)
             levels.append(level)
@@ -52,13 +35,7 @@ def extract_profile_gpv(ds, lat, lon, time_idx=0):
     idx = np.argsort(levels)[::-1]
     return (np.array(levels)[idx], np.array(temp)[idx], np.array(dew)[idx], np.array(u)[idx], np.array(v)[idx])
 
-# ===============================================
-# 単一時刻エマグラム描画（SkewT＋風バーブ）
-# ===============================================
 def plot_emagram_skewt(ax, ds, lat, lon, time_idx=0, title="Emagram"):
-    """
-    SkewT上に気温（赤）・露点温度（緑）・風バーブ（右側）を描画
-    """
     levels, temp, dew, u, v = extract_profile_gpv(ds, lat, lon, time_idx)
     p = levels * units.hPa
     t = temp * units.degC
@@ -77,36 +54,23 @@ def plot_emagram_skewt(ax, ds, lat, lon, time_idx=0, title="Emagram"):
     skew.ax.legend(loc='upper right', fontsize=7)
     return ax
 
-# ===============================================
-# 複数時刻のエマグラムを1枚パネルで描画
-# ===============================================
 def plot_emagram_panel(ds, lat=39.72, lon=140.10, times=None, model_name="GSM"):
-    """
-    指定地点・複数時刻のエマグラムを一括パネルで描画
-    ds: xarray Dataset
-    lat, lon: 緯度経度
-    times: 描画時刻リスト（np.datetime64型 or pandas.Timestamp型）
-    model_name: タイトル用
-    """
     if times is None:
-        times = ds.time.values[:6]  # デフォルト先頭6時刻
+        times = ds.time.values[:6]
     ncols = len(times)
     fig, axes = plt.subplots(1, ncols, figsize=(4 * ncols, 6), constrained_layout=True)
     if ncols == 1:
         axes = [axes]
     for i, t in enumerate(times):
-        # 時刻インデックス特定
         tlist = ds.time.values
         time_idx = np.where(tlist == np.datetime64(t))[0][0]
+        import pandas as pd
         pd_time = t if hasattr(t, "strftime") else str(t)
         title = f"{model_name}\n{pd.to_datetime(str(t)).strftime('%Y-%m-%d %H:%M')}"
         plot_emagram_skewt(axes[i], ds, lat, lon, time_idx=time_idx, title=title)
     fig.suptitle(f"{model_name} エマグラム\nLat: {lat:.2f}, Lon: {lon:.2f}", fontsize=13, y=1.05)
     return fig
 
-# ===============================================
-# GSM/MSMラッパー関数（import用）
-# ===============================================
 def plot_emagram_gsm_panel(ds, lat=39.72, lon=140.10, times=None):
     return plot_emagram_panel(ds, lat=lat, lon=lon, times=times, model_name="GSM")
 
