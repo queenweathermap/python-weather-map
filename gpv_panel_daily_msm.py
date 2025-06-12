@@ -165,15 +165,33 @@ if __name__ == "__main__":
     # 2. NetCDF結合
     nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
     ds_list = [xr.open_dataset(nc) for nc in nc_paths]
-
-    # time, latitude, longitude を基準ファイル（最初のファイル）にそろえる
+    
+    # ▼ 修正ここから
+    # まず1つ目を基準に共通部分だけに subset
     base_ds = ds_list[0]
+    common_time = base_ds.time.values
+    common_lat = base_ds.latitude.values
+    common_lon = base_ds.longitude.values
+    
     for i in range(1, len(ds_list)):
-        for dim in ['time', 'latitude', 'longitude']:
-            if dim in base_ds and dim in ds_list[i]:
-                ds_list[i] = ds_list[i].assign_coords({dim: base_ds[dim]})
-
+        # すべてのファイルで「共通部分」に揃える（無理に assign_coords しない）
+        ds_list[i] = ds_list[i].sel(
+            time=np.intersect1d(ds_list[i].time.values, common_time),
+            latitude=np.intersect1d(ds_list[i].latitude.values, common_lat),
+            longitude=np.intersect1d(ds_list[i].longitude.values, common_lon),
+        )
+    
+        # baseも狭める（共通部分）
+        common_time = np.intersect1d(base_ds.time.values, ds_list[i].time.values)
+        common_lat = np.intersect1d(base_ds.latitude.values, ds_list[i].latitude.values)
+        common_lon = np.intersect1d(base_ds.longitude.values, ds_list[i].longitude.values)
+        base_ds = base_ds.sel(time=common_time, latitude=common_lat, longitude=common_lon)
+    
+    ds_list[0] = base_ds  # 更新
+    # マージではなく時系列で連結
     ds = xr.concat(ds_list, dim="time")
+    print("xr.concat OK")
+    # ▲ 修正ここまで
 
 
     # 3. 天気図パネル画像生成
