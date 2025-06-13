@@ -1,6 +1,7 @@
 # gpv_panel_daily_msm_akita.py
 # ========================================================
 # MSM秋田局地天気図パネル（6段×12列）自動生成スクリプト
+# 必須: gpv_downloader.py, panel_utils.py
 # ========================================================
 
 import sys
@@ -8,8 +9,15 @@ import traceback
 import pandas as pd
 import xarray as xr
 
-from gpv_downloader import find_existing_init_dt, download_gpv_panel, grib2_to_nc, MSM_PATTERNS, GPV_MIRROR_URLS
-from module.panel_utils import make_nodata_weather_panel, make_local_weather_panel, align_datasets_common
+from gpv_downloader import (
+    find_existing_init_dt, download_gpv_panel, grib2_to_nc,
+    MSM_PATTERNS, GPV_MIRROR_URLS
+)
+from module.panel_utils import (
+    make_nodata_weather_panel,
+    make_local_weather_panel,
+    align_datasets_common,
+)
 
 BASE_DIR = "./data"
 NCOLS = 12
@@ -18,15 +26,18 @@ if __name__ == "__main__":
     try:
         print("=== 秋田局地MSMパネル処理開始 ===")
         # MSMの「利用可能な最新イニシャル時刻」を取得（00UTC/12UTC限定）
-        init_dt = find_existing_init_dt(MSM_PATTERNS, "./data", GPV_MIRROR_URLS, hours=[0, 12])
-        print("MSM最新イニシャル時刻:", init_dt)
+        init_dt = find_existing_init_dt(MSM_PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12])
         if init_dt is None:
             print("NO DATA: MSMファイルがサーバに見つかりません")
-            # NO DATAパネル生成など
-        else:
-            panel_files = download_gpv_panel(MSM_PATTERNS, "./data", init_dt, GPV_MIRROR_URLS, ncols=12)
-            # panel_filesを使ってNetCDF変換・パネル生成
+            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+            times = [base_time + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
+            make_nodata_weather_panel(times, save_path="akita_panel_nodata.jpg")
+            print("【ERROR】秋田局地 MSM GPVデータ未取得。NO DATAパネル生成")
+            sys.exit(0)
 
+        print(f"init_dt: {init_dt}")
+
+        panel_files = download_gpv_panel(MSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
         pattern_files = [f for f in panel_files if len(f) == len(MSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
@@ -34,7 +45,7 @@ if __name__ == "__main__":
             times = [base_time + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
             make_nodata_weather_panel(times, save_path="akita_panel_nodata.jpg")
             print("【ERROR】秋田局地 MSM GPVデータ未取得。NO DATAパネル生成")
-            sys.exit(0)  # ← ここを0に
+            sys.exit(0)
 
         print("2. NetCDF変換開始")
         file_list = [item for sublist in pattern_files[:3] for item in sublist]
@@ -55,7 +66,8 @@ if __name__ == "__main__":
             times = [base_time + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
             make_nodata_weather_panel(times, save_path="akita_panel_nodata.jpg")
             print("【ERROR】秋田局地 MSM GPVに有効データ無し。NO DATAパネル生成")
-            sys.exit(0)  # ← ここも0に
+            sys.exit(0)
+
         times = ds.time.values[:NCOLS]
         print("times:", times)
 
