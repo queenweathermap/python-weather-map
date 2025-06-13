@@ -8,13 +8,30 @@ import xarray as xr
 
 def get_var(ds, var):
     """
-    dsから指定変数をNumPy配列で安全に取得（xarrayバグ対応）
+    xarray DataSet/DataArrayから変数を安全にNumPy配列で取得
     """
-    x = ds.get(var, None) if isinstance(ds, dict) else (ds[var] if var in ds else None)
-    if x is None:
+    # 1. 存在確認
+    if isinstance(ds, dict):
+        x = ds.get(var, None)
+    elif var in ds:
+        x = ds[var]
+    else:
         return None
-    if hasattr(x, "load"):
-        x = x.load()
-    if hasattr(x, "values"):
-        return np.array(x.values)
-    return np.array(x)
+
+    # 2. xarray.DataArrayなら、データを一度list経由で明示展開→np.array化（バグ潰し！）
+    try:
+        return np.array(list(x.values.ravel())).reshape(x.shape)
+    except Exception:
+        pass
+
+    # 3. だめなら list→np.array
+    try:
+        return np.array(list(x.ravel())).reshape(x.shape)
+    except Exception:
+        pass
+
+    # 4. 最後は生配列
+    try:
+        return np.array(x)
+    except Exception:
+        return None
