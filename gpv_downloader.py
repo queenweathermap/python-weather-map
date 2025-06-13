@@ -161,8 +161,12 @@ if __name__ == "__main__":
     base_dir = "./data"
     # GSMは[0,12,18,6]、MSMは[0,3,6,9,12,15,18,21]
     # 例: MSMで運用する場合はこちら
-    init_dt = find_existing_init_dt(MSM_PATTERNS, base_dir, GPV_MIRROR_URLS, hours=[0,3,6,9,12,15,18,21])
-    print("[INFO] サーバ存在確認済みイニシャル時刻:", init_dt)
+    init_dt = find_existing_init_dt(
+        MSM_PATTERNS,
+        base_dir="./data",
+        mirrors=GPV_MIRROR_URLS,
+        hours=[0, 3, 6, 9, 12, 15, 18, 21]  # ← ここ重要！
+    )    print("[INFO] サーバ存在確認済みイニシャル時刻:", init_dt)
     if init_dt is None:
         print("【ERROR】サーバ上に利用可能なイニシャル時刻がありません")
     else:
