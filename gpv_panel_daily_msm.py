@@ -33,9 +33,10 @@ def add_gridlines(ax):
     return gl
 
 def make_nodata_weather_panel(times, save_path):
-    nrows, ncols = 6, len(times)
+    nrows, ncols = 6, max(1, len(times))
     figsize = (4 * ncols, 21)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
+    axes = np.atleast_2d(axes)  # 1次元のときも2次元に
     for col in range(ncols):
         for row in range(nrows):
             ax = axes[row, col]
@@ -49,6 +50,7 @@ def make_nodata_weather_panel(times, save_path):
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"[NO DATAパネル生成] {save_path}")
+
 
 def make_daily_weather_panel_multi_time(ds, times, save_path):
     if times is None or len(times) == 0:
