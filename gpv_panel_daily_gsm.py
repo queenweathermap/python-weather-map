@@ -1,7 +1,6 @@
 # gpv_panel_daily_gsm.py
 # ===============================================
 # GSMパネル自動生成スクリプト（12時刻×2パターン/日パネル）
-# 必須: gpv_downloader.py, panel_utils.py
 # ===============================================
 
 import sys
@@ -36,6 +35,7 @@ if __name__ == "__main__":
             sys.exit(0)  # ← ここを0に
 
         print(f"init_dt: {init_dt}")
+        # 以降、正常パスが続く…
 
         panel_files = download_gpv_panel(GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
