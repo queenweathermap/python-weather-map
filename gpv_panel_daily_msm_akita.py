@@ -138,9 +138,14 @@ if __name__ == "__main__":
     try:
         print("=== 秋田局地MSMパネル処理開始 ===")
         # もっとも近いイニシャル時刻・ファイル群を取得
-        init_dt, pattern_files = find_nearest_init(MSM_PATTERNS, mirrors=GPV_MIRROR_URLS, base_dir=BASE_DIR)
+        init_dt, pattern_files = find_nearest_init(MSM_PATTERNS, base_dir=BASE_DIR)
         print(f"init_dt: {init_dt}")
         print("pattern_files:", pattern_files)
+        if not pattern_files or len(pattern_files) < 3:
+            # NO DATAパネル
+            sys.exit(1)
+        nc_paths = [grib2_to_nc(path) for path, _ in pattern_files]
+
 
         # 必要数そろわなければNO DATAパネル
         if not pattern_files or len(pattern_files) < 3:
