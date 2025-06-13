@@ -74,13 +74,15 @@ def main():
     try:
         print(f"=== MSMローカルパネル生成開始：{args.city} ===")
         print(f"ピンポイント: ({args.pin_lat}, {args.pin_lon})  範囲: lat{args.lat_range}, lon{args.lon_range}")
-        # 直近のイニシャル時刻取得（JSTで最も近い00/06/12/18UTC）
-        init_dt = find_nearest_init()
-        print(f"init_dt: {init_dt}")
-
-        # MSM GPVデータ一括DL（ncols本分）
-        panel_files = download_gpv_panel(
-            MSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS
+    # MSMの「利用可能な最新イニシャル時刻」を取得（00UTC/12UTC限定）
+    init_dt = find_existing_init_dt(MSM_PATTERNS, "./data", GPV_MIRROR_URLS, hours=[0, 12])
+    print("MSM最新イニシャル時刻:", init_dt)
+    if init_dt is None:
+        print("NO DATA: MSMファイルがサーバに見つかりません")
+        # NO DATAパネル生成など
+    else:
+        panel_files = download_gpv_panel(MSM_PATTERNS, "./data", init_dt, GPV_MIRROR_URLS, ncols=12)
+        # panel_filesを使ってNetCDF変換・パネル生成
         )
         print("panel_files:", panel_files)
 
