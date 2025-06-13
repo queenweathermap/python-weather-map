@@ -15,25 +15,34 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib.colors import LinearSegmentedColormap
+from module.utils.var_utils import get_var
 
 def get_lon_lat(ds):
-    lon2d = ds["longitude"].values
-    lat2d = ds["latitude"].values
+    lon2d = np.asarray(ds["longitude"])
+    lat2d = np.asarray(ds["latitude"])
     if lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
 def plot_700hpa_dindex_500hpa_temp(ax, ds, model="GSM"):
+    """
+    700hPa湿数＋500hPa等温線描画（GSM/MSM両対応）
+    """
     lon2d, lat2d = get_lon_lat(ds)
-    # --- モデル分岐 ---
-    temp_500 = ds["TMP_500mb"].values - 273.15
-    temp_700 = ds["TMP_700mb"].values - 273.15
-    rh_700   = ds["RH_700mb"].values
-    # 湿数計算
-    dewpoint_700 = temp_700 - (100 - rh_700) / 5
-    dindex_700 = temp_700 - dewpoint_700
+    # 各変数取得
+    temp_500 = get_var(ds, "TMP_500mb")
+    temp_700 = get_var(ds, "TMP_700mb")
+    rh_700   = get_var(ds, "RH_700mb")
+    if temp_500 is None or temp_700 is None or rh_700 is None:
+        raise ValueError("必要な700/500hPa変数が含まれていません")
+    temp_500_c = temp_500 - 273.15
+    temp_700_c = temp_700 - 273.15
 
-    # カラーマップ
+    # 湿数計算
+    dewpoint_700 = temp_700_c - (100 - rh_700) / 5
+    dindex_700 = temp_700_c - dewpoint_700
+
+    # カラーマップ（黄緑系）
     colors = [
         (0.0, "#006400"),
         (0.25, "#32cd32"),
@@ -60,7 +69,7 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds, model="GSM"):
 
     # 500hPa等温線
     cs = ax.contour(
-        lon2d, lat2d, temp_500,
+        lon2d, lat2d, temp_500_c,
         levels=np.arange(-60, 0, 2),
         colors='navy', linewidths=0.7,
         linestyles='solid', transform=ccrs.PlateCarree(),
@@ -75,6 +84,7 @@ def plot_700hpa_dindex_500hpa_temp_gsm(ax, ds):
 
 def plot_700hpa_dindex_500hpa_temp_msm(ax, ds):
     return plot_700hpa_dindex_500hpa_temp(ax, ds, model="MSM")
+
 # ===============================================
 # END OF FILE
 # ===============================================
