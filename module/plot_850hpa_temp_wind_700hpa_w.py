@@ -14,10 +14,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+from module.utils.var_utils import get_var
 
 def get_lon_lat(ds):
-    lon2d = ds["longitude"].values
-    lat2d = ds["latitude"].values
+    lon2d = np.asarray(ds["longitude"])
+    lat2d = np.asarray(ds["latitude"])
     if lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
@@ -27,10 +28,14 @@ def plot_850hpa_temp_wind_700hpa_w(ax, ds, model="GSM", prop=None, skip=5):
     850hPa温度・風＋700hPa鉛直流（GSM/MSM両対応）
     """
     lon2d, lat2d = get_lon_lat(ds)
-    temp = ds["TMP_850mb"].values - 273.15  # 850hPa温度 [℃]
-    u = ds["UGRD_850mb"].values
-    v = ds["VGRD_850mb"].values
-    w700 = ds["VVEL_700mb"].values * 3600  # 700hPa鉛直流 [hPa/h]
+    temp_850 = get_var(ds, "TMP_850mb")
+    u_850    = get_var(ds, "UGRD_850mb")
+    v_850    = get_var(ds, "VGRD_850mb")
+    w_700    = get_var(ds, "VVEL_700mb")
+    if temp_850 is None or u_850 is None or v_850 is None or w_700 is None:
+        raise ValueError("必要な850/700hPa変数が含まれていません")
+    temp = temp_850 - 273.15  # 850hPa温度 [℃]
+    w700 = w_700 * 3600       # 700hPa鉛直流 [hPa/h]
 
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
@@ -58,12 +63,13 @@ def plot_850hpa_temp_wind_700hpa_w(ax, ds, model="GSM", prop=None, skip=5):
     # 850hPa風ベクトル
     ax.quiver(
         lon2d[::skip, ::skip], lat2d[::skip, ::skip],
-        u[::skip, ::skip], v[::skip, ::skip],
+        u_850[::skip, ::skip], v_850[::skip, ::skip],
         transform=ccrs.PlateCarree(), scale=250, width=0.002, alpha=0.8
     )
 
     ax.set_title("850hPa温度・風＋700hPa鉛直流", fontsize=10, pad=10, fontproperties=prop)
 
+# ======= ラッパー関数 =======
 def plot_850hpa_temp_wind_700hpa_w_gsm(ax, ds, prop=None, skip=5):
     return plot_850hpa_temp_wind_700hpa_w(ax, ds, model="GSM", prop=prop, skip=skip)
 
