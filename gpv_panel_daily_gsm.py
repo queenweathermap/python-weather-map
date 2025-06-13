@@ -1,6 +1,6 @@
 # gpv_panel_daily_gsm.py
 # ===============================================
-# GSM天気図 6行×n列パネル生成スクリプト
+# GSM天気図 6行×12列パネル生成スクリプト
 #  - GPVデータの自動ダウンロード＆grib2→NetCDF変換
 #  - 天気図画像の自動生成（複数時刻・パネル形式）
 #  - GitHub Actions／ローカル双方で動作
@@ -20,7 +20,7 @@ import pandas as pd
 import xarray as xr
 
 # --- サブモジュール読み込み ---
-from gpv_downloader import download_gpv_panel, grib2_to_nc, find_nearest_init, GPV_MIRROR_URLS, GSM_PATTERNS, MSM_PATTERNS
+from gpv_downloader import download_gpv_panel, grib2_to_nc, find_nearest_init, GPV_MIRROR_URLS, GSM_PATTERNS
 from module.utils.xr_utils import align_datasets_common
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind_gsm,
@@ -28,13 +28,10 @@ from module.gpv_plotter_gsm import (
     plot_700hpa_dindex_500hpa_temp_gsm,
     plot_850hpa_temp_wind_700hpa_w_gsm,
     plot_850hpa_thetae_stream_gsm,
-    plot_925hpa_temp_wind_dindex_gsm,
     plot_surface_pressure_and_wind_gsm,
-    plot_emagram_gsm_panel,
 )
 
 print("==== GSMパネル処理開始 ====")
-
 
 
 def add_gridlines(ax):
@@ -47,12 +44,11 @@ def make_nodata_weather_panel(times, save_path):
     nrows, ncols = 6, max(1, len(times))
     figsize = (4 * ncols, 21)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-    # axesを強制的に2次元配列化
     if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
     elif nrows == 1 or ncols == 1:
         axes = np.atleast_2d(axes)
-        if axes.shape[0] != nrows:  # (ncols, )の場合
+        if axes.shape[0] != nrows:
             axes = axes.T
     for col in range(ncols):
         for row in range(nrows):
@@ -63,11 +59,10 @@ def make_nodata_weather_panel(times, save_path):
                 spine.set_linewidth(1)
             ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
             ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
-    fig.suptitle("MSM GPVデータ未取得（NO DATAパネル）", fontsize=16)
+    fig.suptitle("GSM GPVデータ未取得（NO DATAパネル）", fontsize=16)
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"[NO DATAパネル生成] {save_path}")
-
 
 def make_daily_weather_panel_multi_time(ds, times, save_path):
     if times is None or len(times) == 0:
@@ -130,16 +125,17 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     plt.close(fig)
     print("画像ファイルの存在:", os.path.exists(save_path))
 
-GSM_PATTERNS = [
-    "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",
-    "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",
-]
+
 BASE_DIR = "./data"
+ncols = 12
 
 if __name__ == "__main__":
     try:
         print("1. データダウンロード開始")
-        downloaded = download_gpv_all(GSM_PATTERNS, base_dir=BASE_DIR)
+        # 直近のイニシャル時刻を探して指定（12, 0, 18, 6UTC優先）
+        init_dt = find_nearest_init([12, 0, 18, 6])
+        print("init_dt:", init_dt)
+        downloaded = download_gpv_panel(GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=ncols)
         print("downloaded:", downloaded)
         if not downloaded or len(downloaded) < 2:
             print("NO DATA: downloaded is None or <2")
@@ -178,15 +174,7 @@ if __name__ == "__main__":
                 ds_list[i] = ds
                 print(f"[修正] ds_list[{i}]のtimeをdatetime64[ns]に揃えました")
 
-        # --- 一旦素のmergeで失敗チェック
-        try:
-            ds_raw = xr.merge(ds_list)
-            print("xr.merge(ds_list) 1st try: OK")
-            print(ds_raw)
-        except Exception as e:
-            print("[WARNING] xr.merge(ds_list)で失敗:", e)
-
-        # ★ 座標軸揃え（共通化）
+        # --- merge (join="outer"を明示)
         ds_list_aligned = align_datasets_common(ds_list)
         for i, ds in enumerate(ds_list_aligned):
             print(f"--- ds_list_aligned[{i}] ---")
@@ -204,7 +192,6 @@ if __name__ == "__main__":
 
         print("== align_datasets_common OK ==")
 
-        # --- merge (join="outer"を明示)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         print("xr.merge OK")
         print(ds)
