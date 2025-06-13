@@ -34,6 +34,11 @@ from module.gpv_plotter_gsm import (
 )
 
 print("==== GSMパネル処理開始 ====")
+print(ds)
+print(ds.data_vars)
+print(list(ds.variables))
+
+
 
 def add_gridlines(ax):
     gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
