@@ -17,8 +17,15 @@ NCOLS = 12
 if __name__ == "__main__":
     try:
         print("=== 秋田局地MSMパネル処理開始 ===")
-        init_dt = find_nearest_init()
-        print(f"init_dt: {init_dt}")
+        # MSMの「利用可能な最新イニシャル時刻」を取得（00UTC/12UTC限定）
+        init_dt = find_existing_init_dt(MSM_PATTERNS, "./data", GPV_MIRROR_URLS, hours=[0, 12])
+        print("MSM最新イニシャル時刻:", init_dt)
+        if init_dt is None:
+            print("NO DATA: MSMファイルがサーバに見つかりません")
+            # NO DATAパネル生成など
+        else:
+            panel_files = download_gpv_panel(MSM_PATTERNS, "./data", init_dt, GPV_MIRROR_URLS, ncols=12)
+            # panel_filesを使ってNetCDF変換・パネル生成
 
         panel_files = download_gpv_panel(MSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
