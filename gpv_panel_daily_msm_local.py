@@ -65,6 +65,12 @@ def main():
     parser.add_argument("--nrows", type=int, default=6, help="パネルの縦行数（固定6）")
     args = parser.parse_args()
 
+    # 主要な入力値に空欄やNone/0/""があれば何もせず正常終了
+    skip = False
+    if not args.city or not args.pin_lat or not args.pin_lon or not args.lat_range or not args.lon_range:
+        print("[INFO] 必須パラメータが空欄。ローカルパネル生成はスキップします。")
+        sys.exit(0)
+
     BASE_DIR = "./data"
     NCOLS = args.ncols
     NROWS = args.nrows
