@@ -1,20 +1,23 @@
 # gpv_panel_daily_msm_akita.py
 # ========================================================
 # MSM秋田局地天気図パネル（6段×12列）自動生成スクリプト
+# 必須: gpv_downloader.py, panel_utils.py, gpv_plotter_msm.py など
 # ========================================================
 
-import os
 import sys
 import traceback
-import numpy as np
-import matplotlib.pyplot as plt
-plt.rcParams['font.family'] = 'IPAGothic'
-import cartopy.crs as ccrs
+import os
 import pandas as pd
 import xarray as xr
 
-from gpv_downloader import download_gpv_panel, grib2_to_nc, find_nearest_init, GPV_MIRROR_URLS, MSM_PATTERNS
-from module.utils.xr_utils import align_datasets_common
+from gpv_downloader import (
+    download_gpv_panel, grib2_to_nc, find_nearest_init,
+    GPV_MIRROR_URLS, MSM_PATTERNS
+)
+from module.panel_utils import (
+    make_nodata_weather_panel,
+    align_datasets_common
+)
 from module.gpv_plotter_msm import (
     plot_emagram_msm_panel,
     plot_700hpa_dindex_500hpa_temp_msm,
@@ -28,48 +31,27 @@ AKITA_LAT_RANGE = (38.8, 40.8)
 AKITA_LON_RANGE = (139.2, 141.0)
 AKITA_PIN_LAT = 39.72
 AKITA_PIN_LON = 140.10
-
-def add_gridlines(ax):
-    gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-    gl.top_labels = False
-    gl.right_labels = False
-    return gl
-
-def make_nodata_weather_panel(times, save_path):
-    nrows, ncols = 6, max(1, len(times))
-    figsize = (4 * ncols, 21)
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-    if nrows == 1 and ncols == 1:
-        axes = np.array([[axes]])
-    elif nrows == 1 or ncols == 1:
-        axes = np.atleast_2d(axes)
-        if axes.shape[0] != nrows:
-            axes = axes.T
-    for col in range(ncols):
-        for row in range(nrows):
-            ax = axes[row, col]
-            ax.set_facecolor("white")
-            for spine in ax.spines.values():
-                spine.set_edgecolor("gray")
-                spine.set_linewidth(1)
-            ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-            ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
-    fig.suptitle("MSM GPVデータ未取得（NO DATAパネル）", fontsize=16)
-    plt.savefig(save_path, dpi=200, bbox_inches='tight')
-    plt.close(fig)
-    print(f"[NO DATAパネル生成] {save_path}")
+BASE_DIR = "./data"
+NCOLS = 12
+NROWS = 6
 
 def make_local_weather_panel(ds, times, save_path):
+    """
+    秋田局地用：エマグラム＋天気図の複合パネル
+    """
     if times is None or len(times) == 0:
         print("timesが空です。NO DATAパネルを作成します")
         make_nodata_weather_panel([pd.Timestamp.now()], save_path)
         return
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+
     ncols = len(times)
-    nrows = 6
+    nrows = NROWS
     figsize = (4 * ncols, 21)
     fig = plt.figure(figsize=figsize)
     axes = np.empty((nrows, ncols), dtype=object)
-    # 地図系はrow=1〜5、col=0〜ncols-1
     for row in range(1, nrows):
         for col in range(ncols):
             axes[row, col] = fig.add_subplot(nrows, ncols, row * ncols + col + 1, projection=ccrs.PlateCarree())
@@ -84,7 +66,7 @@ def make_local_weather_panel(ds, times, save_path):
         hh_labels.append(f"+{hour_diff:02d}")
 
     for col, time in enumerate(times):
-        if np.datetime64(time) not in ds.time.values:
+        if pd.to_datetime(time) not in pd.to_datetime(ds.time.values):
             for row in range(nrows):
                 ax = axes[row, col] if row > 0 else None
                 if ax is not None:
@@ -122,7 +104,10 @@ def make_local_weather_panel(ds, times, save_path):
 
     for row in range(1, nrows):
         for col in range(ncols):
-            add_gridlines(axes[row, col])
+            ax = axes[row, col]
+            gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+            gl.top_labels = False
+            gl.right_labels = False
 
     fig.suptitle(
         f"【秋田局地版・MSM】天気図パネル（エマグラム含む）\nInit: {init_time.strftime('%Y%m%d %HUTC')} | Forecasts: {', '.join(hh_labels)}",
@@ -132,54 +117,50 @@ def make_local_weather_panel(ds, times, save_path):
     plt.close(fig)
     print("画像ファイルの存在:", os.path.exists(save_path))
 
-BASE_DIR = "./data"
-
 if __name__ == "__main__":
     try:
         print("=== 秋田局地MSMパネル処理開始 ===")
-        # もっとも近いイニシャル時刻・ファイル群を取得
-        init_dt, pattern_files = find_nearest_init(MSM_PATTERNS, BASE_DIR)
+        init_dt = find_nearest_init()
         print(f"init_dt: {init_dt}")
-        print("pattern_files:", pattern_files)
+
+        panel_files = download_gpv_panel(MSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
+        print("panel_files:", panel_files)
+
+        pattern_files = [f for f in panel_files if len(f) == len(MSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
+            times = [base_time + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
             make_nodata_weather_panel(times, save_path="akita_panel_nodata.jpg")
             print("【ERROR】秋田局地 MSM GPVデータ未取得。NO DATAパネル生成")
             sys.exit(1)
 
-        # grib2→NetCDF変換
         print("2. NetCDF変換開始")
-        nc_paths = [grib2_to_nc(path) for path, _ in pattern_files]
+        file_list = [item for sublist in pattern_files[:3] for item in sublist]
+        nc_paths = [grib2_to_nc(path) for path, _ in file_list]
         print("nc_paths:", nc_paths)
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
 
-        # time dtype 統一
         for i, ds in enumerate(ds_list):
             if ds["time"].dtype != "datetime64[ns]":
                 ds = ds.assign_coords(time=ds["time"].astype("datetime64[ns]"))
                 ds_list[i] = ds
                 print(f"[修正] ds_list[{i}]のtimeをdatetime64[ns]に揃えました")
 
-        # align + merge
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         print("xr.merge OK")
-        print(ds)
         print("ds.time.values:", ds.time.values)
         print("len(ds.time):", len(ds.time.values))
 
-        # 上位12時刻
         if len(ds.time) == 0:
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
+            times = [base_time + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
             make_nodata_weather_panel(times, save_path="akita_panel_nodata.jpg")
             print("【ERROR】秋田局地 MSM GPVに有効データ無し。NO DATAパネル生成")
             sys.exit(1)
-        times = ds.time.values[:12]
+        times = ds.time.values[:NCOLS]
         print("times:", times)
 
-        # パネル作成
         make_local_weather_panel(ds, times, "akita_local_msm_map.jpg")
         print("画像生成完了")
         print("=== 完了 ===")
