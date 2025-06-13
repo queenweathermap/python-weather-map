@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
+from module.utils.var_utils import get_var
 
 def get_lon_lat(ds):
     lon2d = np.asarray(ds["longitude"])
@@ -23,19 +24,17 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def _get_var(ds, var):
-    """xarray Datasetから変数をnp配列で安全取得"""
-    return np.asarray(ds[var]) if var in ds else None
 
 def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
     """
     300hPa等高度線＋等風速線＋風ベクトル描画（GSM/MSM両対応）
     """
     lon2d, lat2d = get_lon_lat(ds)
-    hgt  = _get_var(ds, "HGT_300mb")
-    u    = _get_var(ds, "UGRD_300mb")
-    v    = _get_var(ds, "VGRD_300mb")
-    temp = _get_var(ds, "TMP_300mb")
+    hgt  = get_var(ds, "HGT_300mb")
+    u    = get_var(ds, "UGRD_300mb")
+    v    = get_var(ds, "VGRD_300mb")
+    temp = get_var(ds, "TMP_300mb")
+
     if hgt is None or u is None or v is None:
         raise ValueError("必要な300hPa変数が含まれていません")
     wspd = np.sqrt(u**2 + v**2) * 1.94384  # m/s→kt
