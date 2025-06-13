@@ -35,16 +35,13 @@ MSM_PATTERNS = [
 ]
 
 
-def find_nearest_init(hours=[12, 0, 18, 6], now=None):
+def find_nearest_init(hours, now=None):
     """
-    現在時刻に一番近いイニシャル時刻（00/06/12/18 UTC）を返す（JST基準）
-    どんな型が来てもdatetime型に変換
+    現在時刻に一番近いイニシャル時刻（例: [0,3,6,9,12,15,18,21]）を返す（JST基準）
     """
     if now is None:
         now = datetime.utcnow() + timedelta(hours=9)  # JST
-    # --- 型を必ずdatetimeに ---
     if isinstance(now, str):
-        # 文字列→datetime
         try:
             now = datetime.fromisoformat(now)
         except Exception:
@@ -54,7 +51,6 @@ def find_nearest_init(hours=[12, 0, 18, 6], now=None):
                 raise ValueError(f"now='{now}' はサポートされていない形式です")
     elif hasattr(now, "to_pydatetime"):
         now = now.to_pydatetime()
-    # それ以外（datetime型）はそのまま
     today = now.replace(minute=0, second=0, microsecond=0)
     base = today.replace(hour=0)
     diff = [(abs((today - base.replace(hour=h)).total_seconds()), h) for h in hours]
@@ -65,21 +61,17 @@ def find_nearest_init(hours=[12, 0, 18, 6], now=None):
     return nearest_dt
 
 
-def find_existing_init_dt(patterns, base_dir, mirrors, hours=[0, 12]):
+def find_existing_init_dt(patterns, base_dir, mirrors, hours):
     """
     サーバ上に実際に全パターンファイルが存在する最新イニシャル時刻を返す
-    - patterns: GSM/MSM用ファイルパターンリスト
-    - base_dir: 保存先ディレクトリ
-    - mirrors: サーバURLリスト
-    - hours: 検索優先時刻（例 [0,12] なら00,12UTC）
-    戻り値: 見つかったdatetime or None
+    - hours例: GSM=[0,12,18,6], MSM=[0,3,6,9,12,15,18,21]
     """
     now = datetime.utcnow() + timedelta(hours=9)  # JST
     for day_offset in range(0, 2):  # 今日→昨日
         dt = now - timedelta(days=day_offset)
         ymd = dt.strftime("%Y%m%d")
         y, m, d = dt.strftime("%Y"), dt.strftime("%m"), dt.strftime("%d")
-        for h in hours:
+        for h in sorted(hours, reverse=True):  # 新しい時刻から順に
             all_exists = True
             for pattern in patterns:
                 fname = f"Z__C_RJTD_{ymd}{h:02d}0000_{pattern}"
@@ -92,16 +84,13 @@ def find_existing_init_dt(patterns, base_dir, mirrors, hours=[0, 12]):
                                 exists_this = True
                                 break
                     except Exception:
-                        continue  # 他のmirrorに回す
+                        continue
                 if not exists_this:
                     all_exists = False
                     break
             if all_exists:
-                # JSTをUTCに（GPVファイル名はUTC表記のため）
                 return dt.replace(hour=h, minute=0, second=0, microsecond=0)
     return None
-
-
 
 
 def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
@@ -114,7 +103,7 @@ def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
     os.makedirs(base_dir, exist_ok=True)
     ret = []
     for icol in range(ncols):
-        target_time = init_dt + timedelta(hours=3*icol)
+        target_time = init_dt + timedelta(hours=3 * icol)
         ymd = target_time.strftime("%Y%m%d")
         y, m, d = target_time.strftime("%Y"), target_time.strftime("%m"), target_time.strftime("%d")
         h = target_time.hour
@@ -166,16 +155,18 @@ def grib2_to_nc(grib2_path):
         raise RuntimeError("grib2→nc変換に失敗しました（上記参照）") from e
     return str(nc_path)
 
+
 # --- 使用例（GSM/MSMどちらも運用可） ---
 if __name__ == "__main__":
     base_dir = "./data"
-    # ここを find_existing_init_dt に
-    init_dt = find_existing_init_dt(GSM_PATTERNS, base_dir, GPV_MIRROR_URLS, hours=[0,12])
+    # GSMは[0,12,18,6]、MSMは[0,3,6,9,12,15,18,21]
+    # 例: MSMで運用する場合はこちら
+    init_dt = find_existing_init_dt(MSM_PATTERNS, base_dir, GPV_MIRROR_URLS, hours=[0,3,6,9,12,15,18,21])
     print("[INFO] サーバ存在確認済みイニシャル時刻:", init_dt)
     if init_dt is None:
         print("【ERROR】サーバ上に利用可能なイニシャル時刻がありません")
     else:
-        panel_files = download_gpv_panel(GSM_PATTERNS, base_dir, init_dt, GPV_MIRROR_URLS, ncols=12)
+        panel_files = download_gpv_panel(MSM_PATTERNS, base_dir, init_dt, GPV_MIRROR_URLS, ncols=12)
         for icol, files in enumerate(panel_files):
             t = init_dt + timedelta(hours=3*icol)
             if files:
