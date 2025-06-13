@@ -30,7 +30,7 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
     300hPa等高度線＋等風速線＋風ベクトル描画（GSM/MSM両対応）
     """
     lon2d, lat2d = get_lon_lat(ds)
-    hgt  = get_var(ds, "HGT_300mb")
+    hgt = get_var(ds, "HGT_300mb")
     u    = get_var(ds, "UGRD_300mb")
     v    = get_var(ds, "VGRD_300mb")
     temp = get_var(ds, "TMP_300mb")
