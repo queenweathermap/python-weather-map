@@ -34,9 +34,6 @@ from module.gpv_plotter_gsm import (
 )
 
 print("==== GSMパネル処理開始 ====")
-print(ds)
-print(ds.data_vars)
-print(list(ds.variables))
 
 
 
@@ -156,6 +153,9 @@ if __name__ == "__main__":
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
         print("nc_paths:", nc_paths)
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
+        print(ds)
+        print(ds.data_vars)
+        print(list(ds.variables))
 
         # ★ 共通部分に揃えてから merge
         ds_list_aligned = align_datasets_common(ds_list)
