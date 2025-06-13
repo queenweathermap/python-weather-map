@@ -14,10 +14,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from metpy.plots import SkewT
 from metpy.units import units
+from module.utils.var_utils import get_var
 
 def extract_profile_gpv(ds, lat, lon, time_idx=0):
-    lat_arr = ds["latitude"].values
-    lon_arr = ds["longitude"].values
+    lat_arr = get_var(ds, "latitude")
+    lon_arr = get_var(ds, "longitude")
     ilat = np.abs(lat_arr - lat).argmin()
     ilon = np.abs(lon_arr - lon).argmin()
     levels = []
@@ -30,15 +31,19 @@ def extract_profile_gpv(ds, lat, lon, time_idx=0):
         key_rh = f"RH_{level}mb"
         key_u = f"UGRD_{level}mb"
         key_v = f"VGRD_{level}mb"
-        if key_tmp in ds.variables and key_rh in ds.variables:
-            t = ds[key_tmp][time_idx, ilat, ilon] - 273.15
-            rh = ds[key_rh][time_idx, ilat, ilon]
+        t_arr = get_var(ds, key_tmp)
+        rh_arr = get_var(ds, key_rh)
+        u_arr = get_var(ds, key_u)
+        v_arr = get_var(ds, key_v)
+        if t_arr is not None and rh_arr is not None:
+            t = t_arr[time_idx, ilat, ilon] - 273.15
+            rh = rh_arr[time_idx, ilat, ilon]
             td = t - (100 - rh) / 5
             temp.append(t)
             dew.append(td)
             levels.append(level)
-            u.append(ds[key_u][time_idx, ilat, ilon] if key_u in ds.variables else np.nan)
-            v.append(ds[key_v][time_idx, ilat, ilon] if key_v in ds.variables else np.nan)
+            u.append(u_arr[time_idx, ilat, ilon] if u_arr is not None else np.nan)
+            v.append(v_arr[time_idx, ilat, ilon] if v_arr is not None else np.nan)
     idx = np.argsort(levels)[::-1]
     return (np.array(levels)[idx], np.array(temp)[idx], np.array(dew)[idx], np.array(u)[idx], np.array(v)[idx])
 
