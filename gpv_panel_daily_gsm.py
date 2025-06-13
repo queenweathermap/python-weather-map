@@ -20,7 +20,7 @@ import pandas as pd
 import xarray as xr
 
 # --- サブモジュール読み込み ---
-from gpv_downloader import download_gpv_all, grib2_to_nc
+from gpv_downloader import download_gpv_panel, grib2_to_nc
 from module.utils.xr_utils import align_datasets_common
 from module.gpv_plotter_gsm import (
     plot_300hpa_height_wind_gsm,
