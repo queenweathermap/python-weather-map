@@ -133,17 +133,13 @@ if __name__ == "__main__":
     try:
         print("1. データダウンロード開始")
         # 直近のイニシャル時刻を探して指定（12, 0, 18, 6UTC優先）
-        init_dt = find_nearest_init([12, 0, 18, 6])
-        print("init_dt:", init_dt)
-        downloaded = download_gpv_panel(GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=ncols)
-        print("downloaded:", downloaded)
-        if not downloaded or len(downloaded) < 2:
-            print("NO DATA: downloaded is None or <2")
-            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
-            make_nodata_weather_panel(times, "gsm_panel_nodata.jpg")
-            print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
+        init_dt, pattern_files = find_nearest_init(GSM_PATTERNS, base_dir=BASE_DIR)
+        print(f"init_dt: {init_dt}")
+        print("pattern_files:", pattern_files)
+        if not pattern_files or len(pattern_files) < 2:
+            # NO DATAパネル
             sys.exit(1)
+        nc_paths = [grib2_to_nc(path) for path, _ in pattern_files]
 
         print("2. NetCDF変換開始")
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
