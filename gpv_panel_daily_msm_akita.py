@@ -12,7 +12,7 @@ import cartopy.crs as ccrs
 import pandas as pd
 import xarray as xr
 
-from gpv_downloader import download_gpv_all, grib2_to_nc
+from gpv_downloader import download_gpv_panel, grib2_to_nc
 from module.utils.xr_utils import align_datasets_common
 from module.gpv_plotter_msm import (
     plot_emagram_msm_panel,
