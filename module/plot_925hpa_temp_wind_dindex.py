@@ -13,20 +13,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+from module.utils.var_utils import get_var
 
 def get_lon_lat(ds):
-    lon2d = ds["longitude"].values
-    lat2d = ds["latitude"].values
-    if lon2d.ndim == 1 and lat2d.ndim == 1:
+    lon2d = get_var(ds, "longitude")
+    lat2d = get_var(ds, "latitude")
+    if lon2d is not None and lat2d is not None and lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
 def plot_925hpa_temp_wind_dindex(ax, ds, model="GSM", prop=None, skip=5):
     lon2d, lat2d = get_lon_lat(ds)
-    temp = ds["TMP_925mb"].values - 273.15
-    u = ds["UGRD_925mb"].values
-    v = ds["VGRD_925mb"].values
-    rh = ds["RH_925mb"].values
+    temp = get_var(ds, "TMP_925mb")
+    u = get_var(ds, "UGRD_925mb")
+    v = get_var(ds, "VGRD_925mb")
+    rh = get_var(ds, "RH_925mb")
+    if temp is None or u is None or v is None or rh is None:
+        raise ValueError("必要な925hPa変数が含まれていません")
+    temp = temp - 273.15
     dewpoint = temp - (100 - rh) / 5
     dindex = temp - dewpoint
 
