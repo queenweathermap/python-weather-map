@@ -1,8 +1,12 @@
 # .github/workflows/daily_weather.yml
 # ===============================================
-# Daily Weather Map（LINE通知版：メール/Slackはコメントアウト保存）
+# Daily Weather Map（LINE通知版：Slack/メールはコメントアウト保存）
+# -----------------------------------------------
+# ・毎日JST 5時/17時に自動バッチ運用
+# ・任意地点のローカルパネルも「手動実行＋引数入力」で柔軟対応
+# ・Docker化運用想定（各種APIキーはGitHub Secrets管理）
+# 2025-06-13 by ChatGPT
 # ===============================================
-
 
 name: Daily Weather Map
 
@@ -11,6 +15,32 @@ on:
     - cron: '0 20 * * *'  # JST 5時
     - cron: '0 8 * * *'   # JST 17時
   workflow_dispatch:
+    # 手動実行時のみ使う追加パラメータ（任意地点パネル用）
+    inputs:
+      city:
+        description: 'City name (for local MSM panel)'
+        required: false
+        default: ''
+      pin_lat:
+        description: 'Pin latitude (for local MSM panel)'
+        required: false
+        default: ''
+      pin_lon:
+        description: 'Pin longitude (for local MSM panel)'
+        required: false
+        default: ''
+      lat_range:
+        description: 'Latitude range (min max, e.g. "37.3 37.6")'
+        required: false
+        default: ''
+      lon_range:
+        description: 'Longitude range (min max, e.g. "138.7 139.1")'
+        required: false
+        default: ''
+      output:
+        description: 'Output filename'
+        required: false
+        default: ''
 
 jobs:
   run-weather-batch:
@@ -27,15 +57,60 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}      # ← ここ追加！
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          # Slack/メール連携も再開時は以下コメント解除
+          # SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          # MAIL_HOST: ${{ secrets.MAIL_HOST }}
+          # MAIL_PORT: ${{ secrets.MAIL_PORT }}
+          # MAIL_USER: ${{ secrets.MAIL_USER }}
+          # MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
         run: |
+          # ==== 定時自動運用部分（GSM/MSM/秋田局地） ====
           docker run --rm \
             -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
             -e LINE_USER_ID="${LINE_USER_ID}" \
             -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
             -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \
-            weather-map-app
+            weather-map-app \
+            python gpv_panel_daily_gsm.py
+          docker run --rm \
+            -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
+            -e LINE_USER_ID="${LINE_USER_ID}" \
+            -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
+            -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \
+            weather-map-app \
+            python gpv_panel_daily_msm.py
+          docker run --rm \
+            -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
+            -e LINE_USER_ID="${LINE_USER_ID}" \
+            -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
+            -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \
+            weather-map-app \
+            python gpv_panel_daily_msm_akita.py
 
+          # ==== 手動運用：任意地点ローカルパネル生成 ====
+          # 手動入力欄がすべて埋まっていた場合のみローカルパネルも作成
+          if [ ! -z "${{ github.event.inputs.city }}" ] && \
+             [ ! -z "${{ github.event.inputs.pin_lat }}" ] && \
+             [ ! -z "${{ github.event.inputs.pin_lon }}" ] && \
+             [ ! -z "${{ github.event.inputs.lat_range }}" ] && \
+             [ ! -z "${{ github.event.inputs.lon_range }}" ]; then
+
+            # lat/lon_rangeはスペース区切りで渡す
+            docker run --rm \
+              -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
+              -e LINE_USER_ID="${LINE_USER_ID}" \
+              -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
+              -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \
+              weather-map-app \
+              python gpv_panel_daily_msm_local.py \
+                --city "${{ github.event.inputs.city }}" \
+                --pin_lat ${{ github.event.inputs.pin_lat }} \
+                --pin_lon ${{ github.event.inputs.pin_lon }} \
+                --lat_range ${{ github.event.inputs.lat_range }} \
+                --lon_range ${{ github.event.inputs.lon_range }} \
+                --output "${{ github.event.inputs.output }}"
+          fi
 
 # Slack通知用（今後復活する場合はコメント解除）
 # SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -44,4 +119,4 @@ jobs:
 # MAIL_PORT: ${{ secrets.MAIL_PORT }}
 # MAIL_USER: ${{ secrets.MAIL_USER }}
 # MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
-# LINE通知用（Messaging APIの設定値）
+# ===============================================
