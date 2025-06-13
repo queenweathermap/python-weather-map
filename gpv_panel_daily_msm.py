@@ -117,25 +117,34 @@ def make_daily_weather_panel_multi_time(ds, times, save_path):
     print("画像ファイルの存在:", os.path.exists(save_path))
 
 BASE_DIR = "./data"
+NCOLS = 12
 
 if __name__ == "__main__":
     try:
         print("=== MSMパネル処理開始 ===")
-        # 一番近いイニシャル時刻・ファイル群を取得
-        init_dt, pattern_files = find_nearest_init(MSM_PATTERNS, BASE_DIR)
+        # 直近のイニシャル時刻を取得（引数なしに統一！）
+        init_dt = find_nearest_init()
         print(f"init_dt: {init_dt}")
-        print("pattern_files:", pattern_files)
+
+        # データダウンロード（時刻ごとのファイルセットリスト）
+        panel_files = download_gpv_panel(MSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
+        print("panel_files:", panel_files)
+
+        # 使うべきファイルセットを抽出（パターン数そろった時刻だけ）
+        pattern_files = [f for f in panel_files if len(f) == len(MSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
             print("NO DATA: pattern_files is None or <3")
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
+            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
             make_nodata_weather_panel(times, "msm_panel_nodata.jpg")
             print("【ERROR】MSM GPVファイル未取得。NO DATAパネル送信処理へ…")
             sys.exit(1)
 
         # grib2→NetCDF変換
         print("2. NetCDF変換開始")
-        nc_paths = [grib2_to_nc(path) for path, _ in pattern_files]
+        # ファイルセットを1つにflatten（ex. 3セットぶん6ファイルとか）
+        file_list = [item for sublist in pattern_files[:3] for item in sublist]
+        nc_paths = [grib2_to_nc(path) for path, _ in file_list]
         print("nc_paths:", nc_paths)
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
 
@@ -155,7 +164,7 @@ if __name__ == "__main__":
         print("len(ds.time):", len(ds.time.values))
 
         # 上位12時刻
-        times = ds.time.values[:12]
+        times = ds.time.values[:NCOLS]
         print("times:", times)
 
         # パネル作成
