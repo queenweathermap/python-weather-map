@@ -122,17 +122,14 @@ if __name__ == "__main__":
     try:
         print("=== MSMパネル処理開始 ===")
         # 一番近いイニシャル時刻・ファイル群を取得
-        init_dt, pattern_files = find_nearest_init(MSM_PATTERNS, mirrors=GPV_MIRROR_URLS, base_dir=BASE_DIR)
+        init_dt, pattern_files = find_nearest_init(MSM_PATTERNS, base_dir=BASE_DIR)
         print(f"init_dt: {init_dt}")
         print("pattern_files:", pattern_files)
-
-        # 必要数そろわなければNO DATAパネル
         if not pattern_files or len(pattern_files) < 3:
-            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
-            make_nodata_weather_panel(times, "msm_panel_nodata.jpg")
-            print("【ERROR】MSM GPVデータ未取得。NO DATAパネル生成")
+            # NO DATAパネル
             sys.exit(1)
+        nc_paths = [grib2_to_nc(path) for path, _ in pattern_files]
+
 
         # grib2→NetCDF変換
         nc_paths = [grib2_to_nc(path) for path in pattern_files]
