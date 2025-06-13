@@ -18,10 +18,12 @@ NCOLS = 12
 if __name__ == "__main__":
     try:
         print("1. データダウンロード開始")
-        init_dt = find_nearest_init()  # 直近イニシャル時刻（自動）
+        init_dt = find_existing_init_dt(GSM_PATTERNS, "./data", GPV_MIRROR_URLS, hours=[0, 12])
+        if init_dt is None:
         print(f"init_dt: {init_dt}")
 
-        panel_files = download_gpv_panel(GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
+    else:
+        panel_files = download_gpv_panel(GSM_PATTERNS, "./data", init_dt, GPV_MIRROR_URLS, ncols=12)
         print("panel_files:", panel_files)
         pattern_files = [f for f in panel_files if len(f) == len(GSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 2:
