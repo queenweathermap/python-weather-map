@@ -9,7 +9,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import xarray as xr
 
+# --- 日本語フォント（IPAGothic）強制指定 ---
+plt.rcParams['font.family'] = 'IPAGothic'
+
 from module.utils.xr_utils import align_datasets_common
+
 
 def make_nodata_weather_panel(times, save_path="nodata_panel.jpg", title="NO DATA"):
     """
