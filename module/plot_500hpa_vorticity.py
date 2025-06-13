@@ -1,12 +1,21 @@
 # ===============================================
 # module/plot_500hpa_vorticity.py
 # 500hPa等高度線＋渦度（正の渦度領域に半透明オレンジ）描画モジュール
+# GSM/MSM両対応
+# -----------------------------------------------
+# 利用例:
+#   from module.plot_500hpa_vorticity import plot_500hpa_vorticity_gsm
+#   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
+#   plot_500hpa_vorticity_gsm(ax, ds)
+#   plt.show()
 # ===============================================
+
 import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
+from module.utils.var_utils import get_var
 
 def get_lon_lat(ds):
     lon2d = np.asarray(ds["longitude"])
@@ -15,10 +24,10 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def _get_var(ds, var):
-    return np.asarray(ds[var]) if var in ds else None
-
 def plot_500hpa_vorticity(ax, ds, model="GSM", prop=None):
+    """
+    500hPa等高度線＋渦度（正の渦度領域オレンジ塗り）描画（GSM/MSM両対応）
+    """
     import metpy.calc as mpcalc
     from metpy.units import units
 
@@ -27,6 +36,7 @@ def plot_500hpa_vorticity(ax, ds, model="GSM", prop=None):
     vgrd  = get_var(ds, "VGRD_500mb") * units('m/s')
     lon2d, lat2d = get_lon_lat(ds)
 
+    # --- メトピー流の格子間隔を計算 ---
     dy, dx = mpcalc.lat_lon_grid_deltas(lon2d, lat2d)
     dx_mean = np.mean(dx)
     dy_mean = np.mean(dy)
@@ -36,20 +46,27 @@ def plot_500hpa_vorticity(ax, ds, model="GSM", prop=None):
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
-    cs = ax.contour(lon2d, lat2d, hgt, levels=np.arange(4800, 6001, 60), colors="navy", linewidths=0.8, transform=ccrs.PlateCarree())
+    # --- 等高度線 ---
+    cs = ax.contour(lon2d, lat2d, hgt, levels=np.arange(4800, 6001, 60),
+                    colors="navy", linewidths=0.8, transform=ccrs.PlateCarree())
     ax.clabel(cs, fontsize=6)
-    ax.contour(lon2d, lat2d, hgt, levels=np.arange(4800, 6001, 120), colors="navy", linewidths=2.0, transform=ccrs.PlateCarree())
+    ax.contour(lon2d, lat2d, hgt, levels=np.arange(4800, 6001, 120),
+               colors="navy", linewidths=2.0, transform=ccrs.PlateCarree())
 
+    # --- 渦度（正の値のみ半透明オレンジ） ---
     vorticity_masked = np.ma.masked_less_equal(vort, 0)
-    ax.contourf(lon2d, lat2d, vorticity_masked, levels=[0, 1e-5], colors=["orange"], alpha=0.5, transform=ccrs.PlateCarree())
+    ax.contourf(lon2d, lat2d, vorticity_masked, levels=[0, 1e-5],
+                colors=["orange"], alpha=0.5, transform=ccrs.PlateCarree())
 
     ax.set_title("500hPa等高度線・渦度", fontsize=10, pad=10, fontproperties=prop)
 
+# ======= ラッパー関数 =======
 def plot_500hpa_vorticity_gsm(ax, ds, prop=None):
     return plot_500hpa_vorticity(ax, ds, model="GSM", prop=prop)
 
 def plot_500hpa_vorticity_msm(ax, ds, prop=None):
     return plot_500hpa_vorticity(ax, ds, model="MSM", prop=prop)
+
 # ===============================================
 # END OF FILE
 # ===============================================
