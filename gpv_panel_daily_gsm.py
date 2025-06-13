@@ -163,12 +163,20 @@ if __name__ == "__main__":
             print("variables:", list(ds.variables))
             if "time" in ds.coords:
                 print("time:", ds["time"].values)
+                print("time dtype:", ds["time"].dtype)
             if "latitude" in ds.coords:
                 print("latitude shape:", ds["latitude"].shape)
             if "longitude" in ds.coords:
                 print("longitude shape:", ds["longitude"].shape)
 
         print("\n== merge前のds_listチェック完了 ==\n")
+
+        # --- timeのdtypeを明示的に統一
+        for i, ds in enumerate(ds_list):
+            if ds["time"].dtype != "datetime64[ns]":
+                ds = ds.assign_coords(time=ds["time"].astype("datetime64[ns]"))
+                ds_list[i] = ds
+                print(f"[修正] ds_list[{i}]のtimeをdatetime64[ns]に揃えました")
 
         # --- 一旦素のmergeで失敗チェック
         try:
@@ -188,6 +196,7 @@ if __name__ == "__main__":
             print("variables:", list(ds.variables))
             if "time" in ds.coords:
                 print("time:", ds["time"].values)
+                print("time dtype:", ds["time"].dtype)
             if "latitude" in ds.coords:
                 print("latitude shape:", ds["latitude"].shape)
             if "longitude" in ds.coords:
@@ -195,12 +204,15 @@ if __name__ == "__main__":
 
         print("== align_datasets_common OK ==")
 
-        ds = xr.merge(ds_list_aligned, compat="override")
+        # --- merge (join="outer"を明示)
+        ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         print("xr.merge OK")
         print(ds)
         print("ds.data_vars:", ds.data_vars)
         print("ds.variables:", list(ds.variables))
+        print("ds.time dtype:", ds.time.dtype)
         print("ds.time.values:", ds.time.values)
+        print("len(ds.time):", len(ds.time.values))
 
         # --- times取得（上位12件/空チェック）
         times = ds.time.values[:12]
