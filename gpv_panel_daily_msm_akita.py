@@ -27,7 +27,6 @@ if __name__ == "__main__":
             panel_files = download_gpv_panel(MSM_PATTERNS, "./data", init_dt, GPV_MIRROR_URLS, ncols=12)
             # panel_filesを使ってNetCDF変換・パネル生成
 
-        panel_files = download_gpv_panel(MSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
         pattern_files = [f for f in panel_files if len(f) == len(MSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
