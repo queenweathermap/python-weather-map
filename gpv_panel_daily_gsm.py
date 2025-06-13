@@ -60,6 +60,10 @@ def make_nodata_weather_panel(times, save_path):
     print(f"[NO DATAパネル生成] {save_path}")
 
 def make_daily_weather_panel_multi_time(ds, times, save_path):
+    if times is None or len(times) == 0:
+        print("timesが空です。NO DATAパネルを作成します")
+        make_nodata_weather_panel([np.datetime64('now')], save_path)
+        return
     ncols = len(times)
     figsize = (4 * ncols, 21)
     fig, axes = plt.subplots(
