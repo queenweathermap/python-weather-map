@@ -1,21 +1,24 @@
 # gpv_panel_daily_msm.py
 # ===============================================
 # MSM天気図 6行×n列パネル生成スクリプト
+# 必須: gpv_downloader.py, panel_utils.py, gpv_plotter_msm.py など
+# 2025-06-13 by ChatGPT
 # ===============================================
 
-import os
 import sys
 import traceback
-import numpy as np
-import matplotlib.pyplot as plt
-plt.rcParams['font.family'] = 'IPAGothic'
-import cartopy.crs as ccrs
 import pandas as pd
 import xarray as xr
 
-# --- サブモジュール ---
-from gpv_downloader import download_gpv_panel, grib2_to_nc, find_nearest_init, GPV_MIRROR_URLS, MSM_PATTERNS
-from module.utils.xr_utils import align_datasets_common
+from gpv_downloader import (
+    download_gpv_panel, grib2_to_nc, find_nearest_init,
+    GPV_MIRROR_URLS, MSM_PATTERNS
+)
+from module.panel_utils import (
+    make_nodata_weather_panel,
+    make_daily_weather_panel_multi_time,
+    align_datasets_common
+)
 from module.gpv_plotter_msm import (
     plot_500hpa_vorticity_msm,
     plot_700hpa_dindex_500hpa_temp_msm,
@@ -25,112 +28,18 @@ from module.gpv_plotter_msm import (
     plot_surface_pressure_and_wind_msm,
 )
 
-def add_gridlines(ax):
-    gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-    gl.top_labels = False
-    gl.right_labels = False
-    return gl
-
-def make_nodata_weather_panel(times, save_path):
-    nrows, ncols = 6, max(1, len(times))
-    figsize = (4 * ncols, 21)
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-    if nrows == 1 and ncols == 1:
-        axes = np.array([[axes]])
-    elif nrows == 1 or ncols == 1:
-        axes = np.atleast_2d(axes)
-        if axes.shape[0] != nrows:
-            axes = axes.T
-    for col in range(ncols):
-        for row in range(nrows):
-            ax = axes[row, col]
-            ax.set_facecolor("white")
-            for spine in ax.spines.values():
-                spine.set_edgecolor("gray")
-                spine.set_linewidth(1)
-            ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-            ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
-    fig.suptitle("MSM GPVデータ未取得（NO DATAパネル）", fontsize=16)
-    plt.savefig(save_path, dpi=200, bbox_inches='tight')
-    plt.close(fig)
-    print(f"[NO DATAパネル生成] {save_path}")
-
-def make_daily_weather_panel_multi_time(ds, times, save_path):
-    if times is None or len(times) == 0:
-        print("timesが空です。NO DATAパネルを作成します")
-        make_nodata_weather_panel([np.datetime64('now')], save_path)
-        return
-    ncols = len(times)
-    figsize = (4 * ncols, 21)
-    fig, axes = plt.subplots(
-        nrows=6, ncols=ncols, figsize=figsize,
-        subplot_kw={'projection': ccrs.PlateCarree()},
-        constrained_layout=True
-    )
-    if axes.ndim == 1:
-        axes = axes.reshape((6, 1))
-    elif axes.shape[0] != 6:
-        axes = axes.reshape((6, -1))
-    init_time = pd.Timestamp(times[0])
-    init_label = init_time.strftime('%Y%m%d %HUTC')
-    col_labels, hh_labels = [], []
-    for time in times:
-        t = pd.Timestamp(time)
-        hour_diff = int((t - init_time).total_seconds() // 3600)
-        label = f"{t.strftime('%Y%m%d %HUTC')} (+" + f"{hour_diff:02d}h)"
-        col_labels.append(label)
-        hh_labels.append(f"+{hour_diff:02d}")
-    for col, time in enumerate(times):
-        if np.datetime64(time) not in ds.time.values:
-            for row in range(6):
-                ax = axes[row, col]
-                ax.set_facecolor("white")
-                for spine in ax.spines.values():
-                    spine.set_edgecolor("gray")
-                    spine.set_linewidth(1)
-                ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-                ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
-            continue
-        dsi = ds.sel(time=time)
-        plot_500hpa_vorticity_msm(axes[0, col], dsi)
-        plot_700hpa_dindex_500hpa_temp_msm(axes[1, col], dsi)
-        plot_850hpa_temp_wind_700hpa_w_msm(axes[2, col], dsi)
-        plot_850hpa_thetae_stream_msm(axes[3, col], dsi)
-        plot_925hpa_temp_wind_dindex_msm(axes[4, col], dsi)
-        plot_surface_pressure_and_wind_msm(axes[5, col], dsi)
-        axes[5, col].text(
-            0.5, -0.18,
-            col_labels[col],
-            fontsize=9,
-            ha='center',
-            va='top',
-            transform=axes[5, col].transAxes
-        )
-    for ax in axes.flatten():
-        add_gridlines(ax)
-    fig.suptitle(
-        f"MSM天気図パネル\nInit: {init_label} | Forecasts: {', '.join(hh_labels)}",
-        fontsize=11, y=1.04
-    )
-    plt.savefig(save_path, dpi=200, bbox_inches='tight')
-    plt.close(fig)
-    print("画像ファイルの存在:", os.path.exists(save_path))
-
 BASE_DIR = "./data"
-NCOLS = 12
+NCOLS = 12  # 列数は必要に応じて調整可
 
 if __name__ == "__main__":
     try:
         print("=== MSMパネル処理開始 ===")
-        # 直近のイニシャル時刻を取得（引数なしに統一！）
         init_dt = find_nearest_init()
         print(f"init_dt: {init_dt}")
 
-        # データダウンロード（時刻ごとのファイルセットリスト）
         panel_files = download_gpv_panel(MSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
 
-        # 使うべきファイルセットを抽出（パターン数そろった時刻だけ）
         pattern_files = [f for f in panel_files if len(f) == len(MSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
             print("NO DATA: pattern_files is None or <3")
@@ -140,34 +49,30 @@ if __name__ == "__main__":
             print("【ERROR】MSM GPVファイル未取得。NO DATAパネル送信処理へ…")
             sys.exit(1)
 
-        # grib2→NetCDF変換
         print("2. NetCDF変換開始")
-        # ファイルセットを1つにflatten（ex. 3セットぶん6ファイルとか）
         file_list = [item for sublist in pattern_files[:3] for item in sublist]
         nc_paths = [grib2_to_nc(path) for path, _ in file_list]
         print("nc_paths:", nc_paths)
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
 
-        # time dtype 統一
         for i, ds in enumerate(ds_list):
             if ds["time"].dtype != "datetime64[ns]":
                 ds = ds.assign_coords(time=ds["time"].astype("datetime64[ns]"))
                 ds_list[i] = ds
                 print(f"[修正] ds_list[{i}]のtimeをdatetime64[ns]に揃えました")
 
-        # align + merge
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         print("xr.merge OK")
-        print(ds)
         print("ds.time.values:", ds.time.values)
         print("len(ds.time):", len(ds.time.values))
 
-        # 上位12時刻
         times = ds.time.values[:NCOLS]
         print("times:", times)
 
-        # パネル作成
+        # MSM天気図パネル作成（ここで個別パネル描画用の関数リストも渡せます）
+        # plot_func_list例: [plot_500hpa_vorticity_msm, ...] × 行数ぶん
+        # もし1枚ごとに異なる描画ならpanel_utils側を拡張する形でも可
         make_daily_weather_panel_multi_time(ds, times, "msm_weather_map.jpg")
         print("画像生成完了")
         print("=== 完了 ===")
