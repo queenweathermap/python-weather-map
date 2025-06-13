@@ -133,7 +133,7 @@ if __name__ == "__main__":
     try:
         print("1. データダウンロード開始")
         # 直近のイニシャル時刻を探して指定（12, 0, 18, 6UTC優先）
-        init_dt, pattern_files = find_nearest_init(GSM_PATTERNS, base_dir=BASE_DIR)
+        init_dt, pattern_files = find_nearest_init(GSM_PATTERNS, BASE_DIR)
         print(f"init_dt: {init_dt}")
         print("pattern_files:", pattern_files)
         if not pattern_files or len(pattern_files) < 2:
