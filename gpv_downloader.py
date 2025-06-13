@@ -34,18 +34,27 @@ MSM_PATTERNS = [
     "MSM_GPV_Rjp_Lsurf_FH36-39_grib2.bin",
 ]
 
-from datetime import datetime, timedelta
 
 def find_nearest_init(hours=[12, 0, 18, 6], now=None):
     """
     現在時刻に一番近いイニシャル時刻（00/06/12/18 UTC）を返す（JST基準）
+    どんな型が来てもdatetime型に変換
     """
     if now is None:
         now = datetime.utcnow() + timedelta(hours=9)  # JST
-    # --- ここで型を必ずdatetimeに統一 ---
-    if not isinstance(now, datetime):
-        # pandas.Timestampや他の型はto_pydatetime()で変換
+    # --- 型を必ずdatetimeに ---
+    if isinstance(now, str):
+        # 文字列→datetime
+        try:
+            now = datetime.fromisoformat(now)
+        except Exception:
+            try:
+                now = datetime.strptime(now, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                raise ValueError(f"now='{now}' はサポートされていない形式です")
+    elif hasattr(now, "to_pydatetime"):
         now = now.to_pydatetime()
+    # それ以外（datetime型）はそのまま
     today = now.replace(minute=0, second=0, microsecond=0)
     base = today.replace(hour=0)
     diff = [(abs((today - base.replace(hour=h)).total_seconds()), h) for h in hours]
@@ -54,6 +63,7 @@ def find_nearest_init(hours=[12, 0, 18, 6], now=None):
     if nearest_dt > today:
         nearest_dt -= timedelta(days=1)
     return nearest_dt
+
 
 
 def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
