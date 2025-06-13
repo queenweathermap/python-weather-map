@@ -133,6 +133,7 @@ if __name__ == "__main__":
     try:
         print("1. MSM GPVデータのダウンロード＆変換")
         downloaded = download_gpv_all(MSM_PATTERNS, base_dir=BASE_DIR)
+        print("downloaded:", downloaded)
         if not downloaded or len(downloaded) < 3:
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
             times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
@@ -140,16 +141,68 @@ if __name__ == "__main__":
             print("【ERROR】MSM GPVデータ未取得。NO DATAパネル生成")
             sys.exit(1)
 
+        print("2. NetCDF変換開始")
         nc_paths = [grib2_to_nc(path) for path, _ in downloaded]
+        print("nc_paths:", nc_paths)
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
+
+        # --- 各ファイルの中身を詳細print
+        for i, ds in enumerate(ds_list):
+            print(f"--- ds_list[{i}] ---")
+            print(ds)
+            print("dims:", ds.dims)
+            print("coords:", list(ds.coords))
+            print("variables:", list(ds.variables))
+            if "time" in ds.coords:
+                print("time:", ds["time"].values)
+            if "latitude" in ds.coords:
+                print("latitude shape:", ds["latitude"].shape)
+            if "longitude" in ds.coords:
+                print("longitude shape:", ds["longitude"].shape)
+
+        print("\n== merge前のds_listチェック完了 ==\n")
+
+        # --- 一旦素のmergeで失敗チェック
+        try:
+            ds_raw = xr.merge(ds_list)
+            print("xr.merge(ds_list) 1st try: OK")
+            print(ds_raw)
+        except Exception as e:
+            print("[WARNING] xr.merge(ds_list)で失敗:", e)
+
+        # ★ 座標軸揃え（共通化）
         ds_list_aligned = align_datasets_common(ds_list)
-        ds = xr.merge(ds_list_aligned, compat="override")  # ←★ここを修正
+        for i, ds in enumerate(ds_list_aligned):
+            print(f"--- ds_list_aligned[{i}] ---")
+            print(ds)
+            print("dims:", ds.dims)
+            print("coords:", list(ds.coords))
+            print("variables:", list(ds.variables))
+            if "time" in ds.coords:
+                print("time:", ds["time"].values)
+            if "latitude" in ds.coords:
+                print("latitude shape:", ds["latitude"].shape)
+            if "longitude" in ds.coords:
+                print("longitude shape:", ds["longitude"].shape)
+
+        print("== align_datasets_common OK ==")
+
+        ds = xr.merge(ds_list_aligned, compat="override")
         print("xr.merge OK")
+        print(ds)
+        print("ds.data_vars:", ds.data_vars)
+        print("ds.variables:", list(ds.variables))
+        print("ds.time.values:", ds.time.values)
+
+        # --- times取得（上位12件/空チェック）
         times = ds.time.values[:12]
         print("times:", times)
+
+        # --- パネル作成
         make_daily_weather_panel_multi_time(ds, times, "msm_weather_map.jpg")
         print("画像生成完了")
         print("=== 完了 ===")
+
     except Exception as e:
         print("=== 重大エラー発生 ===")
         print(type(e), e)
