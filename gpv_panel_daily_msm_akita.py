@@ -138,16 +138,9 @@ if __name__ == "__main__":
     try:
         print("=== 秋田局地MSMパネル処理開始 ===")
         # もっとも近いイニシャル時刻・ファイル群を取得
-        iinit_dt, pattern_files = find_nearest_init(MSM_PATTERNS, BASE_DIR)
+        init_dt, pattern_files = find_nearest_init(MSM_PATTERNS, BASE_DIR)
         print(f"init_dt: {init_dt}")
         print("pattern_files:", pattern_files)
-        if not pattern_files or len(pattern_files) < 3:
-            # NO DATAパネル
-            sys.exit(1)
-        nc_paths = [grib2_to_nc(path) for path, _ in pattern_files]
-
-
-        # 必要数そろわなければNO DATAパネル
         if not pattern_files or len(pattern_files) < 3:
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
             times = [base_time + pd.Timedelta(hours=3*i) for i in range(12)]
@@ -156,7 +149,8 @@ if __name__ == "__main__":
             sys.exit(1)
 
         # grib2→NetCDF変換
-        nc_paths = [grib2_to_nc(path) for path in pattern_files]
+        print("2. NetCDF変換開始")
+        nc_paths = [grib2_to_nc(path) for path, _ in pattern_files]
         print("nc_paths:", nc_paths)
         ds_list = [xr.open_dataset(nc) for nc in nc_paths]
 
