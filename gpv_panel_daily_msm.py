@@ -36,7 +36,13 @@ def make_nodata_weather_panel(times, save_path):
     nrows, ncols = 6, max(1, len(times))
     figsize = (4 * ncols, 21)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-    axes = np.atleast_2d(axes)  # 1次元のときも2次元に
+    # axesを強制的に2次元配列化
+    if nrows == 1 and ncols == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1 or ncols == 1:
+        axes = np.atleast_2d(axes)
+        if axes.shape[0] != nrows:  # (ncols, )の場合
+            axes = axes.T
     for col in range(ncols):
         for row in range(nrows):
             ax = axes[row, col]
