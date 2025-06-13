@@ -27,7 +27,6 @@ if __name__ == "__main__":
         print("=== GSMパネル処理開始 ===")
         # GSMの「利用可能な最新イニシャル時刻」を取得（00UTC/12UTC限定）
         init_dt = find_existing_init_dt(GSM_PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12])
-        print("GSM最新イニシャル時刻:", init_dt)
         if init_dt is None:
             print("NO DATA: GSMファイルがサーバに見つかりません")
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
@@ -35,6 +34,10 @@ if __name__ == "__main__":
             make_nodata_weather_panel(times, "gsm_panel_nodata.jpg")
             print("【ERROR】GSM GPVファイル未取得。NO DATAパネル送信処理へ…")
             sys.exit(0)  # ← ここを0に
+
+        print(f"init_dt: {init_dt}")
+        # 以降、正常パスが続く…
+
 
         panel_files = download_gpv_panel(GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
