@@ -1,10 +1,10 @@
-# module/xr_utils.py
+# module/utils/xr_utils.py
 # ==============================================
 # xarray Datasetリストの「共通部分のみ」抽出ユーティリティ
 # 2025-06-12 by ChatGPT
 # ----------------------------------------------
 # 使い方:
-#   from module.xr_utils import align_datasets_common
+#   from module.utils.xr_utils import align_datasets_common
 #   aligned = align_datasets_common(ds_list)
 #   ds_merged = xr.concat(aligned, dim="time", compat="override")
 # ==============================================
