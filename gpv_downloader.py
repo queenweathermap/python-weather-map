@@ -65,6 +65,44 @@ def find_nearest_init(hours=[12, 0, 18, 6], now=None):
     return nearest_dt
 
 
+def find_existing_init_dt(patterns, base_dir, mirrors, hours=[0, 12]):
+    """
+    サーバ上に実際に全パターンファイルが存在する最新イニシャル時刻を返す
+    - patterns: GSM/MSM用ファイルパターンリスト
+    - base_dir: 保存先ディレクトリ
+    - mirrors: サーバURLリスト
+    - hours: 検索優先時刻（例 [0,12] なら00,12UTC）
+    戻り値: 見つかったdatetime or None
+    """
+    now = datetime.utcnow() + timedelta(hours=9)  # JST
+    for day_offset in range(0, 2):  # 今日→昨日
+        dt = now - timedelta(days=day_offset)
+        ymd = dt.strftime("%Y%m%d")
+        y, m, d = dt.strftime("%Y"), dt.strftime("%m"), dt.strftime("%d")
+        for h in hours:
+            all_exists = True
+            for pattern in patterns:
+                fname = f"Z__C_RJTD_{ymd}{h:02d}0000_{pattern}"
+                exists_this = False
+                for url_base in mirrors:
+                    url = f"{url_base}/{y}/{m}/{d}/{fname}"
+                    try:
+                        with urllib.request.urlopen(url) as res:
+                            if res.status == 200:
+                                exists_this = True
+                                break
+                    except Exception:
+                        continue  # 他のmirrorに回す
+                if not exists_this:
+                    all_exists = False
+                    break
+            if all_exists:
+                # JSTをUTCに（GPVファイル名はUTC表記のため）
+                return dt.replace(hour=h, minute=0, second=0, microsecond=0)
+    return None
+
+
+
 
 def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
     """
@@ -131,13 +169,16 @@ def grib2_to_nc(grib2_path):
 # --- 使用例（GSM/MSMどちらも運用可） ---
 if __name__ == "__main__":
     base_dir = "./data"
-    init_dt = find_nearest_init([12, 0, 18, 6])
-    print("[INFO] イニシャル時刻:", init_dt)
-    # GSMならGSM_PATTERNS, MSMならMSM_PATTERNSを指定
-    panel_files = download_gpv_panel(GSM_PATTERNS, base_dir, init_dt, GPV_MIRROR_URLS, ncols=12)
-    for icol, files in enumerate(panel_files):
-        t = init_dt + timedelta(hours=3*icol)
-        if files:
-            print(f"[{icol:02d}] {t:%Y-%m-%d %H:%M} DL OK: {[f[0] for f in files]}")
-        else:
-            print(f"[{icol:02d}] {t:%Y-%m-%d %H:%M} DL NG")
+    # ここを find_existing_init_dt に
+    init_dt = find_existing_init_dt(GSM_PATTERNS, base_dir, GPV_MIRROR_URLS, hours=[0,12])
+    print("[INFO] サーバ存在確認済みイニシャル時刻:", init_dt)
+    if init_dt is None:
+        print("【ERROR】サーバ上に利用可能なイニシャル時刻がありません")
+    else:
+        panel_files = download_gpv_panel(GSM_PATTERNS, base_dir, init_dt, GPV_MIRROR_URLS, ncols=12)
+        for icol, files in enumerate(panel_files):
+            t = init_dt + timedelta(hours=3*icol)
+            if files:
+                print(f"[{icol:02d}] {t:%Y-%m-%d %H:%M} DL OK: {[f[0] for f in files]}")
+            else:
+                print(f"[{icol:02d}] {t:%Y-%m-%d %H:%M} DL NG")
