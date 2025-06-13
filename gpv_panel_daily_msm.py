@@ -15,7 +15,7 @@ import xarray as xr
 
 # --- サブモジュール ---
 from gpv_downloader import download_gpv_all, grib2_to_nc
-from module.xr_utils import align_datasets_common
+from module.utils.xr_utils import align_datasets_common
 from module.gpv_plotter_msm import (
     plot_emagram_msm_panel,
     plot_500hpa_vorticity_msm,
