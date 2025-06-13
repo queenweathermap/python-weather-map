@@ -42,9 +42,16 @@ def add_gridlines(ax):
     return gl
 
 def make_nodata_weather_panel(times, save_path):
-    nrows, ncols = 6, len(times)
+    nrows, ncols = 6, max(1, len(times))
     figsize = (4 * ncols, 21)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
+    # axesを強制的に2次元配列化
+    if nrows == 1 and ncols == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1 or ncols == 1:
+        axes = np.atleast_2d(axes)
+        if axes.shape[0] != nrows:  # (ncols, )の場合
+            axes = axes.T
     for col in range(ncols):
         for row in range(nrows):
             ax = axes[row, col]
@@ -54,10 +61,11 @@ def make_nodata_weather_panel(times, save_path):
                 spine.set_linewidth(1)
             ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
             ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
-    fig.suptitle("GPVデータ未取得（NO DATAパネル）", fontsize=16)
+    fig.suptitle("MSM GPVデータ未取得（NO DATAパネル）", fontsize=16)
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"[NO DATAパネル生成] {save_path}")
+
 
 def make_daily_weather_panel_multi_time(ds, times, save_path):
     if times is None or len(times) == 0:
