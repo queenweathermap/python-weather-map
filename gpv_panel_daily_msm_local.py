@@ -30,10 +30,7 @@ import argparse
 import pandas as pd
 import xarray as xr
 
-from gpv_downloader import (
-    download_gpv_panel, grib2_to_nc, find_nearest_init,
-    GPV_MIRROR_URLS, MSM_PATTERNS
-)
+from gpv_downloader import find_existing_init_dt, download_gpv_panel, MSM_PATTERNS, GPV_MIRROR_URLS
 from module.panel_utils import (
     make_nodata_weather_panel,
     align_datasets_common,
