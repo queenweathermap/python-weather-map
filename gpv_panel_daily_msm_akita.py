@@ -53,6 +53,10 @@ def make_nodata_weather_panel(times, save_path):
     print(f"[NO DATAパネル生成] {save_path}")
 
 def make_local_weather_panel(ds, times, save_path):
+    if times is None or len(times) == 0:
+        print("timesが空です。NO DATAパネルを作成します")
+        make_nodata_weather_panel([pd.Timestamp.now()], save_path)
+        return
     ncols = len(times)
     nrows = 6
     figsize = (4 * ncols, 21)
