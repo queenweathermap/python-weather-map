@@ -36,8 +36,6 @@ if __name__ == "__main__":
             sys.exit(0)  # ← ここを0に
 
         print(f"init_dt: {init_dt}")
-        # 以降、正常パスが続く…
-
 
         panel_files = download_gpv_panel(GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
