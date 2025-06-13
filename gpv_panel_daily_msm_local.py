@@ -37,7 +37,7 @@ from gpv_downloader import (
 from module.panel_utils import (
     make_nodata_weather_panel,
     align_datasets_common,
-    make_local_weather_panel,  # ← パネル生成本体はpanel_utilsに吸収
+    make_local_weather_panel,
 )
 from module.gpv_plotter_msm import (
     plot_emagram_msm_panel,
@@ -66,7 +66,6 @@ def main():
     args = parser.parse_args()
 
     # 主要な入力値に空欄やNone/0/""があれば何もせず正常終了
-    skip = False
     if not args.city or not args.pin_lat or not args.pin_lon or not args.lat_range or not args.lon_range:
         print("[INFO] 必須パラメータが空欄。ローカルパネル生成はスキップします。")
         sys.exit(0)
@@ -96,7 +95,7 @@ def main():
             times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
             print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
-            sys.exit(1)
+            sys.exit(0)  # ← ここを0に
 
         print("2. NetCDF変換開始")
         file_list = [item for sublist in pattern_files[:3] for item in sublist]
@@ -124,7 +123,7 @@ def main():
             times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
             print("【ERROR】MSM GPVに有効データ無し。NO DATAパネル生成")
-            sys.exit(1)
+            sys.exit(0)  # ← ここも0に
         times = ds.time.values[:NCOLS]
         print("times:", times)
 
