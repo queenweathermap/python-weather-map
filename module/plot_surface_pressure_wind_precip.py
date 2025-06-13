@@ -15,20 +15,21 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
+from module.utils.var_utils import get_var
 
 def get_lon_lat(ds):
-    lon2d = ds["longitude"].values
-    lat2d = ds["latitude"].values
-    if lon2d.ndim == 1 and lat2d.ndim == 1:
+    lon2d = get_var(ds, "longitude")
+    lat2d = get_var(ds, "latitude")
+    if lon2d is not None and lat2d is not None and lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
 def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
     lon2d, lat2d = get_lon_lat(ds)
-    prmsl = ds.get("PRMSL_meansealevel", None)
-    u10 = ds.get("UGRD_10maboveground", None)
-    v10 = ds.get("VGRD_10maboveground", None)
-    precip = ds.get("APCP_surface", None)
+    prmsl = get_var(ds, "PRMSL_meansealevel")
+    u10 = get_var(ds, "UGRD_10maboveground")
+    v10 = get_var(ds, "VGRD_10maboveground")
+    precip = get_var(ds, "APCP_surface")
 
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
@@ -36,7 +37,7 @@ def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
 
     # 海面更正気圧
     if prmsl is not None:
-        prmsl_hpa = prmsl.values / 100  # hPa
+        prmsl_hpa = prmsl / 100  # hPa
         levels_fine = np.arange(900, 1101, 1)
         cs = ax.contour(
             lon2d, lat2d, prmsl_hpa,
@@ -71,14 +72,14 @@ def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
     if u10 is not None and v10 is not None:
         ax.quiver(
             lon2d[::skip, ::skip], lat2d[::skip, ::skip],
-            u10.values[::skip, ::skip], v10.values[::skip, ::skip],
+            u10[::skip, ::skip], v10[::skip, ::skip],
             transform=ccrs.PlateCarree(), scale=500, width=0.002, alpha=0.8
         )
 
     # 降水量
     if precip is not None:
         cf = ax.contourf(
-            lon2d, lat2d, precip.values,
+            lon2d, lat2d, precip,
             levels=np.arange(0, 51, 5), cmap="Blues", alpha=0.4,
             transform=ccrs.PlateCarree()
         )
