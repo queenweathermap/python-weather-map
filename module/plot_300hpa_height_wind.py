@@ -2,7 +2,14 @@
 # module/plot_300hpa_height_wind.py
 # 300hPa等高度線＋等風速線＋風ベクトル描画モジュール
 # GSM/MSM両対応
+# -----------------------------------------------
+# 利用例:
+#   from module.plot_300hpa_height_wind import plot_300hpa_height_wind_gsm
+#   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
+#   plot_300hpa_height_wind_gsm(ax, ds)
+#   plt.show()
 # ===============================================
+
 import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
@@ -17,23 +24,27 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 def _get_var(ds, var):
+    """xarray Datasetから変数をnp配列で安全取得"""
     return np.asarray(ds[var]) if var in ds else None
 
-
 def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
+    """
+    300hPa等高度線＋等風速線＋風ベクトル描画（GSM/MSM両対応）
+    """
     lon2d, lat2d = get_lon_lat(ds)
-    hgt = get_var(ds, "HGT_300mb")
-    u   = get_var(ds, "UGRD_300mb")
-    v   = get_var(ds, "VGRD_300mb")
-    temp = get_var(ds, "TMP_300mb")
+    hgt  = _get_var(ds, "HGT_300mb")
+    u    = _get_var(ds, "UGRD_300mb")
+    v    = _get_var(ds, "VGRD_300mb")
+    temp = _get_var(ds, "TMP_300mb")
     if hgt is None or u is None or v is None:
         raise ValueError("必要な300hPa変数が含まれていません")
-    wspd = np.sqrt(u**2 + v**2) * 1.94384
+    wspd = np.sqrt(u**2 + v**2) * 1.94384  # m/s→kt
 
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
+    # --- 気温等値線（任意） ---
     if temp is not None:
         temp_c = temp - 273.15 if np.nanmax(temp) > 100 else temp
         t_levels = np.arange(-60, 6, 6)
@@ -42,6 +53,7 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
                              transform=ccrs.PlateCarree())
         ax.clabel(cs_temp, fmt="%.0f", fontsize=7, colors="blue")
 
+    # --- 等高度線 ---
     hgt_levels = np.arange(9600, 16001, 120)
     cs = ax.contour(lon2d, lat2d, hgt, levels=hgt_levels, colors="navy",
                     linewidths=0.8, transform=ccrs.PlateCarree())
@@ -50,11 +62,13 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
     bold = ax.contour(lon2d, lat2d, hgt, levels=bold_lv, colors="navy",
                       linewidths=2.0, transform=ccrs.PlateCarree())
 
+    # --- 等風速線 ---
     ws_levels = np.arange(20, 180, 20)
     ws = ax.contour(lon2d, lat2d, wspd, levels=ws_levels,
                     colors="gray", linestyles="solid", linewidths=0.5,
                     transform=ccrs.PlateCarree())
     ax.clabel(ws, fmt="%d", fontsize=7, colors="black")
+    # 東風(dashed)のみ追加
     for level in ws_levels:
         wspd_east = np.where(u < 0, wspd, np.nan)
         cs_east = ax.contour(lon2d, lat2d, wspd_east, levels=[level],
@@ -62,10 +76,12 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
                              transform=ccrs.PlateCarree())
         ax.clabel(cs_east, fmt="%d", fontsize=7, colors="black")
 
+    # --- 風ベクトル ---
     ax.quiver(lon2d[::skip, ::skip], lat2d[::skip, ::skip],
               u[::skip, ::skip], v[::skip, ::skip],
               transform=ccrs.PlateCarree(), scale=350, alpha=0.3)
 
+    # --- H/Lマーク ---
     hgt_max = maximum_filter(hgt, size=9)
     hgt_min = minimum_filter(hgt, size=9)
     hgt_flat = hgt.flatten()
@@ -78,6 +94,7 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
     for j, i in zip(*hmin_coords):
         ax.text(lon2d[j, i], lat2d[j, i], 'L', color='red', fontsize=14, weight='bold', ha='center', va='center')
 
+    # --- W/Cマーク（暖域/寒域：気温最大・最小） ---
     if temp is not None:
         temp_flat = temp.flatten()
         w_indices = np.argpartition(temp_flat, -3)[-3:]
@@ -91,11 +108,13 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
 
     ax.set_title("300hPa等高度線・風", fontsize=10, pad=10)
 
+# ======= ラッパー関数 =======
 def plot_300hpa_height_wind_gsm(ax, ds):
     return plot_300hpa_height_wind(ax, ds, model="GSM")
 
 def plot_300hpa_height_wind_msm(ax, ds):
     return plot_300hpa_height_wind(ax, ds, model="MSM")
+
 # ===============================================
 # END OF FILE
 # ===============================================
