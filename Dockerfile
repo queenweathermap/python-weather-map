@@ -31,4 +31,5 @@ COPY . /workspace
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
+# デフォルトはmain的バッチだが、docker runでコマンド差し替え可
 CMD ["python3", "main_weather_batch.py"]
