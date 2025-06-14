@@ -153,8 +153,13 @@ def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
     return ret
 
 def grib2_to_nc(grib2_path):
-    """GRIB2ファイルをNetCDFへ変換。既存関数と同じ仕様"""
+    """GRIB2ファイルをNetCDFへ変換（サイズチェック付き）"""
+    import os
     grib2_path = Path(grib2_path)
+    # GRIB2ファイルサイズが極端に小さい場合はスキップ（例: 10KB未満）
+    if not grib2_path.exists() or os.path.getsize(grib2_path) < 10 * 1024:
+        print(f"[SKIP] ダウンロード失敗or空ファイル: {grib2_path}")
+        return None
     nc_path = grib2_path.with_suffix(grib2_path.suffix + ".nc")
     cmd = f"wgrib2 {grib2_path} -netcdf {nc_path}"
     print(f"[grib2_to_nc] 実行コマンド: {cmd}")
@@ -168,12 +173,12 @@ def grib2_to_nc(grib2_path):
         print("[grib2_to_nc] stdout:", result.stdout)
         print("[grib2_to_nc] stderr:", result.stderr)
     except subprocess.CalledProcessError as e:
-        print("=== grib2→NetCDF変換でエラー ===")
-        print("コマンド:", e.cmd)
-        print("リターンコード:", e.returncode)
-        print("stdout:", e.stdout)
-        print("stderr:", e.stderr)
-        raise RuntimeError("grib2→nc変換に失敗しました（上記参照）") from e
+        print(f"[SKIP] NetCDF変換失敗: {nc_path}")
+        return None
+    # NetCDF出力もサイズが小さすぎる場合は失敗扱い
+    if not nc_path.exists() or os.path.getsize(nc_path) < 10 * 1024:
+        print(f"[SKIP] NetCDF出力異常: {nc_path}")
+        return None
     return str(nc_path)
 
 # --- 使用例 ---
