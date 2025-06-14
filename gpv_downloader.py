@@ -204,8 +204,10 @@ if __name__ == "__main__":
         # NetCDF変換サンプル（None除外必須！）
         if panel_files and panel_files[0]:
             file_list = [item for sublist in panel_files[:3] for item in sublist]
-            nc_paths = [
-                nc for path, _ in file_list
-                if (nc := grib2_to_nc(path)) is not None and os.path.exists(nc)
-            ]
+            nc_paths = []
+            for path, _ in file_list:
+                nc = grib2_to_nc(path)
+                if nc is not None and os.path.exists(nc):
+                    nc_paths.append(nc)
             print("nc_paths:", nc_paths)
+
