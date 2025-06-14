@@ -201,8 +201,9 @@ if __name__ == "__main__":
             nc_paths = []
             for path, _ in file_list:
                 nc = grib2_to_nc(path)
-                if nc is not None and os.path.exists(nc):
+                if nc is not None:
                     nc_paths.append(nc)
             print("nc_paths:", nc_paths)
         else:
             print("[SKIP] パネルファイルがありません")
+
