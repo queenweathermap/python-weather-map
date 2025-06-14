@@ -155,6 +155,9 @@ def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
 def grib2_to_nc(grib2_path):
     """GRIB2ファイルをNetCDFへ変換（サイズチェック付き）"""
     import os
+    from pathlib import Path
+    import subprocess
+
     grib2_path = Path(grib2_path)
     # GRIB2ファイルサイズが極端に小さい場合はスキップ（例: 10KB未満）
     if not grib2_path.exists() or os.path.getsize(grib2_path) < 10 * 1024:
@@ -180,6 +183,7 @@ def grib2_to_nc(grib2_path):
         print(f"[SKIP] NetCDF出力異常: {nc_path}")
         return None
     return str(nc_path)
+
 
 # --- 使用例 ---
 if __name__ == "__main__":
