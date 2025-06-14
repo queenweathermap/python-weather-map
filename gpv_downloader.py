@@ -54,9 +54,7 @@ def find_nearest_init(hours, now=None):
     return nearest_dt
 
 def find_existing_init_dt(patterns, base_dir, mirrors, hours):
-    """
-    サーバ上に実際に全パターンファイルが存在する最新イニシャル時刻を返す
-    """
+    """サーバ上に実際に全パターンファイルが存在する最新イニシャル時刻を返す"""
     now = datetime.utcnow() + timedelta(hours=9)  # JST
     for day_offset in range(0, 2):  # 今日→昨日
         dt = now - timedelta(days=day_offset)
@@ -84,9 +82,7 @@ def find_existing_init_dt(patterns, base_dir, mirrors, hours):
     return None
 
 def download_with_requests(url, out_path):
-    """
-    User-Agent付きでファイルDL、落ちなければTrue
-    """
+    """User-Agent付きでファイルDL、落ちなければFalse"""
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         with requests.get(url, headers=headers, stream=True, timeout=60) as r:
@@ -101,9 +97,7 @@ def download_with_requests(url, out_path):
         return False
 
 def download_with_curl(url, out_path):
-    """
-    curlによるダウンロード（リトライ・User-Agent・follow-redirects付き）
-    """
+    """curlによるダウンロード（リトライ・User-Agent・follow-redirects付き）"""
     cmd = ["curl", "-L", "-A", "Mozilla/5.0", "-o", out_path, url]
     result = subprocess.run(cmd)
     if result.returncode == 0:
@@ -201,7 +195,7 @@ if __name__ == "__main__":
             else:
                 print(f"[{icol:02d}] {t:%Y-%m-%d %H:%M} DL NG")
 
-        # NetCDF変換サンプル（None除外必須！）
+        # NetCDF変換サンプル（Noneや空リストを除外して安全に実行）
         if panel_files:
             # 1. 空リストも除外しつつフラット化
             file_list = [item for sublist in panel_files[:3] if sublist for item in sublist]
@@ -213,4 +207,3 @@ if __name__ == "__main__":
             print("nc_paths:", nc_paths)
         else:
             print("[SKIP] パネルファイルがありません")
-
