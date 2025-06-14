@@ -3,33 +3,11 @@
 # 任意の地点でMSM局地天気図パネル（エマグラム付き）を生成する汎用スクリプト
 # 必須: gpv_downloader.py, panel_utils.py, gpv_plotter_msm.py
 # ===============================================================
-# ・全国どこでも「ピンポイント＋周辺範囲」で局地パネルを自動生成
-# ・地名・緯度経度・範囲・出力ファイル名はコマンドライン引数で指定
-# ・観測地点やイベント会場など日々異なる任意地点でのパネル作成に最適
-# ・GSM/MSM定時運用パネル（秋田局地など）とは独立して個別出力
-# ・ワークフロー・バッチ処理・スポット出力に柔軟対応！
-# ----------------------------------------------------------------
-# 実行例:
-#   python gpv_panel_daily_msm_local.py --city "長岡花火" --pin_lat 37.444 --pin_lon 138.848 \
-#       --lat_range 37.3 37.6 --lon_range 138.7 139.1 --output nagoka_panel.jpg
-#
-# コマンドライン引数:
-#   --city       : 地名（タイトル等に使用）
-#   --pin_lat    : ピンポイント緯度（エマグラム中心位置）
-#   --pin_lon    : ピンポイント経度
-#   --lat_range  : 地図描画の緯度範囲（2つ、例 37.3 37.6）
-#   --lon_range  : 地図描画の経度範囲（2つ、例 138.7 139.1）
-#   --output     : 保存ファイル名（省略可／自動命名）
-#
-# 必須: gpv_downloader.py, panel_utils.py, gpv_plotter_msm.py
-# 2025-06-13 by ChatGPT
-# ===============================================================
-
-
 
 import sys
 import traceback
 import argparse
+import os
 import pandas as pd
 import xarray as xr
 
@@ -91,7 +69,9 @@ def main():
 
         panel_files = download_gpv_panel(MSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
-        pattern_files = [f for f in panel_files if len(f) == len(MSM_PATTERNS)]
+
+        # 空のものを除外して必要最低限チェック
+        pattern_files = [f for f in panel_files if f and len(f) == len(MSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
             print("NO DATA: pattern_files is None or <3")
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
@@ -101,15 +81,41 @@ def main():
             sys.exit(0)
 
         print("2. NetCDF変換開始")
-        file_list = [item for sublist in pattern_files[:3] for item in sublist]
-        nc_paths = [grib2_to_nc(path) for path, _ in file_list]
+        file_list = [item for sublist in pattern_files for item in sublist]
+        nc_paths = []
+        for path, _ in file_list:
+            try:
+                nc_path = grib2_to_nc(path)
+                if os.path.exists(nc_path):
+                    nc_paths.append(nc_path)
+                else:
+                    print(f"[SKIP] NetCDF変換失敗: {nc_path}")
+            except Exception as e:
+                print(f"[SKIP] NetCDF変換失敗: {path} ({e})")
         print("nc_paths:", nc_paths)
-        ds_list = [xr.open_dataset(nc) for nc in nc_paths]
 
-        for i, ds in enumerate(ds_list):
-            if ds["time"].dtype != "datetime64[ns]":
-                ds = ds.assign_coords(time=ds["time"].astype("datetime64[ns]"))
-                ds_list[i] = ds
+        if not nc_paths or len(nc_paths) < 3:
+            print("NO DATA: ncファイル少なすぎ")
+            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
+            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
+            print("【ERROR】MSM GPVファイル未取得。NO DATAパネル送信処理へ…")
+            sys.exit(0)
+
+        ds_list = []
+        for nc in nc_paths:
+            try:
+                ds = xr.open_dataset(nc)
+                ds_list.append(ds)
+            except Exception as e:
+                print(f"[SKIP] open_dataset失敗: {nc} ({e})")
+        if not ds_list or len(ds_list) < 3:
+            print("NO DATA: ds_list少なすぎ")
+            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
+            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
+            print("【ERROR】MSM GPVファイル未取得。NO DATAパネル送信処理へ…")
+            sys.exit(0)
 
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
