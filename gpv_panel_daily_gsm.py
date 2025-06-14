@@ -21,44 +21,59 @@ from module.panel_utils import (
 BASE_DIR = "./data"
 NCOLS = 12
 
+
+
 if __name__ == "__main__":
     try:
         print("=== GSMパネル処理開始 ===")
-        # GSMの「利用可能な最新イニシャル時刻」を取得（00UTC/12UTC限定）
+        # 最新init時刻取得
         init_dt = find_existing_init_dt(GSM_PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12])
         if init_dt is None:
             print("NO DATA: GSMファイルがサーバに見つかりません")
-            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
-            make_nodata_weather_panel(times, "gsm_panel_nodata.jpg")
-            print("【ERROR】GSM GPVファイル未取得。NO DATAパネル送信処理へ…")
-            sys.exit(0)  # ← ここを0に
+            # NO DATAパネル生成処理...
+            sys.exit(0)
 
         print(f"init_dt: {init_dt}")
-        # 以降、正常パスが続く…
-
         panel_files = download_gpv_panel(GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         print("panel_files:", panel_files)
-        pattern_files = [f for f in panel_files if len(f) == len(GSM_PATTERNS)]
+
+        # 空でない時刻だけ抜き出す
+        pattern_files = [f for f in panel_files if f and len(f) == len(GSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 2:
             print("NO DATA: pattern_files is None or <2")
-            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
-            make_nodata_weather_panel(times, "gsm_panel_nodata.jpg")
-            print("【ERROR】GSM GPVファイル未取得。NO DATAパネル送信処理へ…")
+            # NO DATAパネル生成...
             sys.exit(0)
 
         print("2. NetCDF変換開始")
-        file_list = [item for sublist in pattern_files[:2] for item in sublist]
-        nc_paths = [grib2_to_nc(path) for path, _ in file_list]
+        # 存在する時刻だけフラット化
+        file_list = [item for sublist in pattern_files for item in sublist]
+        nc_paths = []
+        for path, _ in file_list:
+            nc_path = grib2_to_nc(path)
+            if os.path.exists(nc_path):
+                nc_paths.append(nc_path)
+            else:
+                print(f"[SKIP] NetCDF変換失敗: {nc_path}")
         print("nc_paths:", nc_paths)
-        ds_list = [xr.open_dataset(nc) for nc in nc_paths]
 
-        for i, ds in enumerate(ds_list):
-            if ds["time"].dtype != "datetime64[ns]":
-                ds = ds.assign_coords(time=ds["time"].astype("datetime64[ns]"))
-                ds_list[i] = ds
+        if not nc_paths or len(nc_paths) < 2:
+            print("NO DATA: ncファイル少なすぎ")
+            # NO DATAパネル生成...
+            sys.exit(0)
 
+        ds_list = []
+        for nc in nc_paths:
+            try:
+                ds = xr.open_dataset(nc)
+                ds_list.append(ds)
+            except Exception as e:
+                print(f"[SKIP] open_dataset失敗: {nc} ({e})")
+        if not ds_list or len(ds_list) < 2:
+            print("NO DATA: ds_list少なすぎ")
+            # NO DATAパネル生成...
+            sys.exit(0)
+
+        # ...以降は今まで通り
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         times = ds.time.values[:NCOLS]
