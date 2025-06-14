@@ -197,12 +197,11 @@ if __name__ == "__main__":
 
         # NetCDF変換サンプル（Noneや空リストを除外して安全に実行）
         if panel_files:
-            # 1. 空リストも除外しつつフラット化
             file_list = [item for sublist in panel_files[:3] if sublist for item in sublist]
             nc_paths = []
             for path, _ in file_list:
                 nc = grib2_to_nc(path)
-                if nc and os.path.exists(nc):
+                if nc is not None and os.path.exists(nc):
                     nc_paths.append(nc)
             print("nc_paths:", nc_paths)
         else:
