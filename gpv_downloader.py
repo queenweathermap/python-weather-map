@@ -14,7 +14,6 @@ import os
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-
 import requests
 
 GPV_MIRROR_URLS = [
@@ -154,10 +153,6 @@ def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
 
 def grib2_to_nc(grib2_path):
     """GRIB2ファイルをNetCDFへ変換（サイズチェック付き）"""
-    import os
-    from pathlib import Path
-    import subprocess
-
     grib2_path = Path(grib2_path)
     # GRIB2ファイルサイズが極端に小さい場合はスキップ（例: 10KB未満）
     if not grib2_path.exists() or os.path.getsize(grib2_path) < 10 * 1024:
@@ -175,7 +170,7 @@ def grib2_to_nc(grib2_path):
         )
         print("[grib2_to_nc] stdout:", result.stdout)
         print("[grib2_to_nc] stderr:", result.stderr)
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         print(f"[SKIP] NetCDF変換失敗: {nc_path}")
         return None
     # NetCDF出力もサイズが小さすぎる場合は失敗扱い
@@ -184,14 +179,13 @@ def grib2_to_nc(grib2_path):
         return None
     return str(nc_path)
 
-
 # --- 使用例 ---
 if __name__ == "__main__":
     base_dir = "./data"
-    # MSM運用例
+    # MSM運用例（hoursはGSM/局地で切り替え可）
     init_dt = find_existing_init_dt(
         MSM_PATTERNS,
-        base_dir="./data",
+        base_dir=base_dir,
         mirrors=GPV_MIRROR_URLS,
         hours=[0, 3, 6, 9, 12, 15, 18, 21]
     )
@@ -206,3 +200,12 @@ if __name__ == "__main__":
                 print(f"[{icol:02d}] {t:%Y-%m-%d %H:%M} DL OK: {[f[0] for f in files]}")
             else:
                 print(f"[{icol:02d}] {t:%Y-%m-%d %H:%M} DL NG")
+
+        # NetCDF変換サンプル（None除外必須！）
+        if panel_files and panel_files[0]:
+            file_list = [item for sublist in panel_files[:3] for item in sublist]
+            nc_paths = [
+                nc for path, _ in file_list
+                if (nc := grib2_to_nc(path)) is not None and os.path.exists(nc)
+            ]
+            print("nc_paths:", nc_paths)
