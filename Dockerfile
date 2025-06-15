@@ -1,8 +1,9 @@
 # Dockerfile
 # ===============================================
-# python-weather-map用 Dockerfile
-# ・日本語フォント, wgrib2, Miniconda, pipパッケージ一式
-# ・RUN時にmain_weather_batch.pyを実行
+# python-weather-map用 Dockerfile（Slack通知専用）
+# ・wgrib2, 日本語フォント, Miniconda, pipパッケージ
+# ・main_weather_batch.py実行
+# 2025-06-16 by ChatGPT
 # ===============================================
 
 FROM ubuntu:22.04
@@ -16,7 +17,7 @@ RUN apt-get update && \
       libcrypt1 \
       fonts-ipafont-gothic
 
-# ---- Miniconda導入＆wgrib2（conda-forge） ----
+# ---- Miniconda導入＆wgrib2 ----
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
 RUN bash /tmp/miniconda.sh -b -p /opt/conda
 RUN rm /tmp/miniconda.sh
@@ -37,5 +38,5 @@ COPY . /workspace
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# --- デフォルトコマンド（バッチ実行） ---
+# --- デフォルトコマンド（Slackバッチ） ---
 CMD ["python3", "main_weather_batch.py"]
