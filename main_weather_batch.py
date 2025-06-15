@@ -1,6 +1,11 @@
 # main_weather_batch.py
 # ===============================================
-# 毎日定時：GSM/MSM/秋田局地 天気図画像を自動生成＆LINE通知＆Driveアップロードバッチ
+# GSM/MSM/秋田局地 天気図画像を自動生成＋Slack通知＋Drive/LINEアップロードバッチ
+# -----------------------------------------------
+# ・定時実行で各種天気図を生成、Slack/Drive/LINEに配信
+# ・APIキーやTokenは環境変数から取得
+# ・どの通知が失敗しても他は続行（ロバスト設計）
+# 2025-06-16 by ChatGPT
 # ===============================================
 
 import subprocess
@@ -8,11 +13,14 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
+# ---- 各通知ユーティリティ ----
+from module.utils.slack_utils import upload_file_external_slack
 from module.utils.line_utils import send_line_text
 from module.utils.drive_utils import upload_to_drive
 
+# --- 環境変数読込（.env優先・GitHub ActionsでもOK） ---
 load_dotenv()
-print("環境変数一覧", dict(os.environ))
+print("【DEBUG】環境変数一覧", dict(os.environ))
 
 init_time = datetime.now().strftime("%Y%m%d_%H%M")
 DESKTOP_DIR = os.path.expanduser("~/Desktop")
@@ -27,6 +35,7 @@ image_jobs = [
     ("gpv_panel_daily_msm_akita.py", IMG_AKITA),
 ]
 
+# --- 1. 画像生成（各スクリプトごと） ---
 for script, out_file in image_jobs:
     print(f"=== {script} 開始 ===")
     try:
@@ -47,6 +56,24 @@ images_info = [
     (IMG_AKITA, "MSM 秋田局地"),
 ]
 
+# --- 2. Slack通知（画像があれば順次送信） ---
+slack_token = os.environ.get("SLACK_BOT_TOKEN")
+slack_channel = os.environ.get("SLACK_CHANNEL_ID")  # 例: "C12345678"
+if slack_token and slack_channel:
+    for img_path, label in images_info:
+        if os.path.exists(img_path):
+            print(f"[Slack通知] 送信: {img_path}")
+            try:
+                upload_file_external_slack(
+                    slack_channel,
+                    img_path,
+                    title=f"{label} 天気図",
+                    initial_comment=f"{label}の天気図を自動配信します"
+                )
+            except Exception as e:
+                print(f"[ERROR] Slack送信失敗: {img_path} {e}")
+
+# --- 3. Google Driveアップロード ---
 exist_files = [img_path for img_path, _ in images_info if os.path.exists(img_path)]
 drive_urls = []
 for img_path in exist_files:
@@ -56,6 +83,7 @@ for img_path in exist_files:
     except Exception as e:
         print(f"[ERROR] Driveアップロード失敗: {img_path} {e}")
 
+# --- 4. LINE通知（URL or 保存情報を送信） ---
 if drive_urls:
     msg = "本日の自動天気図（GSM/MSM/秋田局地）画像を\nGoogle Driveにアップロードしました。\n\n"
     msg += "\n".join(f"- {name}\n{url}" for name, url in drive_urls)
