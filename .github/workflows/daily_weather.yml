@@ -1,10 +1,9 @@
 # .github/workflows/daily_weather.yml
 # ===============================================
-# Daily Weather Map（Slack通知専用・LINE/Driveなし）
+# Daily Weather Map（Slack通知・GSM全国＋秋田局地のみ）
 # -----------------------------------------------
-# ・毎日JST 5時/17時に自動実行
-# ・任意地点パネルも手動対応
-# ・Slack APIキーはGitHub Secretsで管理
+# 毎日JST 5時/17時自動実行
+# Slack APIキーはGitHub Secretsで管理
 # 2025-06-16 by ChatGPT
 # ===============================================
 
@@ -14,32 +13,7 @@ on:
   schedule:
     - cron: '0 20 * * *'  # JST 5時
     - cron: '0 8 * * *'   # JST 17時
-  workflow_dispatch:
-    inputs:
-      city:
-        description: 'City name (for local MSM panel)'
-        required: false
-        default: ''
-      pin_lat:
-        description: 'Pin latitude (for local MSM panel)'
-        required: false
-        default: ''
-      pin_lon:
-        description: 'Pin longitude (for local MSM panel)'
-        required: false
-        default: ''
-      lat_range:
-        description: 'Latitude range (min max, e.g. "37.3 37.6")'
-        required: false
-        default: ''
-      lon_range:
-        description: 'Longitude range (min max, e.g. "138.7 139.1")'
-        required: false
-        default: ''
-      output:
-        description: 'Output filename'
-        required: false
-        default: ''
+  workflow_dispatch: {}
 
 jobs:
   run-weather-batch:
@@ -56,27 +30,7 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
-          # ==== 定時バッチ（Slack通知のみ） ====
           docker run --rm \
             -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN}" \
             -e SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID}" \
             weather-map-app
-
-          # ==== 手動運用：任意地点ローカルパネル ====
-          if [ ! -z "${{ github.event.inputs.city }}" ] && \
-             [ ! -z "${{ github.event.inputs.pin_lat }}" ] && \
-             [ ! -z "${{ github.event.inputs.pin_lon }}" ] && \
-             [ ! -z "${{ github.event.inputs.lat_range }}" ] && \
-             [ ! -z "${{ github.event.inputs.lon_range }}" ]; then
-            docker run --rm \
-              -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN}" \
-              -e SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID}" \
-              weather-map-app \
-              python gpv_panel_daily_msm_local.py \
-                --city "${{ github.event.inputs.city }}" \
-                --pin_lat ${{ github.event.inputs.pin_lat }} \
-                --pin_lon ${{ github.event.inputs.pin_lon }} \
-                --lat_range ${{ github.event.inputs.lat_range }} \
-                --lon_range ${{ github.event.inputs.lon_range }} \
-                --output "${{ github.event.inputs.output }}"
-          fi
