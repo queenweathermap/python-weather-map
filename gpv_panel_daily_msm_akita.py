@@ -4,11 +4,11 @@
 # ※現在はGSMデータで運用、NO DATA時も画像出力
 # ========================================================
 
-
 import sys
 import traceback
 import os
 import xarray as xr
+import pandas as pd
 
 from gpv_downloader import (
     find_existing_init_dt, download_gpv_panel, grib2_to_nc,
@@ -22,7 +22,7 @@ from module.panel_utils import (
 
 BASE_DIR = "./data"
 NCOLS = 12
-OUTFILE = "akita_local_msm_map.jpg"
+OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "akita_local_msm_map.jpg"
 
 # 秋田市の例
 PIN_LAT = 39.7186
@@ -52,7 +52,7 @@ if __name__ == "__main__":
             import pandas as pd
             now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
             times = [now + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
-            make_nodata_weather_panel(times, save_path=OUTFILE)
+            make_local_weather_panel(ds, times, OUTFILE, pin_lat=PIN_LAT, pin_lon=PIN_LON, city_name=CITY_NAME)
             sys.exit(0)
 
         print("2. NetCDF変換開始")
