@@ -1,15 +1,14 @@
 # gpv_panel_daily_gsm.py
 # ===============================================
 # GSMパネル自動生成スクリプト（12時刻×2パターン/日パネル）
+# ・ダウンロード/変換失敗時はNO DATAパネルを強制出力
+# ・Noneチェックを徹底しTypeError回避
 # ===============================================
 
 import sys
 import traceback
-import argparse
 import os
-import pandas as pd
 import xarray as xr
-
 
 from gpv_downloader import (
     find_existing_init_dt, download_gpv_panel, grib2_to_nc,
@@ -23,8 +22,7 @@ from module.panel_utils import (
 
 BASE_DIR = "./data"
 NCOLS = 12
-
-
+OUTFILE = "gsm_weather_map.jpg"
 
 if __name__ == "__main__":
     try:
@@ -33,7 +31,7 @@ if __name__ == "__main__":
         init_dt = find_existing_init_dt(GSM_PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12])
         if init_dt is None:
             print("NO DATA: GSMファイルがサーバに見つかりません")
-            # NO DATAパネル生成処理...
+            make_nodata_weather_panel(save_path=OUTFILE)
             sys.exit(0)
 
         print(f"init_dt: {init_dt}")
@@ -44,7 +42,7 @@ if __name__ == "__main__":
         pattern_files = [f for f in panel_files if f and len(f) == len(GSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 2:
             print("NO DATA: pattern_files is None or <2")
-            # NO DATAパネル生成...
+            make_nodata_weather_panel(save_path=OUTFILE)
             sys.exit(0)
 
         print("2. NetCDF変換開始")
@@ -53,7 +51,7 @@ if __name__ == "__main__":
         nc_paths = []
         for path, _ in file_list:
             nc_path = grib2_to_nc(path)
-            if os.path.exists(nc_path):
+            if nc_path and os.path.exists(nc_path):
                 nc_paths.append(nc_path)
             else:
                 print(f"[SKIP] NetCDF変換失敗: {nc_path}")
@@ -61,7 +59,7 @@ if __name__ == "__main__":
 
         if not nc_paths or len(nc_paths) < 2:
             print("NO DATA: ncファイル少なすぎ")
-            # NO DATAパネル生成...
+            make_nodata_weather_panel(save_path=OUTFILE)
             sys.exit(0)
 
         ds_list = []
@@ -73,7 +71,7 @@ if __name__ == "__main__":
                 print(f"[SKIP] open_dataset失敗: {nc} ({e})")
         if not ds_list or len(ds_list) < 2:
             print("NO DATA: ds_list少なすぎ")
-            # NO DATAパネル生成...
+            make_nodata_weather_panel(save_path=OUTFILE)
             sys.exit(0)
 
         # ...以降は今まで通り
@@ -81,7 +79,7 @@ if __name__ == "__main__":
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         times = ds.time.values[:NCOLS]
 
-        make_daily_weather_panel_multi_time(ds, times, "gsm_weather_map.jpg")
+        make_daily_weather_panel_multi_time(ds, times, OUTFILE)
         print("画像生成完了")
         print("=== 完了 ===")
 
@@ -89,4 +87,5 @@ if __name__ == "__main__":
         print("=== 重大エラー発生 ===")
         print(type(e), e)
         traceback.print_exc()
+        make_nodata_weather_panel(save_path=OUTFILE)
         sys.exit(1)
