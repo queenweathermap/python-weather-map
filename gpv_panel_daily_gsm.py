@@ -23,7 +23,7 @@ from module.panel_utils import (
 
 BASE_DIR = "./data"
 NCOLS = 12
-OUTFILE = "gsm_weather_map.jpg"
+OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "gsm_weather_map.jpg"
 
 def get_nodata_times():
     """NO DATAパネル用に等間隔の時刻リストを返す"""
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         pattern_files = [f for f in panel_files if f and len(f) == len(GSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 2:
             print("NO DATA: pattern_files is None or <2")
-            make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
+            make_daily_weather_panel_multi_time(ds, times, OUTFILE)
             sys.exit(0)
 
         print("2. NetCDF変換開始")
