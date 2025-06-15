@@ -1,10 +1,10 @@
 # .github/workflows/daily_weather.yml
 # ===============================================
-# Daily Weather Map（Slack/LINE/Drive連携）
+# Daily Weather Map（Slack通知専用・LINE/Driveなし）
 # -----------------------------------------------
-# ・毎日JST 5時/17時自動バッチ
-# ・任意地点のローカルパネルも手動対応
-# ・APIキー/TokenはGitHub Secretsで管理
+# ・毎日JST 5時/17時に自動実行
+# ・任意地点パネルも手動対応
+# ・Slack APIキーはGitHub Secretsで管理
 # 2025-06-16 by ChatGPT
 # ===============================================
 
@@ -53,24 +53,11 @@ jobs:
 
       - name: Run weather batch in Docker
         env:
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-          # メール通知等追加の場合は以下も
-          # MAIL_HOST: ${{ secrets.MAIL_HOST }}
-          # MAIL_PORT: ${{ secrets.MAIL_PORT }}
-          # MAIL_USER: ${{ secrets.MAIL_USER }}
-          # MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
         run: |
-          # ==== 定時バッチ ====
+          # ==== 定時バッチ（Slack通知のみ） ====
           docker run --rm \
-            -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
-            -e LINE_USER_ID="${LINE_USER_ID}" \
-            -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
-            -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \
             -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN}" \
             -e SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID}" \
             weather-map-app
@@ -82,10 +69,6 @@ jobs:
              [ ! -z "${{ github.event.inputs.lat_range }}" ] && \
              [ ! -z "${{ github.event.inputs.lon_range }}" ]; then
             docker run --rm \
-              -e LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN}" \
-              -e LINE_USER_ID="${LINE_USER_ID}" \
-              -e GOOGLE_SERVICE_ACCOUNT_JSON="${GOOGLE_SERVICE_ACCOUNT_JSON}" \
-              -e DRIVE_FOLDER_ID="${DRIVE_FOLDER_ID}" \
               -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN}" \
               -e SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID}" \
               weather-map-app \
