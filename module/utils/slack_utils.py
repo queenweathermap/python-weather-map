@@ -29,15 +29,14 @@ def upload_file_external_slack(
         print(f"[ERROR] ファイルが存在しません: {filepath}")
         return
 
-    # 必ずファイル名・バイト数を取得
     filename = os.path.basename(filepath)
     length = os.path.getsize(filepath)
 
-    # 1. アップロードURL取得（files.getUploadURLExternal）
+    # 1. アップロードURL取得
     url = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8"  # 明示する
+        # "Content-Type" を絶対に書かない！！！
     }
     data = {
         "filename": filename,
@@ -63,6 +62,10 @@ def upload_file_external_slack(
 
     # 3. 完了通知
     complete_url = "https://slack.com/api/files.completeUploadExternal"
+    complete_headers = {
+        "Authorization": f"Bearer {bot_token}",
+        # ここもContent-Type不要（json=で勝手につく）
+    }
     complete_data = {
         "files": [
             {
@@ -73,10 +76,6 @@ def upload_file_external_slack(
         "channel_id": channel,
         "initial_comment": initial_comment
     }
-    complete_headers = {
-        "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8"
-    }
     complete_res = requests.post(complete_url, headers=complete_headers, json=complete_data)
     complete_json = complete_res.json()
     print(f"[DEBUG] complete_json={complete_json}")
@@ -85,3 +84,4 @@ def upload_file_external_slack(
         return
 
     print("[Slack送信] 完了:", complete_json)
+
