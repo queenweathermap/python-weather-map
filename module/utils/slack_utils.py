@@ -5,10 +5,6 @@
 # ・チャンネルへ画像やファイルを直接アップロード（API v2方式）
 # ・Slack Bot Tokenは環境変数 SLACK_BOT_TOKEN で管理
 # ・APIエラーやレスポンスも詳細に出力・デバッグしやすい設計
-# -----------------------------------------------
-# 必要パッケージ: requests
-#   pip install requests
-# -----------------------------------------------
 # 利用例:
 #   from module.slack_utils import upload_file_external_slack
 #   upload_file_external_slack("C12345678", "weather_map.jpg")
@@ -16,6 +12,7 @@
 
 import requests
 import os
+import json
 
 def upload_file_external_slack(
     channel,
@@ -30,20 +27,21 @@ def upload_file_external_slack(
         return
 
     filename = os.path.basename(filepath)
-    length = os.path.getsize(filepath)
+    length = int(os.path.getsize(filepath))  # ← 型を必ずintに！
 
     # 1. アップロードURL取得
     url = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        # "Content-Type" を絶対に書かない！！！
     }
     data = {
         "filename": filename,
         "length": length
     }
-    print(f"[INFO] POST to {url} with {data}")
+    print(f"[DEBUG] data={data} (type: {type(data['length'])})")
     res = requests.post(url, headers=headers, json=data)
+    print(f"[DEBUG] res.request.headers={res.request.headers}")
+    print(f"[DEBUG] res.request.body={res.request.body}")
     print(f"[DEBUG] res.text={res.text}")
     res_json = res.json()
     if not res_json.get("ok"):
@@ -64,7 +62,6 @@ def upload_file_external_slack(
     complete_url = "https://slack.com/api/files.completeUploadExternal"
     complete_headers = {
         "Authorization": f"Bearer {bot_token}",
-        # ここもContent-Type不要（json=で勝手につく）
     }
     complete_data = {
         "files": [
