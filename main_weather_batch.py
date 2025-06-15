@@ -2,6 +2,7 @@
 # ===============================================
 # GSM全国・秋田局地の天気図画像を自動生成しSlackに投稿
 # 他通知・アップロード（LINE/Drive/メール）は一切なし
+# 画像ファイルは作業ディレクトリ直下に保存・投稿後削除も可
 # 2025-06-16 by ChatGPT
 # ===============================================
 
@@ -12,14 +13,13 @@ from dotenv import load_dotenv
 
 from module.utils.slack_utils import upload_file_external_slack
 
-# --- .env読込（GitHub Actions上は無視されるがローカル開発用に） ---
+# --- .env読込（ローカル開発用。Actions上では無視される） ---
 load_dotenv()
 
+# 画像ファイル名（作業ディレクトリに保存）
 init_time = datetime.now().strftime("%Y%m%d_%H%M")
-DESKTOP_DIR = os.path.expanduser("~/Desktop")
-
-IMG_GSM   = os.path.join(DESKTOP_DIR, f"gsm_{init_time}.jpg")
-IMG_AKITA = os.path.join(DESKTOP_DIR, f"akita_{init_time}.jpg")
+IMG_GSM   = f"gsm_{init_time}.jpg"
+IMG_AKITA = f"akita_{init_time}.jpg"
 
 image_jobs = [
     ("gpv_panel_daily_gsm.py",      IMG_GSM,   "GSM 日本域"),
@@ -36,6 +36,7 @@ if not slack_token or not slack_channel:
 for script, out_file, label in image_jobs:
     print(f"=== {script} 開始 ===")
     try:
+        # スクリプトを「出力画像ファイル名指定」で起動
         result = subprocess.run(["python3", script, out_file], check=True, capture_output=True, text=True)
         print(f"[INFO] {script} 実行完了：\n{result.stdout}")
     except subprocess.CalledProcessError as e:
@@ -61,6 +62,8 @@ for script, out_file, label in image_jobs:
             )
         except Exception as e:
             print(f"[ERROR] Slack送信失敗: {out_file} {e}")
+        # 投稿後は画像削除してもよい場合（不要ならこの行を消す）
+        os.remove(out_file)
     else:
         print(f"[ERROR] 画像が見つかりません: {out_file}")
 
