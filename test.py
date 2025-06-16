@@ -1,33 +1,33 @@
 import os
 import requests
 
+
 FILENAME = "test.png"
-print("=== カレントディレクトリ ===", os.getcwd())
+print("=== 現在のディレクトリ ===", os.getcwd())
 print("=== ファイル一覧 ===", os.listdir())
 print("=== ファイル存在確認 ===", os.path.exists(FILENAME))
 if not os.path.exists(FILENAME):
-    print("ERROR: ファイルがありません")
-    exit(1)
+    raise FileNotFoundError(f"{FILENAME}が見つかりません！")
+print("=== ファイルサイズ ===", os.path.getsize(FILENAME))
 
 
-SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
-SLACK_CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
 FILENAME = "test.png"
-FILESIZE = os.path.getsize(FILENAME)  # int型になる
+assert os.path.exists(FILENAME), "test.pngが存在しません"
+FILESIZE = os.path.getsize(FILENAME)
+SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 
 headers = {
     "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
     "Content-Type": "application/json; charset=utf-8"
 }
 json_data = {
-    "filename": FILENAME,  # 例: "test.png"
-    "length": FILESIZE     # 例: 12345  ← 必ずint型!
+    "filename": FILENAME,
+    "length": FILESIZE
 }
-
-print("送信データ:", json_data)  # デバッグ用
+print("送信データ:", json_data)
 res = requests.post(
     "https://slack.com/api/files.getUploadURLExternal",
     headers=headers,
     json=json_data
 )
-print("getUploadURLExternal:", res.text)
+print("APIレスポンス:", res.text)
