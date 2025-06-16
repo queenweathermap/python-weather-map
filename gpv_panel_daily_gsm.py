@@ -32,12 +32,11 @@ BASE_DIR = "./data"
 NCOLS = 12
 OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "gsm_weather_map.jpg"
 
-def get_nodata_times():
-    """
-    NO DATAパネル用：等間隔の時刻リストを返す（現在時刻基準）
-    """
+def get_nodata_times(ncols=12):
+    # 必ず「00分」始まり
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-    return [now + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
+    return [now + pd.Timedelta(hours=3*i) for i in range(ncols)]
+
 
 if __name__ == "__main__":
     try:
