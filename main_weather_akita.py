@@ -4,6 +4,7 @@
 # GSM運用、将来MSMに切替可（gpv_panel_daily_local_akita.py を利用）
 # ========================================================
 
+import os
 import subprocess
 from module.utils.slack_utils import upload_file_slack
 from module.utils.drive_utils import upload_to_drive
