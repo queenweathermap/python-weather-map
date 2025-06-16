@@ -3,7 +3,7 @@
 # GSM全国・秋田局地の天気図画像を自動生成しSlackに投稿
 # 他通知・アップロード（LINE/Drive/メール）は一切なし
 # 画像ファイルは作業ディレクトリ直下に保存・投稿後削除も可
-# 2025-06-16 by ChatGPT
+# 2025-06-17 by ChatGPT
 # ===============================================
 
 import subprocess
@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-from module.utils.slack_utils import upload_file_external_slack
+from module.utils.slack_utils import upload_file_slack
 
 # --- .env読込（ローカル開発用。Actions上では無視される） ---
 load_dotenv()
@@ -54,7 +54,7 @@ for script, out_file, label in image_jobs:
     if os.path.exists(out_file):
         print(f"[Slack通知] 送信: {out_file}")
         try:
-            upload_file_external_slack(
+            upload_file_slack(
                 slack_channel,
                 out_file,
                 title=f"{label} 天気図",
