@@ -20,22 +20,35 @@ plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
 from module.utils.xr_utils import align_datasets_common
 
-def make_nodata_weather_panel(times, save_path="nodata_panel.jpg", title="NO DATA"):
+def make_nodata_weather_panel(
+    times, 
+    save_path="nodata_panel.jpg", 
+    title="NO DATA", 
+    city_name=None
+):
     """
     Generate a NO DATA panel image for missing or failed data downloads.
     - times: list of forecast datetimes to display (for context)
     - save_path: Output image filename
-    - title: Title (default: "NO DATA")
+    - title: Panel main title (default: "NO DATA")
+    - city_name: (optional) City/region label to show (e.g. "Akita City")
     """
     fig, ax = plt.subplots(figsize=(16, 6))
     ax.axis("off")
-    msg = f"{title}\n\nWeather data could not be retrieved.\n\n"
-    msg += "\n".join([str(t) for t in times])
+
+    if city_name:
+        main_title = f"{title}  [{city_name}]"
+    else:
+        main_title = title
+
+    msg = f"{main_title}\n\nWeather data could not be retrieved.\n\n"
+    msg += "\n".join([str(pd.Timestamp(t).strftime("%Y-%m-%d %H:%M")) for t in times])
     ax.text(0.5, 0.5, msg, fontsize=20, ha="center", va="center", wrap=True)
     plt.tight_layout()
     fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
     print(f"[NO DATA panel] {save_path} exported.")
+
 
 def make_local_weather_panel(
     ds, times, save_path,
