@@ -1,8 +1,13 @@
 # gpv_panel_daily_gsm.py
 # ===============================================
 # GSMパネル自動生成スクリプト（12時刻×2パターン/日パネル）
-# ・ダウンロード/変換失敗時はNO DATAパネルを強制出力
-# ・NoneチェックとNO DATA用の時刻リストを必ず渡す
+# -----------------------------------------------
+# ・最新のGSM GPVファイルを12時刻分ダウンロード＆NetCDF変換し、
+#   各時刻をパネルとしてまとめて描画（NO DATA時はダミーパネル自動生成）
+# ・ファイル/データの欠損や失敗にも強い自動チェック実装
+# ・NO DATAの場合は指定時刻リストで強制生成
+# -----------------------------------------------
+# 2025-06-17 by ChatGPT
 # ===============================================
 
 import sys
@@ -11,10 +16,12 @@ import os
 import xarray as xr
 import pandas as pd
 
+# --- GPVダウンロード・変換用ユーティリティ ---
 from gpv_downloader import (
     find_existing_init_dt, download_gpv_panel, grib2_to_nc,
     GSM_PATTERNS, GPV_MIRROR_URLS
 )
+# --- パネル生成・NO DATA画像 ---
 from module.panel_utils import (
     make_nodata_weather_panel,
     make_daily_weather_panel_multi_time,
@@ -26,33 +33,40 @@ NCOLS = 12
 OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "gsm_weather_map.jpg"
 
 def get_nodata_times():
-    """NO DATAパネル用に等間隔の時刻リストを返す"""
+    """
+    NO DATAパネル用：等間隔の時刻リストを返す（現在時刻基準）
+    """
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     return [now + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
 
 if __name__ == "__main__":
     try:
         print("=== GSMパネル処理開始 ===")
-        # 最新init時刻取得
-        init_dt = find_existing_init_dt(GSM_PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12])
+        # 1. 最新のイニシャル時刻を探索（GSM: 0時/12時が標準）
+        init_dt = find_existing_init_dt(
+            GSM_PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12]
+        )
         if init_dt is None:
             print("NO DATA: GSMファイルがサーバに見つかりません")
             make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
 
         print(f"init_dt: {init_dt}")
-        panel_files = download_gpv_panel(GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
+        # 2. 12時刻×2パターン ダウンロード実行
+        panel_files = download_gpv_panel(
+            GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS
+        )
         print("panel_files:", panel_files)
 
-        # 空でない時刻だけ抜き出す
+        # 3. 欠損時刻を除去し、2パターン揃った時刻のみ抽出
         pattern_files = [f for f in panel_files if f and len(f) == len(GSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 2:
             print("NO DATA: pattern_files is None or <2")
-            make_daily_weather_panel_multi_time(ds, times, OUTFILE)
+            make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
 
         print("2. NetCDF変換開始")
-        # 存在する時刻だけフラット化
+        # 4. GRIB2→NetCDF変換（全ファイルを一括処理、失敗・小サイズは除外）
         file_list = [item for sublist in pattern_files for item in sublist]
         nc_paths = []
         for path, _ in file_list:
@@ -68,6 +82,7 @@ if __name__ == "__main__":
             make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
 
+        # 5. NetCDFからxarray Datasetをリストで取得
         ds_list = []
         for nc in nc_paths:
             try:
@@ -80,11 +95,13 @@ if __name__ == "__main__":
             make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
 
+        # 6. すべてのDatasetを共通座標にアライン
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
-        # timeはnp.datetime64配列なのでpandas.Timestamp化
+        # time座標→pandas.Timestampリスト化（最大NCOLS本分）
         times = [pd.Timestamp(t).to_pydatetime() for t in ds.time.values[:NCOLS]]
 
+        # 7. パネル画像として描画・保存
         make_daily_weather_panel_multi_time(ds, times, OUTFILE)
         print("画像生成完了")
         print("=== 完了 ===")
