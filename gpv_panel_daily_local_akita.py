@@ -115,12 +115,12 @@ try:
 
     print("天気図パネル画像を正常に出力しました")
 
-except Exception as e:
-    print("【NO DATA】例外:", e)
-    traceback.print_exc()
-    make_nodata_weather_panel(
-        save_path=OUTFILE,
-        city_name=CITY_NAME,
-        times=get_gpv_nodata_times(NCOLS)
-    )
-    sys.exit(0)
+    except Exception as e:
+        print("【NO DATA】例外:", e)
+        traceback.print_exc()
+        make_nodata_weather_panel(
+            save_path=OUTFILE,
+            city_name=CITY_NAME,
+            times=get_gpv_nodata_times(NCOLS)
+        )
+        sys.exit(0)
