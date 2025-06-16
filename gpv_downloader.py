@@ -20,10 +20,18 @@ import subprocess
 GPV_MIRROR_URLS = [
     "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 ]
+# DLパターン例
 GSM_PATTERNS = [
-    "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",   # 気圧面
-    "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",    # 地上
+    "GSM_GPV_Rjp_Gll0p1deg_L-pall",
+    "GSM_GPV_Rjp_Gll0p1deg_Lsurf"
 ]
+
+# MSM用パターン（秋田局地または全国 MSM のファイル名パターン）
+MSM_PATTERNS = [
+    "MSM_GPV_Rjp_L-pall",   # 上層データ
+    "MSM_GPV_Rjp_Lsurf"     # 地上データ
+]
+
 
 def download_available_gpv(pattern, base_dir, mirrors):
     """
