@@ -66,4 +66,21 @@ def upload_file_slack(
     else:
         print("[Slack送信] 完了:", res3_json)
 
+
+def send_slack_text(text):
+    url = "https://slack.com/api/chat.postMessage"
+    token = os.environ["SLACK_BOT_TOKEN"]
+    channel = os.environ["SLACK_CHANNEL_ID"]
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=utf-8"
+    }
+    data = {
+        "channel": channel,
+        "text": text
+    }
+    res = requests.post(url, headers=headers, json=data)
+    if not res.ok or not res.json().get("ok"):
+        print("[ERROR] Slack text送信失敗:", res.text)
+
 # ===============================================
