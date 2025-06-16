@@ -1,10 +1,7 @@
 # gpv_panel_daily_local_akita.py
 # ========================================================
 # 秋田局地 MSMパネル（6段×12列）全FH帯DL・index.htmlパース自動化
-# --------------------------------------------------------
-# 1. サーバindex.htmlからL-pall/Lsurfペア抽出（最速・NO DATA激減）
-# 2. 揃ったペアをDL→NetCDF変換→xarray合成
-# 3. データがあればパネル描画、なければNO DATA画像
+# どちらか単独（L-pall/Lsurf）でもパネル生成可
 # 2025-06-18 by ChatGPT（講座・実運用ベース最適化）
 # ========================================================
 
@@ -14,7 +11,7 @@ import traceback
 import xarray as xr
 import pandas as pd
 
-from module.utils.gpv_html_parser import find_existing_msm_pairs
+from module.utils.gpv_html_parser import find_existing_msm_files
 from gpv_downloader import grib2_to_nc
 from module.panel_utils import (
     make_nodata_weather_panel,
@@ -22,9 +19,6 @@ from module.panel_utils import (
     align_datasets_common,
 )
 
-# ========================================
-# 設定
-# ========================================
 BASE_DIR = "./data"
 OUTFILE = "akita_local_msm_map.jpg"
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
@@ -45,10 +39,10 @@ def get_gpv_nodata_times(ncols=12):
 try:
     os.makedirs(BASE_DIR, exist_ok=True)
 
-    # 1. サーバindex.htmlから最新ペアを抽出
-    pairs = find_existing_msm_pairs(BASE_URL, YMD)
-    if not pairs:
-        print("NO DATA: サーバ上にペアが見つかりません")
+    # 1. サーバindex.htmlからL-pall/Lsurfファイルを抽出（どちらかだけでもOK）
+    files = find_existing_msm_files(BASE_URL, YMD)
+    if not files:
+        print("NO DATA: サーバ上にファイルが見つかりません")
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
@@ -56,11 +50,11 @@ try:
         )
         sys.exit(0)
 
-    # 2. 一番新しいinit時刻のものから必要数だけピックアップ
-    latest_init = max([p[2] for p in pairs])
-    use_pairs = [p for p in pairs if p[2] == latest_init][:NCOLS]
-    if len(use_pairs) < 2:
-        print("NO DATA: 有効ペア不足")
+    # 2. 最新init時刻のものをNCOLS件ピックアップ（どちらかあれば採用）
+    latest_init = max([f["init"] for f in files])
+    use_files = [f for f in files if f["init"] == latest_init][:NCOLS]
+    if not use_files or len(use_files) < 2:
+        print("NO DATA: 有効ファイル不足")
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
@@ -68,14 +62,18 @@ try:
         )
         sys.exit(0)
 
-    # 3. ペアごとにGRIB2→NetCDF変換
+    # 3. NetCDF変換（どちらかだけでも揃った分だけ）
     nc_paths = []
-    for l_pall_path, lsurf_path, init_time, fh_band in use_pairs:
-        nc1 = grib2_to_nc(l_pall_path)
-        nc2 = grib2_to_nc(lsurf_path)
-        if nc1 and nc2:
-            nc_paths.extend([nc1, nc2])
-    if len(nc_paths) < 2:
+    for f in use_files:
+        if f["l_pall_url"]:
+            nc1 = grib2_to_nc(f["l_pall_url"])
+            if nc1:
+                nc_paths.append(nc1)
+        if f["lsurf_url"]:
+            nc2 = grib2_to_nc(f["lsurf_url"])
+            if nc2:
+                nc_paths.append(nc2)
+    if not nc_paths or len(nc_paths) < 1:
         print("NO DATA: NetCDF変換失敗")
         make_nodata_weather_panel(
             save_path=OUTFILE,
@@ -84,16 +82,27 @@ try:
         )
         sys.exit(0)
 
-    # 4. xarrayで合成（全パネル分）
-    ds_l_pall = xr.open_dataset([p for p in nc_paths if "L-pall" in p][0])
-    ds_lsurf  = xr.open_dataset([p for p in nc_paths if "Lsurf" in p][0])
-    ds = xr.merge([ds_l_pall, ds_lsurf])
-    ds = align_datasets_common(ds, ncols=NCOLS)
+    # 4. xarrayで合成（利用可能な分だけ）
+    ds_list = []
+    for nc in nc_paths:
+        try:
+            ds = xr.open_dataset(nc)
+            ds_list.append(ds)
+        except Exception as e:
+            print(f"[WARN] open_dataset失敗: {nc} ({e})")
+    if not ds_list or len(ds_list) < 1:
+        print("NO DATA: Dataset不足")
+        make_nodata_weather_panel(
+            save_path=OUTFILE,
+            city_name=CITY_NAME,
+            times=get_gpv_nodata_times(NCOLS)
+        )
+        sys.exit(0)
 
-    # 5. 描画用時刻リスト
-    times = ds.time.values[:NCOLS]
+    ds = align_datasets_common(ds_list, ncols=NCOLS)
+    times = ds.time.values[:NCOLS] if hasattr(ds, "time") else get_gpv_nodata_times(NCOLS)
 
-    # 6. パネル描画関数リスト（MSM用）
+    # 5. MSM描画関数リスト
     from module.gpv_plotter_msm import (
         plot_emagram_msm_panel,
         plot_700hpa_dindex_500hpa_temp_msm,
@@ -111,7 +120,7 @@ try:
         plot_surface_pressure_and_wind_msm,
     ]
 
-    # 7. パネル描画/NO DATA分岐
+    # 6. パネル描画/NO DATA分岐
     if len(times) >= NCOLS:
         make_local_weather_panel(
             ds, times, OUTFILE,
