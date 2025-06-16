@@ -100,3 +100,43 @@ except Exception as e:
         times=get_gpv_nodata_times(NCOLS)
     )
     sys.exit(0)
+
+
+    # ...（ここまでNetCDF変換、マージまで済んでいる）
+
+    # もしds.timeに十分な時刻が含まれていればパネル描画
+    if len(ds.time) >= NCOLS:
+        times = ds.time.values[:NCOLS]
+        # ↓プロジェクト仕様で必要な関数リストを渡す（例：plot_func_list）
+        from module.gpv_plotter_gsm import (
+            plot_emagram_gsm_panel,
+            plot_700hpa_dindex_500hpa_temp_gsm,
+            plot_850hpa_temp_wind_700hpa_w_gsm,
+            plot_850hpa_thetae_stream_gsm,
+            plot_925hpa_temp_wind_dindex_gsm,
+            plot_surface_pressure_and_wind_gsm,
+        )
+        plot_func_list = [
+            plot_emagram_gsm_panel,
+            plot_700hpa_dindex_500hpa_temp_gsm,
+            plot_850hpa_temp_wind_700hpa_w_gsm,
+            plot_850hpa_thetae_stream_gsm,
+            plot_925hpa_temp_wind_dindex_gsm,
+            plot_surface_pressure_and_wind_gsm,
+        ]
+    
+        make_local_weather_panel(
+            ds, times, OUTFILE,
+            pin_lat=PIN_LAT, pin_lon=PIN_LON, city_name=CITY_NAME,
+            plot_func_list=plot_func_list,
+            nrows=6, ncols=NCOLS,
+        )
+        print("天気図パネル画像を正常に出力しました")
+    else:
+        print("【NO DATA】十分な時刻データがないため、ダミー画像出力")
+        make_nodata_weather_panel(
+            save_path=OUTFILE,
+            city_name=CITY_NAME,
+            times=[pd.Timestamp.now().replace(minute=0, second=0, microsecond=0) + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
+        )
+    
