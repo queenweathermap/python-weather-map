@@ -1,6 +1,6 @@
 # .github/workflows/daily_weather.yml
 # ===============================================
-# Daily Weather Map（Slack通知・GSM全国＋秋田局地のみ）
+# Daily Weather Map（Slack通知・GSM全国のみ）
 # -----------------------------------------------
 # 毎日JST 5時/17時自動実行
 # Slack APIキーはGitHub Secretsで管理
