@@ -2,14 +2,29 @@
 # ===============================================
 # Local Weather Panel Generator（任意地点／手動トリガー）
 # -----------------------------------------------
-# 手動実行のみ（都度指定地点を描画）
-# MSM → いずれ復旧。現在はGSMで運用中でも構文そのまま流用可
-# 2025-06-16 by ChatGPT
+# このGitHub Actionsワークフローは、
+# 任意地点の気象パネル（天気図）を1回ごとに手動で生成するためのものです。
+#
+# ★ 利用シーン
+# - 管理画面やActionsタブから「Run workflow」でパラメータを入力し、即時生成・Drive連携。
+# - 将来的にMSMが安定運用に戻れば「model=msm」も選択肢として有効。
+#
+# ★ パラメータ
+# - model: データ種別（GSMまたはMSMを指定、デフォルトはGSM）
+# - city: 地名（自由入力、例："Nagaoka Fireworks"）
+# - pin_lat, pin_lon: ピンポイント地点の緯度・経度
+# - lat/lon_min/max: 可視化範囲の指定
+#
+# ★ 処理内容
+# - 依存パッケージインストール
+# - 任意地点のパネル生成スクリプト実行（必要なパラメータを全て渡す）
+# - Google Drive連携のため、サービスアカウント等の環境変数もセット
 # ===============================================
 
 name: Local Weather Panel
 
 on:
+  # --- 手動実行トリガー（Run workflow時に下記パラメータを入力） ---
   workflow_dispatch:
     inputs:
       model:
@@ -21,15 +36,15 @@ on:
           - gsm
           - msm
       city:
-        description: '地名（例：長岡花火）'
+        description: '地名（例：Nagaoka Fireworks）'
         required: true
         type: string
       pin_lat:
-        description: 'ピンポイント緯度'
+        description: 'ピンポイント緯度（例：37.4462）'
         required: true
         type: number
       pin_lon:
-        description: 'ピンポイント経度'
+        description: 'ピンポイント経度（例：138.8521）'
         required: true
         type: number
       lat_min:
@@ -53,12 +68,15 @@ jobs:
   run-local-panel:
     runs-on: ubuntu-latest
     steps:
+      # --- リポジトリの最新ソースをチェックアウト ---
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # --- 必要なPythonパッケージをインストール ---
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # --- ローカル天気パネル生成スクリプトを実行（各種パラメータをコマンドラインで渡す） ---
       - name: Run local weather panel script
         env:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
@@ -71,3 +89,5 @@ jobs:
             --pin_lon ${{ github.event.inputs.pin_lon }} \
             --lat_range ${{ github.event.inputs.lat_min }} ${{ github.event.inputs.lat_max }} \
             --lon_range ${{ github.event.inputs.lon_min }} ${{ github.event.inputs.lon_max }}
+
+# ===============================================
