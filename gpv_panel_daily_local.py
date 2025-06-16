@@ -1,7 +1,10 @@
 # gpv_panel_daily_local.py
 # ===============================================================
 # 任意の地点でGSM/MSM局地天気図パネル（エマグラム付き）を生成する汎用スクリプト
-# 2025-06-18 by ChatGPT
+# ---------------------------------------------------------------
+# コマンドライン引数でモデル・地点・範囲を指定し自動描画
+# ---------------------------------------------------------------
+# 2025-06-18 by ChatGPT（講座・現場運用ベース）
 # ===============================================================
 
 import sys
@@ -21,16 +24,19 @@ from module.panel_utils import (
     make_local_weather_panel,
 )
 
+# ========================================
+# NO DATA用：3時間刻み時刻リスト生成
+# ========================================
 def get_gpv_nodata_times(ncols=12):
-    """
-    GPVイニシャル（00,06,12,18時）基準のNO DATA時刻リストを返す
-    """
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     hour = now.hour
     init_hour = max([h for h in [0, 6, 12, 18] if h <= hour])
     base_time = now.replace(hour=init_hour)
     return [base_time + pd.Timedelta(hours=3*i) for i in range(ncols)]
 
+# ========================================
+# メイン処理
+# ========================================
 def main():
     parser = argparse.ArgumentParser(description="全国どこでもGSM/MSM局地天気図パネル生成スクリプト")
     parser.add_argument("--model", choices=["gsm", "msm"], default="gsm", help="モデル選択 (gsm or msm)")
@@ -48,7 +54,7 @@ def main():
     NCOLS = args.ncols
     NROWS = args.nrows
 
-    # === モデル種別に応じて描画関数・パターンを選択 ===
+    # === モデル別に描画関数とパターン設定 ===
     if args.model == "gsm":
         from module.gpv_plotter_gsm import (
             plot_emagram_gsm_panel,
@@ -88,16 +94,16 @@ def main():
 
     try:
         print(f"=== {args.model.upper()}ローカルパネル生成開始：{args.city} ===")
-        # --- 最新の利用可能なイニシャル時刻を探索 ---
+        # --- 1. 最新イニシャル時刻探索 ---
         init_dt = find_existing_init_dt(PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 6, 12, 18])
         if init_dt is None:
             times = get_gpv_nodata_times(NCOLS)
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg", city_name=args.city)
-            print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
+            print("【ERROR】GPVファイル未取得。NO DATAパネル送信")
             sys.exit(0)
 
         print(f"init_dt: {init_dt}")
-        # --- 対象時刻×パターンでGPVファイル取得 ---
+        # --- 2. 予報時刻帯×パターンでGPVファイル取得 ---
         panel_files = download_gpv_panel(PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         pattern_files = [f for f in panel_files if f and len(f) == len(PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
@@ -105,7 +111,7 @@ def main():
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg", city_name=args.city)
             sys.exit(0)
 
-        # --- GRIB2→NetCDF変換 ---
+        # --- 3. GRIB2→NetCDF変換 ---
         file_list = [item for sublist in pattern_files for item in sublist]
         nc_paths = []
         for path, _ in file_list:
@@ -122,7 +128,7 @@ def main():
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg", city_name=args.city)
             sys.exit(0)
 
-        # --- xarray Datasetを座標揃えでマージ ---
+        # --- 4. xarray Datasetを座標揃えでマージ ---
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         if len(ds.time) == 0:
@@ -132,7 +138,7 @@ def main():
 
         times = ds.time.values[:NCOLS]
 
-        # --- パネル生成・画像出力 ---
+        # --- 5. パネル生成・画像出力 ---
         make_local_weather_panel(
             ds, times, args.output or f"{args.city}_local_{args.model}_map.jpg",
             pin_lat=args.pin_lat, pin_lon=args.pin_lon, city_name=args.city,
