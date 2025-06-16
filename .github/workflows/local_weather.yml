@@ -64,7 +64,7 @@ jobs:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
-          python3 scripts/gpv_panel_daily_local.py \
+          python3 gpv_panel_daily_local.py \
             --model "${{ github.event.inputs.model }}" \
             --city "${{ github.event.inputs.city }}" \
             --pin_lat ${{ github.event.inputs.pin_lat }} \
