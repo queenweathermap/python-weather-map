@@ -1,41 +1,43 @@
 # module/utils/gpv_html_parser.py
 # ===============================================
-# サーバindex.htmlをパースしてMSM秋田局地L-pall/Lsurf実在ペアを抽出
+# サーバindex.htmlをパースしてMSM秋田局地L-pall/Lsurfファイル実在リスト抽出
 # ===============================================
 
 import requests
 from bs4 import BeautifulSoup
 import re
+from collections import defaultdict
 
-def find_existing_msm_pairs(base_url, ymd):
+def find_existing_msm_files(base_url, ymd):
     """
     指定日ディレクトリのindex.htmlから
-    MSM秋田局地のL-pall/Lsurfファイルで揃っている（init/FH帯完全一致）ペアを返す
-    Returns: [(l_pall_url, lsurf_url, init_dt, fh_band), ...]
+    MSM秋田局地L-pall/Lsurfファイルをinit/FH帯ごとに抽出
+    Returns: [
+      {"init": ..., "fh": ..., "l_pall_url": ..., "lsurf_url": ...}, ...
+    ]
+    ※ どちらか一方しかない場合も None で返す
     """
     url = f"{base_url}/{ymd[:4]}/{ymd[4:6]}/{ymd[6:8]}/"
     res = requests.get(url)
     soup = BeautifulSoup(res.text, "html.parser")
     files = [a.text for a in soup.find_all('a')]
-    # パターンマッチ
+
     patt = re.compile(r"Z__C_RJTD_(\d{10})00_MSM_GPV_Rjp_L-(pall|surf)_FH(\d{2}-\d{2})_grib2\.bin")
-    meta = []
+    # {(init, fh): {"pall":..., "surf":...}}
+    file_dict = defaultdict(dict)
     for f in files:
         m = patt.match(f)
         if m:
             init_str, ltype, fh_band = m.groups()
-            meta.append((init_str, ltype, fh_band, f))
-    # (init, fh_band)ごとに両方あるペアだけ
-    from collections import defaultdict
-    temp = defaultdict(dict)
-    for init, ltype, fh, fname in meta:
-        temp[(init, fh)][ltype] = fname
-    # 完全ペアだけリスト化
-    pairs = []
-    for (init, fh), v in temp.items():
-        if "pall" in v and "surf" in v:
-            pairs.append((
-                url + v["pall"], url + v["surf"],
-                init, fh
-            ))
-    return pairs
+            file_dict[(init_str, fh_band)][ltype] = url + f
+
+    # どちらか一方しかないものも含めてリスト化
+    result = []
+    for (init, fh), v in file_dict.items():
+        result.append({
+            "init": init,
+            "fh": fh,
+            "l_pall_url": v.get("pall"),
+            "lsurf_url": v.get("surf"),
+        })
+    return result
