@@ -6,12 +6,13 @@
 
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
 import xarray as xr
 
-# --- 日本語フォント（IPAGothic）強制指定 ---
-plt.rcParams['font.family'] = 'IPAGothic'
+import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+
 
 from module.utils.xr_utils import align_datasets_common
 
