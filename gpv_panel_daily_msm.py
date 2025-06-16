@@ -26,6 +26,17 @@ from module.panel_utils import (
     align_datasets_common,
 )
 
+# MSM_PATTERNS を局地・全国で分離も可
+MSM_LOCAL_PATTERNS = [
+    "MSM_GPV_Rjp_L-pall",
+    "MSM_GPV_Rjp_Lsurf"
+]
+MSM_NATIONAL_PATTERNS = [
+    "MSM_GPV_Gll0p1deg_L-pall",
+    "MSM_GPV_Gll0p1deg_Lsurf"
+]
+
+
 BASE_DIR = "./data"
 NCOLS = 12
 OUTFILE = "msm_weather_map.jpg"
