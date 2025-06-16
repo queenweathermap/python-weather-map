@@ -125,7 +125,7 @@ def main():
             # MSMはindex.htmlパースDL
             BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
             YMD = pd.Timestamp.now().strftime("%Y%m%d")
-            pairs = find_existing_msm_pairs(BASE_URL, YMD, base_dir=BASE_DIR, ncols=NCOLS)
+            pairs = find_existing_msm_pairs(BASE_URL, YMD, ncols=NCOLS)
             if not pairs:
                 print("NO DATA: MSMサーバにペアが見つかりません")
                 times = get_gpv_nodata_times(NCOLS)
