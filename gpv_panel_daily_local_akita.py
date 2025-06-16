@@ -46,7 +46,7 @@ try:
     os.makedirs(BASE_DIR, exist_ok=True)
 
     # 1. サーバindex.htmlから最新ペアを抽出
-    pairs = find_existing_msm_pairs(BASE_URL, YMD, base_dir=BASE_DIR, ncols=NCOLS)
+    pairs = find_existing_msm_pairs(BASE_URL, YMD, ncols=NCOLS)
     if not pairs:
         print("NO DATA: サーバ上にペアが見つかりません")
         make_nodata_weather_panel(
