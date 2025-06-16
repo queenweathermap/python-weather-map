@@ -71,7 +71,7 @@ def plot_850hpa_temp_wind_700hpa_w(ax, ds, model="GSM", prop=None, skip=5):
         transform=ccrs.PlateCarree(), scale=250, width=0.002, alpha=0.8
     )
 
-    ax.set_title("850hPa温度・風＋700hPa鉛直流", fontsize=10, pad=10, fontproperties=prop)
+    ax.set_title("850hpa_temp_wind_700hpa_w", fontsize=10, pad=10, fontproperties=prop)
 
 # ======= ラッパー関数 =======
 def plot_850hpa_temp_wind_700hpa_w_gsm(ax, ds, prop=None, skip=5):
