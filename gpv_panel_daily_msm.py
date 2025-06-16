@@ -16,6 +16,8 @@ import os
 import pandas as pd
 import xarray as xr
 
+from module.utils.gpv_html_parser import find_existing_msm_pairs
+
 from gpv_downloader import (
     find_existing_init_dt, download_gpv_panel, grib2_to_nc,
     MSM_PATTERNS, GPV_MIRROR_URLS
