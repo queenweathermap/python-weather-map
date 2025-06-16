@@ -62,7 +62,7 @@ def plot_500hpa_vorticity(ax, ds, model="GSM", prop=None):
     ax.contourf(lon2d, lat2d, vorticity_masked, levels=[0, 1e-5],
                 colors=["orange"], alpha=0.5, transform=ccrs.PlateCarree())
 
-    ax.set_title("500hPa等高度線・渦度", fontsize=10, pad=10, fontproperties=prop)
+    ax.set_title("500hpa_vorticity", fontsize=10, pad=10, fontproperties=prop)
 
 # ======= ラッパー関数 =======
 def plot_500hpa_vorticity_gsm(ax, ds, prop=None):
