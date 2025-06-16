@@ -82,7 +82,7 @@ def plot_emagram_panel(ds, lat=39.72, lon=140.10, times=None, model_name="GSM"):
         time_idx = np.where(tlist == np.datetime64(t))[0][0]
         title = f"{model_name}\n{str(t)[:16]}"
         plot_emagram_skewt(axes[i], ds, lat, lon, time_idx=time_idx, title=title)
-    fig.suptitle(f"{model_name} エマグラム\nLat: {lat:.2f}, Lon: {lon:.2f}", fontsize=13, y=1.05)
+    fig.suptitle(f"{model_name} emagram\nLat: {lat:.2f}, Lon: {lon:.2f}", fontsize=13, y=1.05)
     return fig
 
 def plot_emagram_gsm_panel(ds, lat=39.72, lon=140.10, times=None):
