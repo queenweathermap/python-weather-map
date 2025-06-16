@@ -51,4 +51,11 @@ for script, out_file, label in image_jobs:
     else:
         print(f"[ERROR] 画像が見つかりません: {out_file}")
 
+
+    if is_no_data_image(filename):
+        slack_message = "【注意】本日分の天気図データが取得できませんでした（NO DATA画像です）"
+    else:
+        slack_message = f"ファイルをGoogle Driveにアップロードしました:\n{drive_url}"
+
+
 print("==== 正常終了 ====")
