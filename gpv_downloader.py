@@ -16,10 +16,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import requests
 
+# -----------------------------------------------
+# GPVダウンロード先ミラー（現状は京大RISHのみ）
+# -----------------------------------------------
 GPV_MIRROR_URLS = [
     "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 ]
 
+# -----------------------------------------------
+# パターン（公式配布名）
+# -----------------------------------------------
 GSM_PATTERNS = [
     "GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin",
     "GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin",
@@ -33,8 +39,13 @@ MSM_PATTERNS = [
     "MSM_GPV_Rjp_Lsurf_FH36-39_grib2.bin",
 ]
 
+# -----------------------------------------------
+# JST基準で最も近いイニシャル時刻（例: [0,3,6,...]）を返す
+# -----------------------------------------------
 def find_nearest_init(hours, now=None):
-    """現在時刻に一番近いイニシャル時刻（例: [0,3,6,9,12,15,18,21]）を返す（JST基準）"""
+    """
+    指定した時刻リスト（hours）から現在時刻に一番近いイニシャル時刻を返す（JST基準）
+    """
     if now is None:
         now = datetime.utcnow() + timedelta(hours=9)  # JST
     if isinstance(now, str):
@@ -53,8 +64,13 @@ def find_nearest_init(hours, now=None):
         nearest_dt -= timedelta(days=1)
     return nearest_dt
 
+# -----------------------------------------------
+# サーバ上に全パターンファイルが揃って存在する最新イニシャル時刻を返す
+# -----------------------------------------------
 def find_existing_init_dt(patterns, base_dir, mirrors, hours):
-    """サーバ上に実際に全パターンファイルが存在する最新イニシャル時刻を返す"""
+    """
+    サーバ上にすべてのパターンファイルが存在する最新イニシャル時刻を返す
+    """
     now = datetime.utcnow() + timedelta(hours=9)  # JST
     for day_offset in range(0, 2):  # 今日→昨日
         dt = now - timedelta(days=day_offset)
@@ -81,8 +97,13 @@ def find_existing_init_dt(patterns, base_dir, mirrors, hours):
                 return dt.replace(hour=h, minute=0, second=0, microsecond=0)
     return None
 
+# -----------------------------------------------
+# User-Agent付きでrequestsダウンロード
+# -----------------------------------------------
 def download_with_requests(url, out_path):
-    """User-Agent付きでファイルDL、落ちなければFalse"""
+    """
+    User-Agent付きでrequestsダウンロード（失敗時はFalse）
+    """
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         with requests.get(url, headers=headers, stream=True, timeout=60) as r:
@@ -96,8 +117,13 @@ def download_with_requests(url, out_path):
         print(f"[NG][requests] {url}: {e}")
         return False
 
+# -----------------------------------------------
+# curlによるダウンロード（リトライ・User-Agent付き）
+# -----------------------------------------------
 def download_with_curl(url, out_path):
-    """curlによるダウンロード（リトライ・User-Agent・follow-redirects付き）"""
+    """
+    curlによるダウンロード（リトライ・User-Agent・リダイレクト対応）
+    """
     cmd = ["curl", "-L", "-A", "Mozilla/5.0", "-o", out_path, url]
     result = subprocess.run(cmd)
     if result.returncode == 0:
@@ -107,6 +133,9 @@ def download_with_curl(url, out_path):
         print(f"[NG][curl] {url}")
         return False
 
+# -----------------------------------------------
+# 指定したinit_dtから3時間ごとncols分DL（ペア/分割全て揃える）
+# -----------------------------------------------
 def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
     """
     指定したinit_dtから3時間ごとにncols分（12列分）を
@@ -145,8 +174,13 @@ def download_gpv_panel(patterns, base_dir, init_dt, mirrors, ncols=12):
             ret.append([])  # 欠損は空配列
     return ret
 
+# -----------------------------------------------
+# GRIB2ファイルをNetCDFへ変換（wgrib2使用・サイズチェック付き）
+# -----------------------------------------------
 def grib2_to_nc(grib2_path):
-    """GRIB2ファイルをNetCDFへ変換（サイズチェック付き）"""
+    """
+    GRIB2ファイルをNetCDFへ変換（wgrib2・ファイルサイズチェック付き）
+    """
     grib2_path = Path(grib2_path)
     # GRIB2ファイルサイズが極端に小さい場合はスキップ（例: 10KB未満）
     if not grib2_path.exists() or os.path.getsize(grib2_path) < 10 * 1024:
@@ -173,7 +207,9 @@ def grib2_to_nc(grib2_path):
         return None
     return str(nc_path)
 
-# --- 使用例 ---
+# -----------------------------------------------
+# --- 使用例: 単体実行テスト用 ---
+# -----------------------------------------------
 if __name__ == "__main__":
     base_dir = "./data"
     # MSM運用例（hoursはGSM/局地で切り替え可）
@@ -206,4 +242,3 @@ if __name__ == "__main__":
             print("nc_paths:", nc_paths)
         else:
             print("[SKIP] パネルファイルがありません")
-
