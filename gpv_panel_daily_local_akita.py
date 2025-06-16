@@ -29,6 +29,7 @@ PIN_LON = 140.1024
 CITY_NAME = "Akita City"
 
 def get_gpv_nodata_times(ncols=12):
+    # 最新イニシャルタイムを00, 06, 12, 18UTCから計算し、その時刻以降で3時間刻みncols分
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     hour = now.hour
     init_hour = max([h for h in [0, 6, 12, 18] if h <= hour])
@@ -39,6 +40,7 @@ try:
     os.makedirs(BASE_DIR, exist_ok=True)
     grib2_files, nc_paths, init_time = [], [], None
 
+    # 1. 最新GSM GPVファイル2種（気圧面・地上）DL
     for pattern in GSM_PATTERNS:
         grib2_path, itime = download_available_gpv(pattern, BASE_DIR, GPV_MIRROR_URLS)
         if grib2_path is not None and itime is not None:
@@ -47,6 +49,7 @@ try:
                 init_time = itime
 
     if len(grib2_files) < 2:
+        print("【NO DATA】2ファイルそろわず。ダミー画像出力")
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
@@ -54,36 +57,49 @@ try:
         )
         sys.exit(0)
 
+    # 2. GRIB2→NetCDF変換
     for path in grib2_files:
         nc = grib2_to_nc(path)
         if nc:
             nc_paths.append(nc)
 
-    # NetCDFが2つ揃っているか
     if len(nc_paths) < 2:
         print("【NO DATA】NetCDF変換不良。ダミー画像出力")
-        make_nodata_weather_panel(...)
-        sys.exit(0)
-    
-    # NetCDF→xarray Datasetを一気に開く
-    ds_l_pall = xr.open_dataset([p for p in nc_paths if "L-pall" in p][0])
-    ds_lsurf  = xr.open_dataset([p for p in nc_paths if "Lsurf" in p][0])
-    ds = xr.merge([ds_l_pall, ds_lsurf])
-    ds = align_datasets_common(ds, ncols=NCOLS)
-    
-    # 十分な時刻データがあるか
-    if len(ds.time) >= NCOLS:
-        # プロット関数リストで天気図描画
-        make_local_weather_panel(
-            ds, times, OUTFILE,
-            pin_lat=..., pin_lon=..., city_name=...,
-            plot_func_list=plot_func_list, nrows=6, ncols=NCOLS,
+        make_nodata_weather_panel(
+            save_path=OUTFILE,
+            city_name=CITY_NAME,
+            times=get_gpv_nodata_times(NCOLS)
         )
-    else:
-        make_nodata_weather_panel(...)
+        sys.exit(0)
 
-    
-    # 天気図描画用プロット関数リストを用意（必須!!）
+    # 3. NetCDF→xarray Dataset結合・時刻アライン
+    try:
+        ds_l_pall = xr.open_dataset([p for p in nc_paths if "L-pall" in p][0])
+        ds_lsurf  = xr.open_dataset([p for p in nc_paths if "Lsurf" in p][0])
+        ds = xr.merge([ds_l_pall, ds_lsurf])
+        ds = align_datasets_common(ds, ncols=NCOLS)
+    except Exception as e:
+        print("【NO DATA】xarray開封失敗", e)
+        make_nodata_weather_panel(
+            save_path=OUTFILE,
+            city_name=CITY_NAME,
+            times=get_gpv_nodata_times(NCOLS)
+        )
+        sys.exit(0)
+
+    # 4. 時刻リスト取得
+    if hasattr(ds, "time") and len(ds.time) >= NCOLS:
+        times = ds.time.values[:NCOLS]
+    else:
+        print("【NO DATA】十分な時刻データなし。ダミー画像出力")
+        make_nodata_weather_panel(
+            save_path=OUTFILE,
+            city_name=CITY_NAME,
+            times=get_gpv_nodata_times(NCOLS)
+        )
+        sys.exit(0)
+
+    # 5. 天気図描画用プロット関数リスト
     from module.gpv_plotter_gsm import (
         plot_emagram_gsm_panel,
         plot_700hpa_dindex_500hpa_temp_gsm,
@@ -101,10 +117,7 @@ try:
         plot_surface_pressure_and_wind_gsm,
     ]
 
-    # 描画時刻リストも xarray から取得
-    times = ds.time.values[:NCOLS]
-    
-    # パネル描画実行（plot_func_list渡すこと！）
+    # 6. パネル描画実行（plot_func_listは必須!!）
     make_local_weather_panel(
         ds, times, OUTFILE,
         pin_lat=PIN_LAT, pin_lon=PIN_LON, city_name=CITY_NAME,
@@ -112,15 +125,14 @@ try:
         plot_func_list=plot_func_list,
         nrows=6, ncols=NCOLS,
     )
-
     print("天気図パネル画像を正常に出力しました")
 
-    except Exception as e:
-        print("【NO DATA】例外:", e)
-        traceback.print_exc()
-        make_nodata_weather_panel(
-            save_path=OUTFILE,
-            city_name=CITY_NAME,
-            times=get_gpv_nodata_times(NCOLS)
-        )
-        sys.exit(0)
+except Exception as e:
+    print("【NO DATA】例外:", e)
+    traceback.print_exc()
+    make_nodata_weather_panel(
+        save_path=OUTFILE,
+        city_name=CITY_NAME,
+        times=get_gpv_nodata_times(NCOLS)
+    )
+    sys.exit(0)
