@@ -17,6 +17,10 @@ RUN apt-get update && \
       libcrypt1 \
       fonts-ipafont-gothic
 
+
+RUN apt-get update && apt-get install -y fonts-ipafont-gothic
+
+
 # ---- Miniconda導入＆wgrib2 ----
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
 RUN bash /tmp/miniconda.sh -b -p /opt/conda
