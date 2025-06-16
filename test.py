@@ -1,4 +1,8 @@
 import requests
+import os
+SLACK_BOT_TOKEN = os.environ['SLACK_BOT_TOKEN']
+SLACK_CHANNEL_ID = os.environ['SLACK_CHANNEL_ID']
+
 
 # ======= 設定 =======
 SLACK_BOT_TOKEN = "xoxb-1240646929364-9017850320086-iwMExKk0giUE43hrG1DA9org"   # ←あなたのBot User OAuth Token
