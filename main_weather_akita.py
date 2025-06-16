@@ -1,7 +1,14 @@
 # main_weather_akita.py
 # ========================================================
-# 秋田局地パネル出力 → Driveアップロード → Slack通知
-# GSM運用、将来MSMに切替可（gpv_panel_daily_local_akita.py を利用）
+# 秋田局地パネル自動生成・共有・通知メインスクリプト（GSM運用）
+# --------------------------------------------------------
+# 1. gpv_panel_daily_local_akita.py で秋田局地パネル画像を生成
+# 2. Google Driveへアップロード（共有リンク自動取得）
+# 3. Slackへ画像＋Driveリンクを自動通知
+# --------------------------------------------------------
+# ・将来MSMにも簡単に切替可（コア部分の構造は変更不要）
+# ・CI/CD・定時自動化・Slack速報通知向けテンプレート
+# 2025-06-17 by ChatGPT
 # ========================================================
 
 import os
@@ -13,24 +20,27 @@ OUTPUT_FILENAME = "akita_local_msm_map.jpg"
 
 def main():
     try:
-        # 1. 秋田局地パネル生成（画像出力）
-        subprocess.run(["python3", "gpv_panel_daily_local_akita.py", OUTPUT_FILENAME], check=True)
+        # 1. 秋田局地パネル画像を生成（サブスクリプト経由）
+        subprocess.run(
+            ["python3", "gpv_panel_daily_local_akita.py", OUTPUT_FILENAME],
+            check=True
+        )
 
-        # 2. Google Drive にアップロード（共有URL取得）
+        # 2. Google Driveへアップロードし共有URLを取得
         url = upload_to_drive(OUTPUT_FILENAME)
 
-        # 3. Slack に画像付きで投稿（ファイルアップロード型）
+        # 3. Slackに画像と共有URLを投稿（ファイルアップロード型通知）
         channel = os.environ["SLACK_CHANNEL_ID"]
         upload_file_slack(
             channel=channel,
             filepath=OUTPUT_FILENAME,
             title="Akita Weather Map",
-            initial_comment=f"Akita Weather Map！\n共有URL: {url}"
+            initial_comment=f"Akita Weather Map\nGoogle Drive URL: {url}"
         )
 
     except Exception as e:
-        # 失敗時だけテキストで送信したい場合、ここに send_slack_message を定義してもOK
-        print(f"ERROR: {e}")
+        # エラー時はprint＋raise（Slack text送信も可：send_slack_text利用）
+        print(f"[ERROR] {e}")
         raise
 
 if __name__ == "__main__":
