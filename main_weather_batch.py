@@ -1,3 +1,11 @@
+# main_weather_batch.py
+# ========================================================
+# GSM日本域の天気図パネルを生成 → Driveアップロード → Slack通知
+# --------------------------------------------------------
+# ※秋田局地の処理は除外済（2025-06-17）
+# ※gpv_panel_daily_gsm.py を使って全国図を作成
+# ========================================================
+
 import os
 import subprocess
 from datetime import datetime
@@ -5,36 +13,55 @@ from dotenv import load_dotenv
 from module.utils.drive_utils import upload_to_drive
 import requests
 
-# 環境変数の読み込み（ローカル開発用）
+# --------------------------------------------------------
+# ローカル開発用：.envファイルから環境変数を読み込む
+# --------------------------------------------------------
 load_dotenv()
 
+# --------------------------------------------------------
+# Slack通知とDriveアップロードに必要な環境変数
+# --------------------------------------------------------
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 SLACK_CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
 
-# 今日の日付でファイル名を生成
+# --------------------------------------------------------
+# 実行時刻からファイル名を生成（例：gsm_20250617_0500.jpg）
+# --------------------------------------------------------
 init_time = datetime.now().strftime("%Y%m%d_%H%M")
-IMG_GSM   = f"gsm_{init_time}.jpg"
-IMG_AKITA = f"akita_{init_time}.jpg"
+IMG_GSM = f"gsm_{init_time}.jpg"
 
+# --------------------------------------------------------
+# 出力対象スクリプトとファイル名、通知ラベルの一覧
+# --------------------------------------------------------
 image_jobs = [
-    ("gpv_panel_daily_gsm.py",      IMG_GSM,   "GSM 日本域"),
-    ("gpv_panel_daily_msm_akita.py", IMG_AKITA, "GSM 秋田局地"),
+    ("gpv_panel_daily_gsm.py", IMG_GSM, "GSM 日本域")
 ]
 
+# --------------------------------------------------------
+# 各スクリプトを実行 → Driveアップロード → Slack通知
+# --------------------------------------------------------
 for script, out_file, label in image_jobs:
     print(f"=== {script} 開始 ===")
     try:
-        # 画像生成スクリプト実行
-        result = subprocess.run(["python3", script, out_file], check=True, capture_output=True, text=True)
+        # 天気図生成スクリプトを実行
+        result = subprocess.run(
+            ["python3", script, out_file],
+            check=True,
+            capture_output=True,
+            text=True
+        )
         print(f"[INFO] {script} 実行完了：\n{result.stdout}")
     except subprocess.CalledProcessError as e:
         print(f"[ERROR] {script} 実行失敗:", e)
         continue
 
-    # ファイルが存在したらDriveアップ＆Slack通知
+    # 出力ファイルが存在する場合のみアップロード＆通知
     if os.path.exists(out_file):
         try:
+            # Google Driveにアップロードし、共有URLを取得
             url = upload_to_drive(out_file)
+
+            # Slackに通知（テキストメッセージのみ）
             message = f"{label}天気図をGoogle Driveにアップロードしました:\n{url}"
             res = requests.post(
                 "https://slack.com/api/chat.postMessage",
@@ -47,15 +74,10 @@ for script, out_file, label in image_jobs:
             print(f"[INFO] Slack通知: {res.text}")
         except Exception as e:
             print(f"[ERROR] Drive/Slack送信失敗: {e}")
-        os.remove(out_file)
+        finally:
+            # ローカルの画像ファイルを削除
+            os.remove(out_file)
     else:
         print(f"[ERROR] 画像が見つかりません: {out_file}")
-
-
-    if is_no_data_image(filename):
-        slack_message = "【注意】本日分の天気図データが取得できませんでした（NO DATA画像です）"
-    else:
-        slack_message = f"ファイルをGoogle Driveにアップロードしました:\n{drive_url}"
-
 
 print("==== 正常終了 ====")
