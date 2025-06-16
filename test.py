@@ -4,24 +4,28 @@ import os
 SLACK_BOT_TOKEN = os.environ['SLACK_BOT_TOKEN']
 SLACK_CHANNEL_ID = os.environ['SLACK_CHANNEL_ID']
 FILENAME = "test.png"
-FILESIZE = os.path.getsize(FILENAME)
+
+# ファイル存在チェック
+assert os.path.exists(FILENAME), "ファイルがありません"
 
 print("ファイル名:", FILENAME)
-print("ファイルサイズ:", FILESIZE, type(FILESIZE))
+print("ファイルサイズ:", os.path.getsize(FILENAME), type(os.path.getsize(FILENAME)))
 print("ファイル存在確認:", os.path.exists(FILENAME))
 
-headers = {
-    "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
-    "Content-Type": "application/json; charset=utf-8"
-}
-json_data = {
-    "filename": FILENAME,
-    "length": FILESIZE
-}
+with open(FILENAME, "rb") as f:
+    res = requests.post(
+        "https://slack.com/api/files.upload",
+        headers={
+            "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+        },
+        data={
+            "channels": SLACK_CHANNEL_ID,
+            "initial_comment": "Slack APIテスト送信 by Actions",
+            "title": "Slack upload test"
+        },
+        files={
+            "file": (FILENAME, f, "image/png")
+        }
+    )
 
-res = requests.post(
-    "https://slack.com/api/files.getUploadURLExternal",
-    headers=headers,
-    json=json_data
-)
-print("APIレスポンス:", res.text)
+print(res.text)
