@@ -11,10 +11,14 @@
 # ===============================================
 
 import numpy as np
-import matplotlib.pyplot as plt
 from metpy.plots import SkewT
 from metpy.units import units
 from module.utils.var_utils import get_var
+
+import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+
 
 def extract_profile_gpv(ds, lat, lon, time_idx=0):
     lat_arr = get_var(ds, "latitude")
