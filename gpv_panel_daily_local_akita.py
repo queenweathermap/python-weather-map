@@ -1,12 +1,11 @@
 # gpv_panel_daily_local_akita.py
 # ========================================================
-# 秋田局地 MSMパネル（6段×12列）全FH帯ループDL・ペア揃い優先
+# 秋田局地 MSMパネル（6段×12列）全FH帯DL・index.htmlパース自動化
 # --------------------------------------------------------
-# 1. MSM GPVデータ（各FH帯/L-pall・Lsurf）を全部DL
-# 2. 揃ったペアのみNetCDF変換→xarray合成
-# 3. データあればパネル描画、なければNO DATA画像
-# --------------------------------------------------------
-# 2025-06-18 by ChatGPT（講座・実運用をもとに最適化）
+# 1. サーバindex.htmlからL-pall/Lsurfペア抽出（最速・NO DATA激減）
+# 2. 揃ったペアをDL→NetCDF変換→xarray合成
+# 3. データがあればパネル描画、なければNO DATA画像
+# 2025-06-18 by ChatGPT（講座・実運用ベース最適化）
 # ========================================================
 
 import os
@@ -16,9 +15,7 @@ import xarray as xr
 import pandas as pd
 
 from module.utils.gpv_html_parser import find_existing_msm_pairs
-from gpv_downloader import (
-    download_available_gpv, grib2_to_nc, GPV_MIRROR_URLS
-)
+from gpv_downloader import grib2_to_nc
 from module.panel_utils import (
     make_nodata_weather_panel,
     make_local_weather_panel,
@@ -29,25 +26,15 @@ from module.panel_utils import (
 # 設定
 # ========================================
 BASE_DIR = "./data"
+OUTFILE = "akita_local_msm_map.jpg"
+BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
+YMD = pd.Timestamp.now().strftime("%Y%m%d")
 NCOLS = 12
-OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "akita_local_msm_map.jpg"
-
-# MSM日本域 予報時刻帯リスト（常にこの順でDL）
-MSM_FORECAST_PERIODS = [
-    "FH00-15",
-    "FH16-33",
-    "FH34-39",
-    "FH40-51",
-    "FH52-78",
-]
 
 PIN_LAT = 39.7186
 PIN_LON = 140.1024
 CITY_NAME = "Akita City"
 
-# ========================================
-# ダミー時刻リスト（NO DATAパネル用）
-# ========================================
 def get_gpv_nodata_times(ncols=12):
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     hour = now.hour
@@ -55,35 +42,13 @@ def get_gpv_nodata_times(ncols=12):
     base_time = now.replace(hour=init_hour)
     return [base_time + pd.Timedelta(hours=3*i) for i in range(ncols)]
 
-# ========================================
-# MSM GPV 全FH帯L-pall/LsurfペアDL
-# ========================================
-def find_latest_matched_pairs(periods, base_dir, mirrors):
-    """
-    各FH帯ごとにL-pall/Lsurfの両方DLできたペアだけ返す
-    戻り値：[(l_pall_grib2, lsurf_grib2, init_time, fh_band), ...]
-    """
-    matched = []
-    for fh in periods:
-        l_pall_pattern  = f"MSM_GPV_Rjp_L-pall_{fh}"
-        lsurf_pattern   = f"MSM_GPV_Rjp_Lsurf_{fh}"
-        l_pall_path, itime1 = download_available_gpv(l_pall_pattern, base_dir, mirrors)
-        lsurf_path, itime2  = download_available_gpv(lsurf_pattern, base_dir, mirrors)
-        # 両方DL成功＆イニシャル一致のみ採用
-        if l_pall_path and lsurf_path and itime1 == itime2 and itime1 is not None:
-            matched.append((l_pall_path, lsurf_path, itime1, fh))
-    return matched
-
-# ========================================
-# メイン
-# ========================================
 try:
     os.makedirs(BASE_DIR, exist_ok=True)
 
-    # 1. 各FH帯DL＆ペア揃いだけ使う
-    matched_pairs = find_latest_matched_pairs(MSM_FORECAST_PERIODS, BASE_DIR, GPV_MIRROR_URLS)
-    if not matched_pairs:
-        print("【NO DATA】L-pall/Lsurfペアそろわず")
+    # 1. サーバindex.htmlから最新ペアを抽出
+    pairs = find_existing_msm_pairs(BASE_URL, YMD, base_dir=BASE_DIR, ncols=NCOLS)
+    if not pairs:
+        print("NO DATA: サーバ上にペアが見つかりません")
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
@@ -91,18 +56,27 @@ try:
         )
         sys.exit(0)
 
-    # 2. 一番新しいペアだけ使う（init_time降順ソート）
-    l_pall_grib2, lsurf_grib2, init_time, fh_band = sorted(matched_pairs, key=lambda x: x[2], reverse=True)[0]
-    print(f"[INFO] 使用FH帯: {fh_band}, init_time: {init_time}")
+    # 2. 一番新しいinit時刻のものから必要数だけピックアップ
+    latest_init = max([p[2] for p in pairs])
+    use_pairs = [p for p in pairs if p[2] == latest_init][:NCOLS]
+    if len(use_pairs) < 2:
+        print("NO DATA: 有効ペア不足")
+        make_nodata_weather_panel(
+            save_path=OUTFILE,
+            city_name=CITY_NAME,
+            times=get_gpv_nodata_times(NCOLS)
+        )
+        sys.exit(0)
 
-    # 3. GRIB2→NetCDF変換（両方）
+    # 3. ペアごとにGRIB2→NetCDF変換
     nc_paths = []
-    for path in [l_pall_grib2, lsurf_grib2]:
-        nc = grib2_to_nc(path)
-        if nc:
-            nc_paths.append(nc)
+    for l_pall_path, lsurf_path, init_time, fh_band in use_pairs:
+        nc1 = grib2_to_nc(l_pall_path)
+        nc2 = grib2_to_nc(lsurf_path)
+        if nc1 and nc2:
+            nc_paths.extend([nc1, nc2])
     if len(nc_paths) < 2:
-        print("【NO DATA】NetCDF変換失敗")
+        print("NO DATA: NetCDF変換失敗")
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
@@ -110,13 +84,13 @@ try:
         )
         sys.exit(0)
 
-    # 4. NetCDF→xarray合成
+    # 4. xarrayで合成（全パネル分）
     ds_l_pall = xr.open_dataset([p for p in nc_paths if "L-pall" in p][0])
     ds_lsurf  = xr.open_dataset([p for p in nc_paths if "Lsurf" in p][0])
     ds = xr.merge([ds_l_pall, ds_lsurf])
     ds = align_datasets_common(ds, ncols=NCOLS)
 
-    # 5. 描画時刻リスト
+    # 5. 描画用時刻リスト
     times = ds.time.values[:NCOLS]
 
     # 6. パネル描画関数リスト（MSM用）
@@ -148,7 +122,7 @@ try:
         )
         print("天気図パネル画像を正常に出力しました")
     else:
-        print("【NO DATA】時刻データ不足")
+        print("NO DATA: 時刻データ不足")
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
@@ -157,11 +131,11 @@ try:
         sys.exit(0)
 
 except Exception as e:
-    print("【NO DATA】例外:", e)
+    print("NO DATA: Exception", e)
     traceback.print_exc()
     make_nodata_weather_panel(
         save_path=OUTFILE,
         city_name=CITY_NAME,
         times=get_gpv_nodata_times(NCOLS)
     )
-    sys.exit(0)
+    sys.exit(1)
