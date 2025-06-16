@@ -1,9 +1,9 @@
 # main_weather_batch.py
 # ===============================================
-# GSM全国・秋田局地の天気図画像を自動生成しSlackに投稿
-# 他通知・アップロード（LINE/Drive/メール）は一切なし
-# 画像ファイルは作業ディレクトリ直下に保存・投稿後削除も可
-# 2025-06-17 by ChatGPT
+# GSM全国・秋田局地の天気図画像を自動生成しSlackに投稿（API最新方式）
+# LINE/Drive/メール通知は行わず、Slack投稿のみ
+# 画像ファイルは作業ディレクトリ直下に保存・投稿後削除
+# 2025-06-17 改訂 by ChatGPT
 # ===============================================
 
 import subprocess
@@ -11,12 +11,12 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-from module.utils.slack_utils import upload_file_slack
+from module.utils.slack_utils import upload_file_slack  # ← 新API版（3ステップ方式）
 
 # --- .env読込（ローカル開発用。Actions上では無視される） ---
 load_dotenv()
 
-# 画像ファイル名（作業ディレクトリに保存）
+# 画像ファイル名（作業ディレクトリ直下）
 init_time = datetime.now().strftime("%Y%m%d_%H%M")
 IMG_GSM   = f"gsm_{init_time}.jpg"
 IMG_AKITA = f"akita_{init_time}.jpg"
@@ -26,7 +26,7 @@ image_jobs = [
     ("gpv_panel_daily_msm_akita.py", IMG_AKITA, "GSM 秋田局地"),
 ]
 
-slack_token = os.environ.get("SLACK_BOT_TOKEN")
+slack_token   = os.environ.get("SLACK_BOT_TOKEN")
 slack_channel = os.environ.get("SLACK_CHANNEL_ID")  # 例: "C12345678"
 
 if not slack_token or not slack_channel:
@@ -36,7 +36,7 @@ if not slack_token or not slack_channel:
 for script, out_file, label in image_jobs:
     print(f"=== {script} 開始 ===")
     try:
-        # スクリプトを「出力画像ファイル名指定」で起動
+        # 出力画像ファイル名指定で描画スクリプトを実行
         result = subprocess.run(["python3", script, out_file], check=True, capture_output=True, text=True)
         print(f"[INFO] {script} 実行完了：\n{result.stdout}")
     except subprocess.CalledProcessError as e:
@@ -50,7 +50,7 @@ for script, out_file, label in image_jobs:
         print(f"[ERROR] {script} 例外:", e)
         continue
 
-    # --- Slack投稿 ---
+    # --- Slackへ画像投稿（アップロード成功時のみ） ---
     if os.path.exists(out_file):
         print(f"[Slack通知] 送信: {out_file}")
         try:
@@ -62,7 +62,7 @@ for script, out_file, label in image_jobs:
             )
         except Exception as e:
             print(f"[ERROR] Slack送信失敗: {out_file} {e}")
-        # 投稿後は画像削除してもよい場合（不要ならこの行を消す）
+        # 投稿後は画像を削除（不要ならこの行をコメントアウト）
         os.remove(out_file)
     else:
         print(f"[ERROR] 画像が見つかりません: {out_file}")
