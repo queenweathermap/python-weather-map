@@ -21,10 +21,21 @@ from module.panel_utils import (
     make_local_weather_panel,
 )
 
-def get_nodata_times(ncols=12):
-    """必ず「00分」始まりで3時間毎時刻を生成"""
+def get_gpv_nodata_times(ncols=12):
+    """
+    GPVイニシャル（00,06,12,18時）基準のNO DATA時刻リストを返す
+    """
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-    return [now + pd.Timedelta(hours=3*i) for i in range(ncols)]
+    # 直前の「00, 06, 12, 18」時に揃える
+    hour = now.hour
+    init_hour = max([h for h in [0, 6, 12, 18] if h <= hour])
+    base_time = now.replace(hour=init_hour)
+    # もし今が0時未満の場合、前日18時を基準にする
+    if hour < 0:
+        base_time -= pd.Timedelta(days=1)
+        base_time = base_time.replace(hour=18)
+    return [base_time + pd.Timedelta(hours=3*i) for i in range(ncols)]
+
 
 def main():
     parser = argparse.ArgumentParser(description="全国どこでもGSM/MSM局地天気図パネル生成スクリプト")
