@@ -13,7 +13,7 @@ on:
   schedule:
     - cron: '0 20 * * *'  # JST 5時
     - cron: '0 8 * * *'   # JST 17時
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
   run-weather-batch:
@@ -22,15 +22,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build Docker image
-        run: docker build --no-cache -t weather-map-app .
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      - name: Run weather batch in Docker
+      - name: Run weather batch
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
-          docker run --rm \
-            -e SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN}" \
-            -e SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID}" \
-            weather-map-app
+          python3 main_weather_batch.py
