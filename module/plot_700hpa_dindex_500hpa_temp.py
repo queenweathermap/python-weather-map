@@ -80,7 +80,7 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds, model="GSM"):
         zorder=10
     )
     ax.clabel(cs, fmt="%d", fontsize=6)
-    ax.set_title("500hPa温度・700hPa湿数", fontsize=10, pad=10)
+    ax.set_title("700hpa_dindex_500hpa_temp", fontsize=10, pad=10)
 
 # ======= ラッパー関数 =======
 def plot_700hpa_dindex_500hpa_temp_gsm(ax, ds):
