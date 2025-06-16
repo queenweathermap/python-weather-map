@@ -1,13 +1,7 @@
 # gpv_panel_daily_local_akita.py
 # ========================================================
 # 秋田局地パネル（6段×12列）自動生成スクリプト（GSM版：DL部改良）
-# --------------------------------------------------------
-# ・指定地点（秋田市）の局地天気図をパネル出力
-# ・GSMデータ（12時刻×2パターン）で運用中（MSM復旧時に切替可）
-# ・NO DATA時もダミー画像必ず出力（Slackや運用バッチで使える設計）
-# ・ファイル取得→NetCDF変換→合成→パネル描画まで一気通貫
-# ・エラー/例外時も必ず画像出力で終了（自動配信に最適）
-# 2025-06-17 by ChatGPT
+# 2025-06-18 by ChatGPT
 # ========================================================
 
 import os
@@ -25,6 +19,10 @@ from module.panel_utils import (
     make_local_weather_panel,
     align_datasets_common,
 )
+
+def get_nodata_times(ncols=12):
+    now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+    return [now + pd.Timedelta(hours=3*i) for i in range(ncols)]
 
 BASE_DIR = "./data"
 NCOLS = 12
@@ -52,7 +50,7 @@ try:
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
-            times=[pd.Timestamp.now() + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
+            times=get_nodata_times(NCOLS)
         )
         sys.exit(0)
 
@@ -67,7 +65,7 @@ try:
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
-            times=[pd.Timestamp.now() + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
+            times=get_nodata_times(NCOLS)
         )
         sys.exit(0)
 
@@ -77,13 +75,15 @@ try:
     ds = xr.merge([ds_l_pall, ds_lsurf])
     ds = align_datasets_common(ds, ncols=NCOLS)
 
+    # ここで make_local_weather_panel などに進む（必要に応じて追記）
+
 except Exception as e:
     print("【NO DATA】例外:", e)
     traceback.print_exc()
     make_nodata_weather_panel(
         save_path=OUTFILE,
         city_name=CITY_NAME,
-        times=[pd.Timestamp.now() + pd.Timedelta(hours=3*i) for i in range(NCOLS)]
+        times=get_nodata_times(NCOLS)
     )
     sys.exit(0)
 
