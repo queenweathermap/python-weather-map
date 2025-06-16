@@ -72,13 +72,12 @@ def upload_file_slack(
 
 def send_slack_text(text):
     url = "https://slack.com/api/chat.postMessage"
-    bot_token = os.environ["SLACK_BOT_TOKEN"]   # ←修正
+    bot_token = os.environ["SLACK_BOT_TOKEN"]   # 修正済
     channel = os.environ["SLACK_CHANNEL_ID"]
     headers = {
-        "Authorization": f"Bearer {bot_token}",  # ←修正
+        "Authorization": f"Bearer {bot_token}",  # 修正済
         "Content-Type": "application/json; charset=utf-8"
     }
-
     data = {
         "channel": channel,
         "text": text
