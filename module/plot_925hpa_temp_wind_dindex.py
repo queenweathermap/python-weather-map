@@ -52,14 +52,14 @@ def plot_925hpa_temp_wind_dindex(ax, ds, model="GSM", prop=None, skip=5):
         cmap="Greens", alpha=0.6, transform=ccrs.PlateCarree()
     )
     cbar = plt.colorbar(cf, ax=ax, orientation="vertical", shrink=0.6, pad=0.02)
-    cbar.set_label("925hPa湿数 [℃]", fontsize=8)
+    cbar.set_label("925hpa_dindex [℃]", fontsize=8)
     ax.quiver(
         lon2d[::skip, ::skip], lat2d[::skip, ::skip],
         u[::skip, ::skip], v[::skip, ::skip],
         transform=ccrs.PlateCarree(), scale=250, width=0.002, alpha=0.7
     )
 
-    ax.set_title("925hPa温度・風・湿数", fontsize=10, pad=10, fontproperties=prop)
+    ax.set_title("925hpa_temp_wind_dindex", fontsize=10, pad=10, fontproperties=prop)
 
 def plot_925hpa_temp_wind_dindex_gsm(ax, ds, prop=None, skip=5):
     return plot_925hpa_temp_wind_dindex(ax, ds, model="GSM", prop=prop, skip=skip)
