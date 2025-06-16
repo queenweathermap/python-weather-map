@@ -43,7 +43,7 @@ try:
 
     print("=== MSMパネル自動処理（HTMLパースDL）開始 ===")
     # 1. サーバindex.htmlから最新のL-pall/Lsurfペア（全国MSM）を抽出
-    pairs = find_existing_msm_pairs(BASE_URL, YMD, ncols=NCOLS)
+    pairs = find_existing_msm_pairs(BASE_URL, YMD)
     if not pairs:
         print("NO DATA: サーバ上にペアが見つかりません")
         make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
