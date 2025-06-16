@@ -1,14 +1,7 @@
 # gpv_panel_daily_local.py
 # ===============================================================
 # 任意の地点でGSM/MSM局地天気図パネル（エマグラム付き）を生成する汎用スクリプト
-# ---------------------------------------------------------------
-# ・コマンドライン引数で地名、緯度経度、エリア範囲、モデル種別を指定して利用
-# ・各パラメータを受けて12時刻×6段（エマグラム＋5種天気図）のパネル画像を出力
-# ・データ欠損時やファイル未取得時はNO DATAパネルを必ず出力して終了
-# ・GPVダウンロード・GRIB2→NetCDF変換・パネル描画まで自動実行
-# ・ファイル名・保存先・NO DATA対応など現場運用の実践例に最適化
-# ---------------------------------------------------------------
-# 2025-06-17 by ChatGPT
+# 2025-06-18 by ChatGPT
 # ===============================================================
 
 import sys
@@ -27,6 +20,11 @@ from module.panel_utils import (
     align_datasets_common,
     make_local_weather_panel,
 )
+
+def get_nodata_times(ncols=12):
+    """必ず「00分」始まりで3時間毎時刻を生成"""
+    now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+    return [now + pd.Timedelta(hours=3*i) for i in range(ncols)]
 
 def main():
     parser = argparse.ArgumentParser(description="全国どこでもGSM/MSM局地天気図パネル生成スクリプト")
@@ -88,8 +86,7 @@ def main():
         # --- 最新の利用可能なイニシャル時刻を探索 ---
         init_dt = find_existing_init_dt(PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12])
         if init_dt is None:
-            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
+            times = get_nodata_times(NCOLS)
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
             print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
             sys.exit(0)
@@ -99,8 +96,7 @@ def main():
         panel_files = download_gpv_panel(PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         pattern_files = [f for f in panel_files if f and len(f) == len(PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
-            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
+            times = get_nodata_times(NCOLS)
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
             sys.exit(0)
 
@@ -117,8 +113,7 @@ def main():
 
         ds_list = [xr.open_dataset(nc) for nc in nc_paths if os.path.exists(nc)]
         if not ds_list or len(ds_list) < 3:
-            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
+            times = get_nodata_times(NCOLS)
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
             sys.exit(0)
 
@@ -126,8 +121,7 @@ def main():
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         if len(ds.time) == 0:
-            base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-            times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
+            times = get_nodata_times(NCOLS)
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
             sys.exit(0)
 
