@@ -24,8 +24,8 @@ def main():
         upload_file_slack(
             channel=channel,
             filepath=OUTPUT_FILENAME,
-            title="秋田局地天気図",
-            initial_comment=f"秋田局地パネルを更新しました！\n共有URL: {url}"
+            title="Akita Weather Map",
+            initial_comment=f"Akita Weather Map！\n共有URL: {url}"
         )
 
     except Exception as e:
