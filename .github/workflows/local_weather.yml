@@ -1,0 +1,64 @@
+# .github/workflows/local_weather.yml
+# ===============================================
+# Local Weather Panel Generator（任意地点／手動トリガー）
+# -----------------------------------------------
+# 手動実行のみ（都度指定地点を描画）
+# MSM → いずれ復旧。現在はGSMで運用中でも構文そのまま流用可
+# 2025-06-16 by ChatGPT
+# ===============================================
+
+name: Local Weather Panel
+
+on:
+  workflow_dispatch:
+    inputs:
+      city:
+        description: '地名（例：長岡花火）'
+        required: true
+        type: string
+      pin_lat:
+        description: 'ピンポイント緯度（例：37.45）'
+        required: true
+        type: number
+      pin_lon:
+        description: 'ピンポイント経度（例：138.85）'
+        required: true
+        type: number
+      lat_min:
+        description: '範囲の最小緯度（例：36.8）'
+        required: true
+        type: number
+      lat_max:
+        description: '範囲の最大緯度（例：38.0）'
+        required: true
+        type: number
+      lon_min:
+        description: '範囲の最小経度（例：137.5）'
+        required: true
+        type: number
+      lon_max:
+        description: '範囲の最大経度（例：139.0）'
+        required: true
+        type: number
+
+jobs:
+  run-local-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run local weather panel script
+        env:
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          python3 gpv_panel_daily_msm_local.py \
+            --city "${{ github.event.inputs.city }}" \
+            --pin_lat ${{ github.event.inputs.pin_lat }} \
+            --pin_lon ${{ github.event.inputs.pin_lon }} \
+            --lat_range ${{ github.event.inputs.lat_min }} ${{ github.event.inputs.lat_max }} \
+            --lon_range ${{ github.event.inputs.lon_min }} ${{ github.event.inputs.lon_max }}
