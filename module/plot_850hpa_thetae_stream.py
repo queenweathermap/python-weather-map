@@ -72,7 +72,7 @@ def plot_850hpa_thetae_stream(ax, ds, model="GSM", prop=None):
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m", linewidth=0.5)
     ax.add_feature(cfeature.BORDERS, linestyle=":", linewidth=0.4)
-    ax.set_title("850hPa簡易相当温位（1K刻み/15Kごと太線）＋流線", fontsize=10, pad=10, fontproperties=prop)
+    ax.set_title("850hpa_thetae_stream", fontsize=10, pad=10, fontproperties=prop)
 
 # ======= ラッパー関数 =======
 def plot_850hpa_thetae_stream_gsm(ax, ds, prop=None):
