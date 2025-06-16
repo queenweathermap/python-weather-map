@@ -30,7 +30,10 @@ def upload_file_slack(
 
     # === 1. アップロードURLを取得 ===
     url_get = "https://slack.com/api/files.getUploadURLExternal"
-    headers = {"Authorization": f"Bearer {bot_token}"}
+    headers = {
+        "Authorization": f"Bearer {bot_token}",
+        "Content-Type": "application/json; charset=utf-8"
+    }
     data = {"filename": filename, "length": length}
     print(f"[INFO] getUploadURLExternal: {data}")
     res1 = requests.post(url_get, headers=headers, json=data)
