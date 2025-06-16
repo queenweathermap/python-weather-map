@@ -27,7 +27,7 @@ OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "akita_local_msm_map.jpg"
 # 秋田市の例
 PIN_LAT = 39.7186
 PIN_LON = 140.1024
-CITY_NAME = "秋田市"
+CITY_NAME = "Akita City"
 
 if __name__ == "__main__":
     try:
