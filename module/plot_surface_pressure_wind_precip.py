@@ -88,9 +88,9 @@ def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
             transform=ccrs.PlateCarree()
         )
         cb = plt.colorbar(cf, ax=ax, orientation="vertical", shrink=0.6, pad=0.02)
-        cb.set_label("降水量 [mm]", fontsize=8, fontproperties=prop)
+        cb.set_label("PA [mm]", fontsize=8, fontproperties=prop)
 
-    ax.set_title("海面更正気圧・地上風・降水量", fontsize=10, pad=10, fontproperties=prop)
+    ax.set_title("surface_pressure_and_wind", fontsize=10, pad=10, fontproperties=prop)
 
 def plot_surface_pressure_and_wind_gsm(ax, ds, prop=None, skip=5):
     return plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=prop, skip=skip)
