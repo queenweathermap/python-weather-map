@@ -1,7 +1,14 @@
 # gpv_panel_daily_local.py
 # ===============================================================
 # 任意の地点でGSM/MSM局地天気図パネル（エマグラム付き）を生成する汎用スクリプト
-# 必須: gpv_downloader.py, panel_utils.py, gpv_plotter_msm.py, gpv_plotter_gsm.py
+# ---------------------------------------------------------------
+# ・コマンドライン引数で地名、緯度経度、エリア範囲、モデル種別を指定して利用
+# ・各パラメータを受けて12時刻×6段（エマグラム＋5種天気図）のパネル画像を出力
+# ・データ欠損時やファイル未取得時はNO DATAパネルを必ず出力して終了
+# ・GPVダウンロード・GRIB2→NetCDF変換・パネル描画まで自動実行
+# ・ファイル名・保存先・NO DATA対応など現場運用の実践例に最適化
+# ---------------------------------------------------------------
+# 2025-06-17 by ChatGPT
 # ===============================================================
 
 import sys
@@ -38,7 +45,7 @@ def main():
     NCOLS = args.ncols
     NROWS = args.nrows
 
-    # モデルに応じたモジュールとパターン選択
+    # === モデル種別に応じて描画関数・パターンを選択 ===
     if args.model == "gsm":
         from module.gpv_plotter_gsm import (
             plot_emagram_gsm_panel,
@@ -78,7 +85,7 @@ def main():
 
     try:
         print(f"=== {args.model.upper()}ローカルパネル生成開始：{args.city} ===")
-
+        # --- 最新の利用可能なイニシャル時刻を探索 ---
         init_dt = find_existing_init_dt(PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12])
         if init_dt is None:
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
@@ -88,21 +95,22 @@ def main():
             sys.exit(0)
 
         print(f"init_dt: {init_dt}")
+        # --- 対象時刻×パターンでGPVファイル取得 ---
         panel_files = download_gpv_panel(PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         pattern_files = [f for f in panel_files if f and len(f) == len(PATTERNS)]
-
         if not pattern_files or len(pattern_files) < 3:
             base_time = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
             times = [base_time + pd.Timedelta(hours=3 * i) for i in range(NCOLS)]
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
             sys.exit(0)
 
+        # --- GRIB2→NetCDF変換 ---
         file_list = [item for sublist in pattern_files for item in sublist]
         nc_paths = []
         for path, _ in file_list:
             try:
                 nc_path = grib2_to_nc(path)
-                if os.path.exists(nc_path):
+                if nc_path and os.path.exists(nc_path):
                     nc_paths.append(nc_path)
             except Exception as e:
                 print(f"[SKIP] NetCDF変換失敗: {path} ({e})")
@@ -114,6 +122,7 @@ def main():
             make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
             sys.exit(0)
 
+        # --- xarray Datasetを座標揃えでマージ ---
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         if len(ds.time) == 0:
@@ -124,6 +133,7 @@ def main():
 
         times = ds.time.values[:NCOLS]
 
+        # --- パネル生成・画像出力 ---
         make_local_weather_panel(
             ds, times, args.output or f"{args.city}_local_{args.model}_map.jpg",
             pin_lat=args.pin_lat, pin_lon=args.pin_lon, city_name=args.city,
