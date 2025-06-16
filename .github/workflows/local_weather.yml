@@ -12,32 +12,40 @@ name: Local Weather Panel
 on:
   workflow_dispatch:
     inputs:
+      model:
+        description: 'データ種別（gsm or msm）'
+        required: false
+        default: 'gsm'
+        type: choice
+        options:
+          - gsm
+          - msm
       city:
         description: '地名（例：長岡花火）'
         required: true
         type: string
       pin_lat:
-        description: 'ピンポイント緯度（例：37.45）'
+        description: 'ピンポイント緯度'
         required: true
         type: number
       pin_lon:
-        description: 'ピンポイント経度（例：138.85）'
+        description: 'ピンポイント経度'
         required: true
         type: number
       lat_min:
-        description: '範囲の最小緯度（例：36.8）'
+        description: '範囲の最小緯度'
         required: true
         type: number
       lat_max:
-        description: '範囲の最大緯度（例：38.0）'
+        description: '範囲の最大緯度'
         required: true
         type: number
       lon_min:
-        description: '範囲の最小経度（例：137.5）'
+        description: '範囲の最小経度'
         required: true
         type: number
       lon_max:
-        description: '範囲の最大経度（例：139.0）'
+        description: '範囲の最大経度'
         required: true
         type: number
 
@@ -56,7 +64,8 @@ jobs:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
-          python3 gpv_panel_daily_msm_local.py \
+          python3 scripts/gpv_panel_daily_local.py \
+            --model "${{ github.event.inputs.model }}" \
             --city "${{ github.event.inputs.city }}" \
             --pin_lat ${{ github.event.inputs.pin_lat }} \
             --pin_lon ${{ github.event.inputs.pin_lon }} \
