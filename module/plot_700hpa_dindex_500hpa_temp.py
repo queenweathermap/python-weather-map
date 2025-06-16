@@ -11,11 +11,15 @@
 # ===============================================
 
 import numpy as np
-import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib.colors import LinearSegmentedColormap
 from module.utils.var_utils import get_var
+
+import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+
 
 def get_lon_lat(ds):
     lon2d = np.asarray(ds["longitude"])
