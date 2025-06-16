@@ -20,22 +20,6 @@ from module.panel_utils import (
     align_datasets_common,
 )
 
-def get_gpv_nodata_times(ncols=12):
-    """
-    GPVイニシャル（00,06,12,18時）基準のNO DATA時刻リストを返す
-    """
-    now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-    # 直前の「00, 06, 12, 18」時に揃える
-    hour = now.hour
-    init_hour = max([h for h in [0, 6, 12, 18] if h <= hour])
-    base_time = now.replace(hour=init_hour)
-    # もし今が0時未満の場合、前日18時を基準にする
-    if hour < 0:
-        base_time -= pd.Timedelta(days=1)
-        base_time = base_time.replace(hour=18)
-    return [base_time + pd.Timedelta(hours=3*i) for i in range(ncols)]
-
-
 BASE_DIR = "./data"
 NCOLS = 12
 OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "akita_local_msm_map.jpg"
@@ -44,6 +28,13 @@ OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "akita_local_msm_map.jpg"
 PIN_LAT = 39.7186
 PIN_LON = 140.1024
 CITY_NAME = "Akita City"
+
+def get_gpv_nodata_times(ncols=12):
+    now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+    hour = now.hour
+    init_hour = max([h for h in [0, 6, 12, 18] if h <= hour])
+    base_time = now.replace(hour=init_hour)
+    return [base_time + pd.Timedelta(hours=3*i) for i in range(ncols)]
 
 try:
     os.makedirs(BASE_DIR, exist_ok=True)
@@ -62,7 +53,7 @@ try:
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
-            times=get_nodata_times(NCOLS)
+            times=get_gpv_nodata_times(NCOLS)
         )
         sys.exit(0)
 
@@ -77,7 +68,7 @@ try:
         make_nodata_weather_panel(
             save_path=OUTFILE,
             city_name=CITY_NAME,
-            times=get_nodata_times(NCOLS)
+            times=get_gpv_nodata_times(NCOLS)
         )
         sys.exit(0)
 
@@ -87,7 +78,18 @@ try:
     ds = xr.merge([ds_l_pall, ds_lsurf])
     ds = align_datasets_common(ds, ncols=NCOLS)
 
-    # ここで make_local_weather_panel などに進む（必要に応じて追記）
+    # 時刻リスト
+    times = ds.time.values[:NCOLS]
+
+    # パネル描画（ここで好きなプロット関数を指定可能）
+    # TODO: plot_func_listはお手元のplotterに合わせてください
+    make_local_weather_panel(
+        ds, times, OUTFILE,
+        pin_lat=PIN_LAT, pin_lon=PIN_LON, city_name=CITY_NAME,
+        lat_range=(38, 41), lon_range=(139, 142),    # 秋田周辺範囲
+        plot_func_list=None,   # プロット関数リストを指定
+        nrows=6, ncols=NCOLS,
+    )
 
 except Exception as e:
     print("【NO DATA】例外:", e)
@@ -95,8 +97,6 @@ except Exception as e:
     make_nodata_weather_panel(
         save_path=OUTFILE,
         city_name=CITY_NAME,
-        times=get_nodata_times(NCOLS)
+        times=get_gpv_nodata_times(NCOLS)
     )
     sys.exit(0)
-
-# ====== この後はパネル描画(make_local_weather_panel)やSlack通知など続けてください ======
