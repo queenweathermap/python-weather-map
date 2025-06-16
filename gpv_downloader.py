@@ -69,6 +69,13 @@ def grib2_to_nc(grib2_path):
             stderr=subprocess.PIPE,
             encoding="utf-8"
         )
+        print("[wgrib2] stdout:", result.stdout)   # ←ここ
+        print("[wgrib2] stderr:", result.stderr)   # ←ここ
+    except subprocess.CalledProcessError as e:
+        print(f"[SKIP] NetCDF変換失敗: {nc_path}")
+        print(f"[wgrib2 error]: {e.stderr}")       # ←ここも追加
+        return None
+
         print("[wgrib2] stdout:", result.stdout)
         print("[wgrib2] stderr:", result.stderr)
     except subprocess.CalledProcessError:
