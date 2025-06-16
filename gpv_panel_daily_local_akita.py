@@ -59,28 +59,30 @@ try:
         if nc:
             nc_paths.append(nc)
 
+    # NetCDFが2つ揃っているか
     if len(nc_paths) < 2:
-        make_nodata_weather_panel(
-            save_path=OUTFILE,
-            city_name=CITY_NAME,
-            times=get_gpv_nodata_times(NCOLS)
-        )
+        print("【NO DATA】NetCDF変換不良。ダミー画像出力")
+        make_nodata_weather_panel(...)
         sys.exit(0)
-
-    ds_l_pall = xr.open_dataset([p for p in nc_paths if "L-pall" in p][0])
-    ds_lsurf  = xr.open_dataset([p for p in nc_paths if "Lsurf" in p][0])
-    ds = xr.merge([ds_l_pall, ds_lsurf])
+    
+    # xarrayで読み込み・共通化
+    ds_l_pall = xr.open_dataset(...)
+    ds_lsurf = xr.open_dataset(...)
+    ds = xr.merge([...])
     ds = align_datasets_common(ds, ncols=NCOLS)
-
-    if len(ds.time) < NCOLS:
-        make_nodata_weather_panel(
-            save_path=OUTFILE,
-            city_name=CITY_NAME,
-            times=get_gpv_nodata_times(NCOLS)
+    
+    # 十分な時刻データがあるか
+    if len(ds.time) >= NCOLS:
+        # プロット関数リストで天気図描画
+        make_local_weather_panel(
+            ds, times, OUTFILE,
+            pin_lat=..., pin_lon=..., city_name=...,
+            plot_func_list=plot_func_list, nrows=6, ncols=NCOLS,
         )
-        sys.exit(0)
+    else:
+        make_nodata_weather_panel(...)
 
-    times = ds.time.values[:NCOLS]
+    
     # 必ずプロット関数リストを指定（下はGSM版例）
     from module.gpv_plotter_gsm import (
         plot_emagram_gsm_panel,
