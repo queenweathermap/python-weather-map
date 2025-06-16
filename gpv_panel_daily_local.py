@@ -26,16 +26,10 @@ def get_gpv_nodata_times(ncols=12):
     GPVイニシャル（00,06,12,18時）基準のNO DATA時刻リストを返す
     """
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-    # 直前の「00, 06, 12, 18」時に揃える
     hour = now.hour
     init_hour = max([h for h in [0, 6, 12, 18] if h <= hour])
     base_time = now.replace(hour=init_hour)
-    # もし今が0時未満の場合、前日18時を基準にする
-    if hour < 0:
-        base_time -= pd.Timedelta(days=1)
-        base_time = base_time.replace(hour=18)
     return [base_time + pd.Timedelta(hours=3*i) for i in range(ncols)]
-
 
 def main():
     parser = argparse.ArgumentParser(description="全国どこでもGSM/MSM局地天気図パネル生成スクリプト")
@@ -95,10 +89,10 @@ def main():
     try:
         print(f"=== {args.model.upper()}ローカルパネル生成開始：{args.city} ===")
         # --- 最新の利用可能なイニシャル時刻を探索 ---
-        init_dt = find_existing_init_dt(PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 12])
+        init_dt = find_existing_init_dt(PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 6, 12, 18])
         if init_dt is None:
-            times = get_nodata_times(NCOLS)
-            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
+            times = get_gpv_nodata_times(NCOLS)
+            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg", city_name=args.city)
             print("【ERROR】GPVファイル未取得。NO DATAパネル送信処理へ…")
             sys.exit(0)
 
@@ -107,8 +101,8 @@ def main():
         panel_files = download_gpv_panel(PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
         pattern_files = [f for f in panel_files if f and len(f) == len(PATTERNS)]
         if not pattern_files or len(pattern_files) < 3:
-            times = get_nodata_times(NCOLS)
-            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
+            times = get_gpv_nodata_times(NCOLS)
+            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg", city_name=args.city)
             sys.exit(0)
 
         # --- GRIB2→NetCDF変換 ---
@@ -124,16 +118,16 @@ def main():
 
         ds_list = [xr.open_dataset(nc) for nc in nc_paths if os.path.exists(nc)]
         if not ds_list or len(ds_list) < 3:
-            times = get_nodata_times(NCOLS)
-            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
+            times = get_gpv_nodata_times(NCOLS)
+            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg", city_name=args.city)
             sys.exit(0)
 
         # --- xarray Datasetを座標揃えでマージ ---
         ds_list_aligned = align_datasets_common(ds_list)
         ds = xr.merge(ds_list_aligned, compat="override", join="outer")
         if len(ds.time) == 0:
-            times = get_nodata_times(NCOLS)
-            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg")
+            times = get_gpv_nodata_times(NCOLS)
+            make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg", city_name=args.city)
             sys.exit(0)
 
         times = ds.time.values[:NCOLS]
@@ -152,6 +146,8 @@ def main():
         print("=== 重大エラー発生 ===")
         print(type(e), e)
         traceback.print_exc()
+        times = get_gpv_nodata_times(NCOLS)
+        make_nodata_weather_panel(times, args.output or "local_panel_nodata.jpg", city_name=args.city)
         sys.exit(1)
 
 if __name__ == "__main__":
