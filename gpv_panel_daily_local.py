@@ -3,7 +3,7 @@
 # 任意の地点でGSM/MSM局地天気図パネル（エマグラム付き）を生成する汎用スクリプト
 # ---------------------------------------------------------------
 # ・モデル・地点・範囲を指定し自動描画
-# ・MSMはindex.htmlパースでペア揃いDL、GSMは従来通り
+# ・MSMはindex.htmlパースでL-pall/Lsurfいずれか単独でも描画
 # ---------------------------------------------------------------
 # 2025-06-18 by ChatGPT
 # ===============================================================
@@ -15,7 +15,7 @@ import os
 import pandas as pd
 import xarray as xr
 
-from module.utils.gpv_html_parser import find_existing_msm_pairs
+from module.utils.gpv_html_parser import find_existing_msm_files  # ★関数名を単独ファイル対応に
 from gpv_downloader import (
     find_existing_init_dt, download_gpv_panel, grib2_to_nc,
     MSM_PATTERNS, GSM_PATTERNS, GPV_MIRROR_URLS
@@ -122,40 +122,51 @@ def main():
             times = ds.time.values[:NCOLS]
 
         else:
-            # MSMはindex.htmlパースDL
+            # MSMはindex.htmlパースDL（どちらか単独でもOK）
             BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
             YMD = pd.Timestamp.now().strftime("%Y%m%d")
-            pairs = find_existing_msm_pairs(BASE_URL, YMD)
-            if not pairs:
-                print("NO DATA: MSMサーバにペアが見つかりません")
+            files = find_existing_msm_files(BASE_URL, YMD)
+            if not files:
+                print("NO DATA: MSMサーバにファイルが見つかりません")
                 times = get_gpv_nodata_times(NCOLS)
                 make_nodata_weather_panel(times, OUTFILE, city_name=args.city)
                 sys.exit(0)
-            # 一番新しいイニシャル時刻の最大NCOLS個だけ使う
-            latest_init = max([p[2] for p in pairs])
-            use_pairs = [p for p in pairs if p[2] == latest_init][:NCOLS]
-            if len(use_pairs) < 2:
-                print("NO DATA: 有効ペア不足")
+            latest_init = max([f["init"] for f in files])
+            use_files = [f for f in files if f["init"] == latest_init][:NCOLS]
+            if not use_files or len(use_files) < 2:
+                print("NO DATA: 有効ファイル不足")
                 times = get_gpv_nodata_times(NCOLS)
                 make_nodata_weather_panel(times, OUTFILE, city_name=args.city)
                 sys.exit(0)
-            # GRIB2→NetCDF変換
             nc_paths = []
-            for l_pall_path, lsurf_path, init_time, fh_band in use_pairs:
-                nc1 = grib2_to_nc(l_pall_path)
-                nc2 = grib2_to_nc(lsurf_path)
-                if nc1 and nc2:
-                    nc_paths.extend([nc1, nc2])
-            if len(nc_paths) < 2:
+            for f in use_files:
+                if f["l_pall_url"]:
+                    nc1 = grib2_to_nc(f["l_pall_url"])
+                    if nc1:
+                        nc_paths.append(nc1)
+                if f["lsurf_url"]:
+                    nc2 = grib2_to_nc(f["lsurf_url"])
+                    if nc2:
+                        nc_paths.append(nc2)
+            if not nc_paths:
                 print("NO DATA: NetCDF変換失敗")
                 times = get_gpv_nodata_times(NCOLS)
                 make_nodata_weather_panel(times, OUTFILE, city_name=args.city)
                 sys.exit(0)
-            ds_l_pall = xr.open_dataset([p for p in nc_paths if "L-pall" in p][0])
-            ds_lsurf  = xr.open_dataset([p for p in nc_paths if "Lsurf" in p][0])
-            ds = xr.merge([ds_l_pall, ds_lsurf])
-            ds = align_datasets_common(ds, ncols=NCOLS)
-            times = ds.time.values[:NCOLS]
+            ds_list = []
+            for nc in nc_paths:
+                try:
+                    ds = xr.open_dataset(nc)
+                    ds_list.append(ds)
+                except Exception as e:
+                    print(f"[WARN] open_dataset失敗: {nc} ({e})")
+            if not ds_list:
+                print("NO DATA: Dataset不足")
+                times = get_gpv_nodata_times(NCOLS)
+                make_nodata_weather_panel(times, OUTFILE, city_name=args.city)
+                sys.exit(0)
+            ds = align_datasets_common(ds_list, ncols=NCOLS)
+            times = ds.time.values[:NCOLS] if hasattr(ds, "time") else get_gpv_nodata_times(NCOLS)
 
         # --- パネル描画 ---
         make_local_weather_panel(
