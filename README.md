@@ -6,15 +6,24 @@
 
 ## 📁 ディレクトリ構成
 
-```
-gpv_project/
-    └── data/
-    ├── weather.ipynb  # 各種処理ノートブック
-    └── module/
-        ├── gpvutils.py
-        ├── gpv_downloader.py
-        ├── gpv_plotter.py
-        └── gpv_plotter_japan.py
+📁 .github/workflows/
+├── daily_weather.yml          # 全国＋秋田（現状）
+├── daily_weather_akita.yml    # 秋田のみ（新規）
+
+📁 module/
+├── drive_utils.py
+├── slack_utils.py
+...
+
+📁 data/
+...
+
+gpv_panel_daily_local.py         ← 任意地域用（CLI）
+gpv_panel_daily_local_akita.py   ← 秋田専用描画スクリプト
+main_weather_batch.py            ← 全体まとめ
+main_weather_akita.py            ← 秋田専用
+requirements.txt
+
 ```
 
 ## ✅ モジュールの使い方（例: ノートブック先頭に記述）
