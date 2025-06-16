@@ -1,6 +1,15 @@
 import os
 import requests
 
+FILENAME = "test.png"
+print("=== カレントディレクトリ ===", os.getcwd())
+print("=== ファイル一覧 ===", os.listdir())
+print("=== ファイル存在確認 ===", os.path.exists(FILENAME))
+if not os.path.exists(FILENAME):
+    print("ERROR: ファイルがありません")
+    exit(1)
+
+
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 SLACK_CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
 FILENAME = "test.png"
