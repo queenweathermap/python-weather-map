@@ -75,9 +75,10 @@ def send_slack_text(text):
     token = os.environ["SLACK_BOT_TOKEN"]
     channel = os.environ["SLACK_CHANNEL_ID"]
     headers = {
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {bot_token}",
         "Content-Type": "application/json; charset=utf-8"
     }
+
     data = {
         "channel": channel,
         "text": text
