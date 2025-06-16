@@ -5,8 +5,8 @@
 # ========================================================
 
 import subprocess
-from module.drive_utils import upload_to_drive
-from module.slack_utils import send_slack_message
+from module.utils.drive_utils import upload_to_drive
+from module.utils.slack_utils import send_slack_message
 
 OUTPUT_FILENAME = "akita_local_msm_map.jpg"
 
@@ -16,7 +16,7 @@ def main():
         subprocess.run(["python3", "gpv_panel_daily_local_akita.py", OUTPUT_FILENAME], check=True)
 
         # Driveへアップロード
-        url = upload_to_drive(OUTPUT_FILENAME)
+        url = upload_to_drive("akita_local_msm_map.jpg")
 
         # Slack通知送信（URLのみ）
         send_slack_message(f"秋田局地パネル（自動生成）を更新しました：\n{url}")
