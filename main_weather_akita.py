@@ -5,24 +5,32 @@
 # ========================================================
 
 import subprocess
+from module.utils.slack_utils import upload_file_slack
 from module.utils.drive_utils import upload_to_drive
-from module.utils.slack_utils import send_slack_message
 
 OUTPUT_FILENAME = "akita_local_msm_map.jpg"
 
 def main():
     try:
-        # 秋田専用パネル生成
+        # 1. 秋田局地パネル生成（画像出力）
         subprocess.run(["python3", "gpv_panel_daily_local_akita.py", OUTPUT_FILENAME], check=True)
 
-        # Driveへアップロード
-        url = upload_to_drive("akita_local_msm_map.jpg")
+        # 2. Google Drive にアップロード（共有URL取得）
+        url = upload_to_drive(OUTPUT_FILENAME)
 
-        # Slack通知送信（URLのみ）
-        send_slack_message(f"秋田局地パネル（自動生成）を更新しました：\n{url}")
+        # 3. Slack に画像付きで投稿（ファイルアップロード型）
+        channel = os.environ["SLACK_CHANNEL_ID"]
+        upload_file_slack(
+            channel=channel,
+            filepath=OUTPUT_FILENAME,
+            title="秋田局地天気図",
+            initial_comment=f"秋田局地パネルを更新しました！\n共有URL: {url}"
+        )
 
     except Exception as e:
-        send_slack_message(f"【ERROR】秋田局地パネルの自動処理に失敗しました：{e}")
+        # 失敗時だけテキストで送信したい場合、ここに send_slack_message を定義してもOK
+        print(f"ERROR: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
