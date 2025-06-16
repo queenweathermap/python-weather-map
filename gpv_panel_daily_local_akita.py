@@ -65,10 +65,10 @@ try:
         make_nodata_weather_panel(...)
         sys.exit(0)
     
-    # xarrayで読み込み・共通化
-    ds_l_pall = xr.open_dataset(...)
-    ds_lsurf = xr.open_dataset(...)
-    ds = xr.merge([...])
+    # NetCDF→xarray Datasetを一気に開く
+    ds_l_pall = xr.open_dataset([p for p in nc_paths if "L-pall" in p][0])
+    ds_lsurf  = xr.open_dataset([p for p in nc_paths if "Lsurf" in p][0])
+    ds = xr.merge([ds_l_pall, ds_lsurf])
     ds = align_datasets_common(ds, ncols=NCOLS)
     
     # 十分な時刻データがあるか
@@ -83,7 +83,7 @@ try:
         make_nodata_weather_panel(...)
 
     
-    # 必ずプロット関数リストを指定（下はGSM版例）
+    # 天気図描画用プロット関数リストを用意（必須!!）
     from module.gpv_plotter_gsm import (
         plot_emagram_gsm_panel,
         plot_700hpa_dindex_500hpa_temp_gsm,
@@ -100,6 +100,11 @@ try:
         plot_925hpa_temp_wind_dindex_gsm,
         plot_surface_pressure_and_wind_gsm,
     ]
+
+    # 描画時刻リストも xarray から取得
+    times = ds.time.values[:NCOLS]
+    
+    # パネル描画実行（plot_func_list渡すこと！）
     make_local_weather_panel(
         ds, times, OUTFILE,
         pin_lat=PIN_LAT, pin_lon=PIN_LON, city_name=CITY_NAME,
@@ -107,6 +112,7 @@ try:
         plot_func_list=plot_func_list,
         nrows=6, ncols=NCOLS,
     )
+
     print("天気図パネル画像を正常に出力しました")
 
 except Exception as e:
