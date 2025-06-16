@@ -82,24 +82,25 @@ def upload_file_slack(
         print("[Slack upload] Done:", res3_json)
 
 
-def send_slack_text(text):
+def send_slack_text(channel, message):
     """
-    Send a simple text message to a Slack channel using chat.postMessage.
-    - Useful for notifications, error alerts, etc.
+    Send a text message to a specified Slack channel via chat.postMessage API.
     """
-    url = "https://slack.com/api/chat.postMessage"
+    import requests
+    import os
+
     bot_token = os.environ["SLACK_BOT_TOKEN"]
-    channel = os.environ["SLACK_CHANNEL_ID"]
+    url = "https://slack.com/api/chat.postMessage"
     headers = {
         "Authorization": f"Bearer {bot_token}",
         "Content-Type": "application/json; charset=utf-8"
     }
     data = {
         "channel": channel,
-        "text": text
+        "text": message
     }
     res = requests.post(url, headers=headers, json=data)
-    if not res.ok or not res.json().get("ok"):
-        print("[ERROR] Slack text post failed:", res.text)
-
-# ===============================================
+    res_json = res.json()
+    print(f"[DEBUG] send_slack_text response: {res_json}")
+    if not res_json.get("ok"):
+        print("[ERROR] Slack text post failed:", res_json)
