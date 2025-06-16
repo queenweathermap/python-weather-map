@@ -109,7 +109,7 @@ def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
         for j, i in zip(*c_coords):
             ax.text(lon2d[j, i], lat2d[j, i], 'C', color='blue', fontsize=13, weight='bold', ha='center', va='center')
 
-    ax.set_title("300hPa等高度線・風", fontsize=10, pad=10)
+    ax.set_title("300hpa_height_wind", fontsize=10, pad=10)
 
 # ======= ラッパー関数 =======
 def plot_300hpa_height_wind_gsm(ax, ds):
