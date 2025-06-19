@@ -34,6 +34,12 @@ SLACK_CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
 # --------------------------------------------------------
 init_time = datetime.now().strftime("%Y%m%d_%H%M")
 IMG_GSM = f"gsm_{init_time}.jpg"
+IMG_MSM = f"msm_{init_time}.jpg"
+
+image_jobs = [
+    ("gpv_panel_daily_gsm.py", IMG_GSM, "GSM 日本域"),
+    ("gpv_panel_daily_msm.py", IMG_MSM, "MSM 日本域"),
+]
 
 # --------------------------------------------------------
 # スクリプト・ファイル名・ラベルの定義リスト
