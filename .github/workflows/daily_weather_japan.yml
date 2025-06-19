@@ -26,13 +26,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install build dependencies for wgrib2
+       - name: Install build dependencies for wgrib2
         run: |
           sudo apt-get update
-          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev libnetcdf-dev netcdf-bin libhdf5-dev
+          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev libnetcdf-dev
 
       - name: Download wgrib2 source
         run: |
@@ -44,13 +41,14 @@ jobs:
           cd wgrib2-3.7.0
           mkdir build
           cd build
-          cmake .. -DENABLE_NETCDF=ON \
+          cmake .. -DENABLE_NETCDF=ON -DENABLE_JASPER=OFF -DENABLE_PNG=OFF \
             -DNETCDF_INCLUDE_DIR=/usr/include \
-            -DNETCDF_LIBRARIES=/usr/lib/x86_64-linux-gnu/libnetcdf.so
+            -DNETCDF_LIBRARY=/usr/lib/x86_64-linux-gnu/libnetcdf.so
           make -j4
           sudo cp wgrib2/wgrib2 /usr/local/bin/wgrib2
           sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V || true
+          ldd /usr/local/bin/wgrib2 | grep netcdf || true
 
 
       - name: Run weather batch (main_weather_batch.py)
