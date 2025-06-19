@@ -1,40 +1,59 @@
 # gpv_downloader.py
 # --------------------------------------------------------
-# GPV1ファイルのダウンロード・変換の**最小単位ユーティリティ**
-# ・「このパターン1つ」の最新DL
-# ・1ファイル→NetCDF変換
-# ・基本的なファイルパターン定義
+# GPVファイルのダウンロード・変換・イニシャル時刻探索ユーティリティ
 # --------------------------------------------------------
-
 
 import os
 import urllib.request
+import glob
 from datetime import datetime, timedelta
 from pathlib import Path
 import subprocess
+import pandas as pd
 
-# ----------- 設定（パターン書換でMSM等もOK） ----------
+# ----------- 設定 ----------
 GPV_MIRROR_URLS = [
     "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 ]
-# DLパターン例
+
 GSM_PATTERNS = [
     "GSM_GPV_Rjp_Gll0p1deg_L-pall",
     "GSM_GPV_Rjp_Gll0p1deg_Lsurf"
 ]
 
-# MSM用パターン（秋田局地または全国 MSM のファイル名パターン）
 MSM_PATTERNS = [
     "MSM_GPV_Rjp_L-pall",   # 上層データ
     "MSM_GPV_Rjp_Lsurf"     # 地上データ
 ]
 
+def find_existing_init_dt(patterns, base_dir, mirror_urls, hours=[0, 12]):
+    """
+    直近3日分の指定時刻（例: 0, 12UTC）で必要な全パターンファイルが揃う
+    最新のイニシャル時刻(dt)を返す。なければNone。
+    """
+    now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+    for day_offset in range(0, 3):
+        dt = now - pd.Timedelta(days=day_offset)
+        for hour in sorted(hours, reverse=True):  # 12→0の順
+            dt_h = dt.replace(hour=hour)
+            all_exist = True
+            for pattern in patterns:
+                ymd = dt_h.strftime("%Y%m%d")
+                h = dt_h.hour
+                # 拡張子は .bin or .bin.nc どちらでもヒットするようにする
+                g = glob.glob(os.path.join(
+                    base_dir,
+                    f"Z__C_RJTD_{ymd}{h:02d}0000_{pattern}*"
+                ))
+                if len(g) == 0:
+                    all_exist = False
+            if all_exist:
+                return dt_h
+    return None
 
 def download_available_gpv(pattern, base_dir, mirrors):
     """
     サーバ上で最新のGPVファイルを探してDL
-    ・「今日→昨日」×「18,12,6,0UTC」で直近1ファイルDL
-    ・成功時は (保存パス, 初期時刻) を返す
     """
     now = datetime.utcnow() + timedelta(hours=9)
     for day_offset in range(0, 2):  # 今日→昨日
@@ -74,17 +93,11 @@ def grib2_to_nc(grib2_path):
             stderr=subprocess.PIPE,
             encoding="utf-8"
         )
-        print("[wgrib2] stdout:", result.stdout)   # ←ここ
-        print("[wgrib2] stderr:", result.stderr)   # ←ここ
-    except subprocess.CalledProcessError as e:
-        print(f"[SKIP] NetCDF変換失敗: {nc_path}")
-        print(f"[wgrib2 error]: {e.stderr}")       # ←ここも追加
-        return None
-
         print("[wgrib2] stdout:", result.stdout)
         print("[wgrib2] stderr:", result.stderr)
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         print(f"[SKIP] NetCDF変換失敗: {nc_path}")
+        print(f"[wgrib2 error]: {e.stderr}")
         return None
     if not nc_path.exists() or os.path.getsize(nc_path) < 10 * 1024:
         print(f"[SKIP] NetCDF出力異常: {nc_path}")
@@ -96,7 +109,6 @@ if __name__ == "__main__":
     base_dir = "./data"
     os.makedirs(base_dir, exist_ok=True)
 
-    # 2ファイル（気圧面・地上）それぞれ個別に最新DL
     grib2_files = []
     nc_paths = []
     init_time = None
@@ -108,25 +120,18 @@ if __name__ == "__main__":
             if init_time is None:
                 init_time = itime
 
-    # 必要な2ファイルがそろわなければNO DATA
     if len(grib2_files) < 2:
         print("【ERROR】気圧面・地上のGRIB2ファイルが両方揃いません（NO DATA）")
-        # ここでNO DATA画像生成 or 終了
         exit(1)
 
-    # GRIB2→NetCDF変換
     for path in grib2_files:
         nc = grib2_to_nc(path)
         if nc is not None:
             nc_paths.append(nc)
 
-    # 両方変換OKか確認
     if len(nc_paths) < 2:
         print("【ERROR】NetCDF変換が両方成功せず（NO DATA）")
         exit(1)
 
     print(f"[INFO] 2つのNetCDF OK: {nc_paths}")
     print(f"[INFO] Init time: {init_time}")
-
-    # ここでxarray.open_dataset等で合成し、以降のパネル描画等へ進む
-    # （描画処理は別モジュールに記述を推奨）
