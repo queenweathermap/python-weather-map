@@ -32,25 +32,23 @@ jobs:
       - name: Install build dependencies for wgrib2
         run: |
           sudo apt-get update
-          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev
-
+          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev libnetcdf-dev
+      
       - name: Download wgrib2 source
         run: |
           wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
           tar xvf v3.7.0.tar.gz
-
-      - name: Build wgrib2 with cmake
+      
+      - name: Build wgrib2 with NetCDF support
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake make gcc gfortran zlib1g-dev
           cd wgrib2-3.7.0
           mkdir build
           cd build
-          cmake .. -DENABLE_JASPER=OFF -DENABLE_PNG=OFF
+          cmake .. -DENABLE_NETCDF=ON -DENABLE_JASPER=OFF -DENABLE_PNG=OFF
           make -j4
           sudo cp wgrib2/wgrib2 /usr/local/bin/wgrib2
           sudo chmod +x /usr/local/bin/wgrib2
-          wgrib2 -V || true  # ←ここがポイント！
+          wgrib2 -V || true
 
 
       - name: Run weather batch (main_weather_batch.py)
