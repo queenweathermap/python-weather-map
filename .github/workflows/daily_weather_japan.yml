@@ -34,14 +34,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev wget
 
-      - name: Build and install wgrib2 v3.7.0
+      - name: Install wgrib2
         run: |
-          wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
-          tar xzf v3.7.0.tar.gz
-          cd wgrib2-3.7.0/wgrib2
-          make
-          sudo cp wgrib2 /usr/local/bin/
-          /usr/local/bin/wgrib2 -V
+          sudo apt-get update
+          sudo apt-get install -y wgrib2
+          wgrib2 -V
 
 
       - name: Run weather batch (main_weather_batch.py)
