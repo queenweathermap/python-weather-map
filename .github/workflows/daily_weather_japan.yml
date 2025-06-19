@@ -1,9 +1,9 @@
 # .github/workflows/daily_weather.yml
 # ===============================================
-# Daily Weather Map（GSM/MSM両対応版・Slack通知・Google Drive連携）
-# 毎日JST 5時/17時自動実行＋手動実行もOK
-# wgrib2はNOAA公式ソースからv3.7.0をビルド（どんな環境でも安定再現）
-# 2025-06-19 by ChatGPT
+# Daily Weather Map（GSM/MSM両対応・Slack通知・Google Drive連携）
+# JST 5時/17時に自動実行＋手動実行対応
+# wgrib2はNOAA公式バイナリから直接ダウンロードし絶対に確保
+# 2025-06-19 改訂 by ChatGPT
 # ===============================================
 
 name: Daily Weather Map
@@ -30,7 +30,7 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Download wgrib2 binary
+      - name: Download wgrib2 binary from NOAA
         run: |
           wget -O wgrib2.tgz "https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz"
           tar xvf wgrib2.tgz
