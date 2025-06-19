@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: 'データ種別（gsm or msm）'
+        description: 'データ種別（msm or gsm）'
         required: false
         default: 'gsm'
         type: choice
