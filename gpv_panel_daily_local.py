@@ -1,11 +1,14 @@
-# gpv_panel_daily_local.py
 # ===============================================================
+# gpv_panel_daily_local.py
 # 任意の地点でGSM/MSM局地天気図パネル（エマグラム付き）を生成する汎用スクリプト
 # ---------------------------------------------------------------
-# ・モデル・地点・範囲を指定し自動描画
-# ・MSMはindex.htmlパースでL-pall/Lsurfいずれか単独でも描画
+# ・モデル・地名・中心座標だけ指定すればOK
+# ・範囲（lat/lon_min/max）は内部で自動計算（デフォルト±2.5度、任意拡張可）
+# ・パネルの中心にピン座標が来るように描画
+# ・MSMはindex.htmlパースでL-pall/Lsurfどちらか単独でも描画
+# ・NO DATA時もパネル自動生成
 # ---------------------------------------------------------------
-# 2025-06-18 by ChatGPT
+# 2025-06-19 by ChatGPT
 # ===============================================================
 
 import sys
@@ -15,7 +18,7 @@ import os
 import pandas as pd
 import xarray as xr
 
-from module.utils.gpv_html_parser import find_existing_msm_files  # ★関数名を単独ファイル対応に
+from module.utils.gpv_html_parser import find_existing_msm_files
 from gpv_downloader import (
     find_existing_init_dt, download_gpv_panel, grib2_to_nc,
     MSM_PATTERNS, GSM_PATTERNS, GPV_MIRROR_URLS
@@ -26,6 +29,12 @@ from module.panel_utils import (
     make_local_weather_panel,
 )
 
+# ---------------------------------------------------------------
+# デフォルト範囲幅（度）：中心±この値
+DEFAULT_RANGE_WIDTH = 2.5
+
+# ---------------------------------------------------------------
+# NO DATA時のダミータイム生成
 def get_gpv_nodata_times(ncols=12):
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     hour = now.hour
@@ -33,18 +42,36 @@ def get_gpv_nodata_times(ncols=12):
     base_time = now.replace(hour=init_hour)
     return [base_time + pd.Timedelta(hours=3*i) for i in range(ncols)]
 
-def main():
-    parser = argparse.ArgumentParser(description="全国どこでもGSM/MSM局地天気図パネル生成スクリプト")
+# ---------------------------------------------------------------
+# コマンドライン引数パース＆範囲自動計算
+def parse_args():
+    parser = argparse.ArgumentParser(description="中心座標だけで任意地点天気パネルを描画")
     parser.add_argument("--model", choices=["gsm", "msm"], default="gsm", help="モデル選択 (gsm or msm)")
     parser.add_argument("--city", required=True, help="地名（例：長岡花火）")
-    parser.add_argument("--pin_lat", type=float, required=True, help="ピンポイント緯度")
-    parser.add_argument("--pin_lon", type=float, required=True, help="ピンポイント経度")
-    parser.add_argument("--lat_range", type=float, nargs=2, required=True, help="地図範囲の緯度 [min max]")
-    parser.add_argument("--lon_range", type=float, nargs=2, required=True, help="地図範囲の経度 [min max]")
+    parser.add_argument("--pin_lat", type=float, required=True, help="中心緯度（例：37.4462）")
+    parser.add_argument("--pin_lon", type=float, required=True, help="中心経度（例：138.8521）")
+    parser.add_argument("--range_width", type=float, default=DEFAULT_RANGE_WIDTH, help="範囲半径（度, デフォルト2.5）")
     parser.add_argument("--output", type=str, default=None, help="保存ファイル名（省略可）")
     parser.add_argument("--ncols", type=int, default=12, help="パネルの横列数（予報時刻数）")
     parser.add_argument("--nrows", type=int, default=6, help="パネルの縦行数（固定6）")
     args = parser.parse_args()
+
+    # 範囲自動計算（中心±range_width）
+    args.lat_min = args.pin_lat - args.range_width
+    args.lat_max = args.pin_lat + args.range_width
+    args.lon_min = args.pin_lon - args.range_width
+    args.lon_max = args.pin_lon + args.range_width
+
+    # デバッグ出力
+    print(f"【描画パネル】地名: {args.city}")
+    print(f"中心緯度経度: ({args.pin_lat}, {args.pin_lon})")
+    print(f"範囲: lat {args.lat_min:.3f}～{args.lat_max:.3f}, lon {args.lon_min:.3f}～{args.lon_max:.3f}")
+
+    return args
+
+# ---------------------------------------------------------------
+def main():
+    args = parse_args()
 
     BASE_DIR = "./data"
     NCOLS = args.ncols
@@ -92,7 +119,7 @@ def main():
         print(f"=== {args.model.upper()}ローカルパネル生成開始：{args.city} ===")
 
         if args.model == "gsm":
-            # GSMは従来方式
+            # GSMは従来通り
             init_dt = find_existing_init_dt(PATTERNS, BASE_DIR, GPV_MIRROR_URLS, hours=[0, 6, 12, 18])
             if init_dt is None:
                 times = get_gpv_nodata_times(NCOLS)
@@ -168,11 +195,11 @@ def main():
             ds = align_datasets_common(ds_list, ncols=NCOLS)
             times = ds.time.values[:NCOLS] if hasattr(ds, "time") else get_gpv_nodata_times(NCOLS)
 
-        # --- パネル描画 ---
+        # --- パネル描画（中心座標＋自動範囲）---
         make_local_weather_panel(
             ds, times, OUTFILE,
             pin_lat=args.pin_lat, pin_lon=args.pin_lon, city_name=args.city,
-            lat_range=tuple(args.lat_range), lon_range=tuple(args.lon_range),
+            lat_range=(args.lat_min, args.lat_max), lon_range=(args.lon_min, args.lon_max),
             plot_func_list=plot_func_list,
             nrows=NROWS, ncols=NCOLS,
         )
@@ -188,3 +215,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# ===============================================================
+# END OF FILE
+# ===============================================================
