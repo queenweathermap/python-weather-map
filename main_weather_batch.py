@@ -80,7 +80,7 @@ for script, out_file, label in image_jobs:
         print(f"[ERROR] {script} 実行失敗: {e}")
         print("stdout:\n", e.stdout)
         print("stderr:\n", e.stderr)
-            print(f"[ERROR] {script} 実行失敗: {e}")
+        print(f"[ERROR] {script} 実行失敗: {e}")
     except Exception as e:
         print(f"[ERROR] Drive/Slack送信失敗: {e}")
 
