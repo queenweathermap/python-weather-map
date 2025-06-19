@@ -54,7 +54,12 @@ jobs:
         run: |
           ls -l /usr/include/netcdf.h
           ls -l /usr/lib/x86_64-linux-gnu/libnetcdf.so
-          
+
+
+      - name: Download wgrib2 source
+        run: |
+          wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
+          tar xvf v3.7.0.tar.gz
 
       - name: Build wgrib2 with NetCDF support
         run: |
@@ -72,7 +77,7 @@ jobs:
           sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V || true
           ldd /usr/local/bin/wgrib2 | grep netcdf || true
-
+          
 
       - name: Run weather batch (main_weather_batch.py)
         env:
