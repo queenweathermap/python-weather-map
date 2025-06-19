@@ -10,8 +10,8 @@ name: Daily Weather Map
 
 on:
   schedule:
-    - cron: '0 20 * * *'
-    - cron: '0 8 * * *'
+    - cron: '0 20 * * *'   # JST 5時
+    - cron: '0 8 * * *'    # JST 17時
   workflow_dispatch:
 
 jobs:
@@ -21,19 +21,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Python dependencies
-        run: |
-          pip install -r requirements.txt
-          pip show python-dotenv
-          pip freeze
-          
-      - name: Install python-dotenv directly
-        run: pip install python-dotenv
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Confirm Python and pip versions
+        run: |
+          which python
+          python --version
+          which pip
+          pip --version
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip show python-dotenv
+          pip freeze
+
+      # 念のためdotenvだけ再インストール（トラブル時のみ有効化でもOK）
+      # - name: Force install python-dotenv
+      #   run: pip install --upgrade --force-reinstall python-dotenv
 
       - name: Install build dependencies for wgrib2
         run: |
@@ -58,7 +67,6 @@ jobs:
           sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V || true
           ldd /usr/local/bin/wgrib2 | grep netcdf || true
-
 
       - name: Run weather batch (main_weather_batch.py)
         env:
