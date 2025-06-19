@@ -32,7 +32,8 @@ jobs:
       - name: Install build dependencies for wgrib2
         run: |
           sudo apt-get update
-          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev jasper libjasper-dev
+          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev
+
 
       - name: Download wgrib2 source
         run: |
