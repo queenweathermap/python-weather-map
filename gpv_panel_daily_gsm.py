@@ -58,43 +58,58 @@ if __name__ == "__main__":
         )
         if init_dt is None:
             print("NO DATA: GSMファイルがサーバに見つかりません")
-            make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
+            make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
 
         print(f"init_dt: {init_dt}")
+
         # 2. 12時刻×2パターン ダウンロード実行
         panel_files = download_gpv_panel(
             GSM_PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS
         )
         print("panel_files:", panel_files)
 
-        # 3. 欠損時刻を除去し、2パターン揃った時刻のみ抽出
-        pattern_files = [f for f in panel_files if isinstance(f, (list, tuple)) and len(f) == len(GSM_PATTERNS)]
+        # 3. 欠損時刻やNone/異常型を除去し、2パターン揃った時刻のみ抽出
+        pattern_files = []
+        for i, f in enumerate(panel_files):
+            if isinstance(f, (list, tuple)) and len(f) == len(GSM_PATTERNS):
+                if None not in f:
+                    pattern_files.append(f)
+                else:
+                    print(f"[WARN] panel_files[{i}]にNoneあり: {f}")
+            else:
+                print(f"[WARN] panel_files[{i}]が異常: {f}")
+        print("pattern_files:", pattern_files)
+
         if not pattern_files or len(pattern_files) < 2:
             print("NO DATA: pattern_files is None or <2")
-            make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
+            make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
-        # flatten時もNoneが来ないように念のためガード
+
+        # flatten時もNoneが来ないようにガード
         file_list = []
         for sublist in pattern_files:
-            if sublist is not None:
-                file_list.extend(sublist)
+            if isinstance(sublist, (list, tuple)):
+                for item in sublist:
+                    if item is not None:
+                        file_list.append(item)
+                    else:
+                        print("[WARN] sublist内itemがNone:", sublist)
 
         print("2. NetCDF変換開始")
         # 4. GRIB2→NetCDF変換（全ファイルを一括処理、失敗・小サイズは除外）
-        file_list = [item for sublist in pattern_files if sublist is not None for item in sublist]
         nc_paths = []
         for path, _ in file_list:
             nc_path = grib2_to_nc(path)
             if nc_path and os.path.exists(nc_path):
                 nc_paths.append(nc_path)
             else:
-                print(f"[SKIP] NetCDF変換失敗: {nc_path}")
+                print(f"[SKIP] NetCDF変換失敗: {nc_path}（元ファイル: {path}）")
         print("nc_paths:", nc_paths)
 
         if not nc_paths or len(nc_paths) < 2:
             print("NO DATA: ncファイル少なすぎ")
-            make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
+            make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
 
         # 5. NetCDFからxarray Datasetをリストで取得
@@ -107,7 +122,7 @@ if __name__ == "__main__":
                 print(f"[SKIP] open_dataset失敗: {nc} ({e})")
         if not ds_list or len(ds_list) < 2:
             print("NO DATA: ds_list少なすぎ")
-            make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
+            make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
 
         # 6. すべてのDatasetを共通座標にアライン
@@ -125,5 +140,5 @@ if __name__ == "__main__":
         print("=== 重大エラー発生 ===")
         print(type(e), e)
         traceback.print_exc()
-        make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
+        make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
         sys.exit(1)
