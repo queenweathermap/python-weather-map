@@ -10,14 +10,13 @@ name: Daily Weather Map
 
 on:
   schedule:
-    - cron: '0 20 * * *'   # JST 5時
-    - cron: '0 8 * * *'    # JST 17時
+    - cron: '0 20 * * *'
+    - cron: '0 8 * * *'
   workflow_dispatch:
 
 jobs:
   run-weather-batch:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,13 +29,23 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Download wgrib2 Linux binary
+      - name: Install build dependencies for wgrib2
         run: |
-          wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2_linux
-          chmod +x wgrib2_linux
-          sudo mv wgrib2_linux /usr/local/bin/wgrib2
-          wgrib2 -V
+          sudo apt-get update
+          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev jasper libjasper-dev
 
+      - name: Download wgrib2 source
+        run: |
+          wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
+          tar xvf v3.7.0.tar.gz
+
+      - name: Build wgrib2
+        run: |
+          cd wgrib2-3.7.0
+          make
+          sudo cp ./wgrib2/wgrib2 /usr/local/bin/wgrib2
+          sudo chmod +x /usr/local/bin/wgrib2
+          wgrib2 -V
 
       - name: Run weather batch (main_weather_batch.py)
         env:
