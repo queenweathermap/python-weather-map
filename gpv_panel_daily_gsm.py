@@ -69,15 +69,20 @@ if __name__ == "__main__":
         print("panel_files:", panel_files)
 
         # 3. 欠損時刻を除去し、2パターン揃った時刻のみ抽出
-        pattern_files = [f for f in panel_files if f and len(f) == len(GSM_PATTERNS)]
+        pattern_files = [f for f in panel_files if isinstance(f, (list, tuple)) and len(f) == len(GSM_PATTERNS)]
         if not pattern_files or len(pattern_files) < 2:
             print("NO DATA: pattern_files is None or <2")
             make_nodata_weather_panel(get_nodata_times(), save_path=OUTFILE)
             sys.exit(0)
+        # flatten時もNoneが来ないように念のためガード
+        file_list = []
+        for sublist in pattern_files:
+            if sublist is not None:
+                file_list.extend(sublist)
 
         print("2. NetCDF変換開始")
         # 4. GRIB2→NetCDF変換（全ファイルを一括処理、失敗・小サイズは除外）
-        file_list = [item for sublist in pattern_files for item in sublist]
+        file_list = [item for sublist in pattern_files if sublist is not None for item in sublist]
         nc_paths = []
         for path, _ in file_list:
             nc_path = grib2_to_nc(path)
