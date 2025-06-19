@@ -30,17 +30,13 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Install build tools for wgrib2
+      - name: Download wgrib2 binary
         run: |
-          sudo apt-get update
-          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev wget
-
-      - name: Install wgrib2
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wgrib2
+          wget -O wgrib2.tgz "https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz"
+          tar xvf wgrib2.tgz
+          sudo cp ./wgrib2/wgrib2_linux /usr/local/bin/wgrib2
+          sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V
-
 
       - name: Run weather batch (main_weather_batch.py)
         env:
