@@ -68,6 +68,11 @@ jobs:
           wgrib2 -V || true
           ldd /usr/local/bin/wgrib2 | grep netcdf || true
 
+      - name: Test wgrib2 netcdf option
+        run: |
+          wgrib2 -h | grep netcdf || true
+
+
       - name: Run weather batch (main_weather_batch.py)
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
