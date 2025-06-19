@@ -42,16 +42,15 @@ jobs:
       - name: Build wgrib2 with NetCDF support
         run: |
           cd wgrib2-3.7.0
-          rm -rf build   # 念のためクリーン
           mkdir build
           cd build
-          cmake .. -DENABLE_NETCDF=ON -DENABLE_JASPER=OFF -DENABLE_PNG=OFF
+          cmake .. -DENABLE_NETCDF=ON \
+            -DNETCDF_INCLUDE_DIR=/usr/include \
+            -DNETCDF_LIBRARIES=/usr/lib/x86_64-linux-gnu/libnetcdf.so
           make -j4
           sudo cp wgrib2/wgrib2 /usr/local/bin/wgrib2
           sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V || true
-          # NetCDFサポート確認（重要！）
-          ldd /usr/local/bin/wgrib2 | grep netcdf || true
 
 
       - name: Run weather batch (main_weather_batch.py)
