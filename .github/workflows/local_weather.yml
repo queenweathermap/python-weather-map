@@ -23,13 +23,13 @@
 
 name: Local Weather Panel
 
+
 on:
-  # --- 手動実行トリガー（Run workflow時に下記パラメータを入力） ---
   workflow_dispatch:
     inputs:
       model:
         description: 'データ種別（gsm or msm）'
-        required: false
+        required: true
         default: 'msm'
         type: choice
         options:
@@ -47,36 +47,17 @@ on:
         description: 'ピンポイント経度（例：138.8521）'
         required: true
         type: number
-      lat_min:
-        description: '範囲の最小緯度'
-        required: true
-        type: number
-      lat_max:
-        description: '範囲の最大緯度'
-        required: true
-        type: number
-      lon_min:
-        description: '範囲の最小経度'
-        required: true
-        type: number
-      lon_max:
-        description: '範囲の最大経度'
-        required: true
+      range_width:
+        description: '中心からの半径（度, デフォルト2.5）'
+        required: false
+        default: 2.5
         type: number
 
 jobs:
   run-local-panel:
     runs-on: ubuntu-latest
     steps:
-      # --- リポジトリの最新ソースをチェックアウト ---
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # --- 必要なPythonパッケージをインストール ---
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      # --- ローカル天気パネル生成スクリプトを実行（各種パラメータをコマンドラインで渡す） ---
+      # ...省略...
       - name: Run local weather panel script
         env:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
@@ -87,7 +68,4 @@ jobs:
             --city "${{ github.event.inputs.city }}" \
             --pin_lat ${{ github.event.inputs.pin_lat }} \
             --pin_lon ${{ github.event.inputs.pin_lon }} \
-            --lat_range ${{ github.event.inputs.lat_min }} ${{ github.event.inputs.lat_max }} \
-            --lon_range ${{ github.event.inputs.lon_min }} ${{ github.event.inputs.lon_max }}
-
-# ===============================================
+            --range_width ${{ github.event.inputs.range_width }}
