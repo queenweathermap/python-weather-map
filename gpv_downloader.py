@@ -27,29 +27,26 @@ MSM_PATTERNS = [
 ]
 
 def find_existing_init_dt(patterns, base_dir, mirror_urls, hours=[0, 12]):
-    """
-    直近3日分の指定時刻（例: 0, 12UTC）で必要な全パターンファイルが揃う
-    最新のイニシャル時刻(dt)を返す。なければNone。
-    """
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     for day_offset in range(0, 3):
         dt = now - pd.Timedelta(days=day_offset)
         for hour in sorted(hours, reverse=True):  # 12→0の順
             dt_h = dt.replace(hour=hour)
-            all_exist = True
+            print(f"CHECK: {dt_h}")  # ←この行を追加
             for pattern in patterns:
                 ymd = dt_h.strftime("%Y%m%d")
                 h = dt_h.hour
-                # 拡張子は .bin or .bin.nc どちらでもヒットするようにする
                 g = glob.glob(os.path.join(
                     base_dir,
                     f"Z__C_RJTD_{ymd}{h:02d}0000_{pattern}*"
                 ))
+                print(f"  pattern={pattern}, files={g}")  # ←この行を追加
                 if len(g) == 0:
                     all_exist = False
             if all_exist:
                 return dt_h
     return None
+
 
 def download_gpv_panel(patterns, base_dir, init_dt, mirror_urls, ncols=12):
     """
