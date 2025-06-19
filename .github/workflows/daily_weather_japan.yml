@@ -34,9 +34,13 @@ jobs:
         run: |
           wget -O wgrib2.tgz "https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz"
           tar xvf wgrib2.tgz
-          sudo cp ./wgrib2/wgrib2_linux /usr/local/bin/wgrib2
+          # wgrib2バイナリ本体のパスを自動検索してコピー
+          file=$(find . -type f -name 'wgrib2*' -perm /111 | grep -v '\.o$' | head -n 1)
+          echo "Found wgrib2 binary: $file"
+          sudo cp "$file" /usr/local/bin/wgrib2
           sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V
+
 
       - name: Run weather batch (main_weather_batch.py)
         env:
