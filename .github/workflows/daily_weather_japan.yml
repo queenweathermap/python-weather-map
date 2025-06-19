@@ -30,15 +30,11 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Download and install wgrib2 from NOAA (Linux x86_64)
+      - name: Download wgrib2 Linux binary
         run: |
-          wget -O wgrib2.tgz "https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz"
-          tar xvf wgrib2.tgz
-          # 展開ディレクトリ内を検索
-          find . -type f -name "wgrib2*"
-          # バイナリを確認してパスを指定（たとえば以下のようになるはず）
-          sudo cp ./grib2/wgrib2/wgrib2 /usr/local/bin/wgrib2
-          sudo chmod +x /usr/local/bin/wgrib2
+          wget https://www.ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2_linux
+          chmod +x wgrib2_linux
+          sudo mv wgrib2_linux /usr/local/bin/wgrib2
           wgrib2 -V
 
 
