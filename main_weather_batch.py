@@ -82,6 +82,10 @@ for script, out_file, label in image_jobs:
         print("stdout:\n", e.stdout)
         print("stderr:\n", e.stderr)
     except Exception as e:
-        print(f"[ERROR] Drive/Slack送信失敗: {e}")
+        import traceback
+        print("=== 重大エラー ===")
+        print(e)
+        traceback.print_exc()
+        sys.exit(1)  # 必ず exit(1)
 
 print("==== 正常終了 ====")
