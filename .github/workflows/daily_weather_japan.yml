@@ -39,6 +39,12 @@ jobs:
           wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
           tar xvf v3.7.0.tar.gz
 
+      - name: 解凍ディレクトリの内容を確認
+        run: |
+          ls -l wgrib2-3.7.0
+          ls -l wgrib2-3.7.0/wgrib2 || true
+
+
       - name: Build wgrib2
         run: |
           cd wgrib2-3.7.0
