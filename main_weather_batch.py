@@ -55,7 +55,6 @@ image_jobs = [
 for script, out_file, label in image_jobs:
     print(f"=== {script} 実行開始 ===")
     try:
-        # 1. 天気図画像生成
         result = subprocess.run(
             ["python3", script, out_file],
             check=True,
@@ -63,12 +62,10 @@ for script, out_file, label in image_jobs:
             text=True
         )
         print(f"[INFO] {script} 実行完了：\n{result.stdout}")
+        print(f"[INFO] {script} エラー出力：\n{result.stderr}")
 
-        # 2. ファイル存在確認 → Google Driveへアップロード
         if os.path.exists(out_file):
             url = upload_to_drive(out_file)
-
-            # 3. Slackへテキスト通知（画像ではなくURLのみ）
             message = f"{label} 天気図をGoogle Driveにアップロードしました：\n{url}"
             res = requests.post(
                 "https://slack.com/api/chat.postMessage",
@@ -76,8 +73,6 @@ for script, out_file, label in image_jobs:
                 json={"channel": SLACK_CHANNEL_ID, "text": message}
             )
             print(f"[INFO] Slack通知: {res.text}")
-
-            # 4. ローカルの画像ファイルを削除（ストレージ節約のため）
             os.remove(out_file)
         else:
             print(f"[ERROR] 画像が見つかりません: {out_file}")
