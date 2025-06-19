@@ -60,6 +60,8 @@ jobs:
         run: |
           wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
           tar xvf v3.7.0.tar.gz
+          ls -l
+
 
       - name: Build wgrib2 with NetCDF support
         run: |
