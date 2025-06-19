@@ -41,11 +41,12 @@ jobs:
 
       - name: Build wgrib2
         run: |
-          cd wgrib2-3.7.0/wgrib2
+          cd wgrib2-3.7.0
           make
-          sudo cp wgrib2 /usr/local/bin/wgrib2
+          sudo cp ./wgrib2/wgrib2 /usr/local/bin/wgrib2
           sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V
+
 
       - name: Run weather batch (main_weather_batch.py)
         env:
