@@ -51,6 +51,48 @@ def find_existing_init_dt(patterns, base_dir, mirror_urls, hours=[0, 12]):
                 return dt_h
     return None
 
+def download_gpv_panel(patterns, base_dir, init_dt, mirror_urls, ncols=12):
+    """
+    指定パターン（GSM/MSMなど）・イニシャル時刻・URLで
+    各時刻のファイル（3時間ごとncols個）を自動DL
+    → [[(パス,時刻), ...], ...] のリストで返す
+    欠損があってもNone埋めで返す
+    """
+    import os
+    import urllib.request
+    from datetime import timedelta
+
+    out_list = []
+    for i in range(ncols):
+        t = init_dt + timedelta(hours=3*i)
+        ymdh = t.strftime("%Y%m%d%H")
+        col = []
+        for pattern in patterns:
+            fname = f"Z__C_RJTD_{ymdh}0000_{pattern}_FD0000-0100_grib2.bin"
+            fpath = os.path.join(base_dir, fname)
+            # 既にファイルがあればDLしない
+            if not os.path.exists(fpath) or os.path.getsize(fpath) < 10000:
+                # 各ミラーURLから順次DL
+                ok = False
+                for url_base in mirror_urls:
+                    y, m, d = t.strftime("%Y"), t.strftime("%m"), t.strftime("%d")
+                    url = f"{url_base}/{y}/{m}/{d}/{fname}"
+                    try:
+                        urllib.request.urlretrieve(url, fpath)
+                        if os.path.exists(fpath) and os.path.getsize(fpath) > 10000:
+                            ok = True
+                            print(f"[OK] DL: {fpath}")
+                            break
+                    except Exception as e:
+                        print(f"[NG] {url.split('/')[-1]}: {e}")
+                if not ok:
+                    col.append(None)
+                    continue
+            col.append((fpath, t))
+        out_list.append(col if all(col) else None)
+    return out_list
+
+
 def download_available_gpv(pattern, base_dir, mirrors):
     """
     サーバ上で最新のGPVファイルを探してDL
