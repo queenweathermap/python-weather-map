@@ -21,11 +21,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check netcdf presence
-        run: |
-          ls -l /usr/include/netcdf.h
-          ls -l /usr/lib/x86_64-linux-gnu/libnetcdf.so
-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -54,6 +49,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev libnetcdf-dev
+
+      - name: Check netcdf presence
+        run: |
+          ls -l /usr/include/netcdf.h
+          ls -l /usr/lib/x86_64-linux-gnu/libnetcdf.so
+          
 
       - name: Build wgrib2 with NetCDF support
         run: |
