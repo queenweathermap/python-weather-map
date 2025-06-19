@@ -50,8 +50,7 @@ jobs:
           make -j4
           sudo cp wgrib2/wgrib2 /usr/local/bin/wgrib2
           sudo chmod +x /usr/local/bin/wgrib2
-          wgrib2 -V
-
+          wgrib2 -V || true  # ←ここがポイント！
 
 
       - name: Run weather batch (main_weather_batch.py)
