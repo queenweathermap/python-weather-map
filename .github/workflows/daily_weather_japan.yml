@@ -40,7 +40,7 @@ jobs:
           tar xzf v3.7.0.tar.gz
           cd wgrib2-3.7.0/wgrib2
           make
-          sudo cp ./wgrib2 /usr/local/bin/
+          sudo cp wgrib2 /usr/local/bin/
           /usr/local/bin/wgrib2 -V
 
 
