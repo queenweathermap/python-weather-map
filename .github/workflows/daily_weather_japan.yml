@@ -39,17 +39,17 @@ jobs:
           wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
           tar xvf v3.7.0.tar.gz
 
-      - name: 解凍ディレクトリの内容を確認
+      - name: Build wgrib2 with cmake
         run: |
-          ls -l wgrib2-3.7.0
-          ls -l wgrib2-3.7.0/wgrib2 || true
-
-
-      - name: Build wgrib2
-        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake make gcc gfortran zlib1g-dev libpng-dev
           cd wgrib2-3.7.0
-          make
-          sudo cp ./wgrib2/wgrib2 /usr/local/bin/wgrib2
+          mkdir build
+          cd build
+          cmake ..
+          make -j4
+          ls -l wgrib2/wgrib2
+          sudo cp wgrib2/wgrib2 /usr/local/bin/wgrib2
           sudo chmod +x /usr/local/bin/wgrib2
           wgrib2 -V
 
