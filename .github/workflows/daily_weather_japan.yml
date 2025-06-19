@@ -1,18 +1,17 @@
 # .github/workflows/daily_weather.yml
 # ===============================================
-# Daily Weather Map（Slack通知・GSM全国のみ）
-# -----------------------------------------------
-# 毎日JST 5時/17時自動実行
-# Slack APIキーはGitHub Secretsで管理
-# 2025-06-16 by ChatGPT
+# Daily Weather Map（GSM/MSM両対応版・Slack通知・Google Drive連携）
+# 毎日JST 5時/17時自動実行＋手動実行もOK
+# wgrib2はNOAA公式ソースからv3.7.0をビルド（どんな環境でも安定再現）
+# 2025-06-19 by ChatGPT
 # ===============================================
 
 name: Daily Weather Map
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # JST 5時
-    - cron: '0 8 * * *'   # JST 17時
+    - cron: '0 20 * * *'   # JST 5時
+    - cron: '0 8 * * *'    # JST 17時
   workflow_dispatch:
 
 jobs:
@@ -22,16 +21,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Install wgrib2
+      - name: Install build tools for wgrib2
         run: |
           sudo apt-get update
-          sudo apt-get install -y wgrib2
+          sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev wget
+
+      - name: Build and install wgrib2 v3.7.0
+        run: |
+          wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
+          tar xzf v3.7.0.tar.gz
+          cd wgrib2-3.7.0
+          make
+          sudo cp ./wgrib2/wgrib2 /usr/local/bin/
           wgrib2 -V
 
-      - name: Run weather batch
+      - name: Run weather batch (main_weather_batch.py)
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
