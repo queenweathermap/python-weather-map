@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: '3.11'
 
-       - name: Install build dependencies for wgrib2
+      - name: Install build dependencies for wgrib2
         run: |
           sudo apt-get update
           sudo apt-get install -y make gcc gfortran zlib1g-dev libpng-dev libnetcdf-dev
