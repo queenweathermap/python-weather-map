@@ -63,8 +63,10 @@ jobs:
           ls -l
 
 
-      - name: Build wgrib2 with NetCDF support
+      - name: Download and build wgrib2 with NetCDF support
         run: |
+          wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
+          tar xvf v3.7.0.tar.gz
           cd wgrib2-3.7.0
           mkdir build
           cd build
