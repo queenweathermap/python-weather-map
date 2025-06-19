@@ -38,10 +38,11 @@ jobs:
         run: |
           wget https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v3.7.0.tar.gz
           tar xzf v3.7.0.tar.gz
-          cd wgrib2-3.7.0
+          cd wgrib2-3.7.0/wgrib2
           make
-          sudo cp ./wgrib2/wgrib2 /usr/local/bin/
-          wgrib2 -V
+          sudo cp ./wgrib2 /usr/local/bin/
+          /usr/local/bin/wgrib2 -V
+
 
       - name: Run weather batch (main_weather_batch.py)
         env:
