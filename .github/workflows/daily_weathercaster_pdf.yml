@@ -26,5 +26,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run weathercaster fetch script
-        run: python scripts/daily_weathercaster_pdf.py
+      - name: Run weathercaster script
+        run: python daily_weathercaster_pdf.py  # ✅ プロジェクト直下
+
