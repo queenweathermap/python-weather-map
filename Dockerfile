@@ -26,6 +26,10 @@ RUN wget https://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz && \
     cp ./wgrib2/wgrib2 /usr/local/bin/ && \
     cd .. && rm -rf grib2 wgrib2.tgz
 
+# --- NetCDFサポート確認（全文も出力）---
+RUN wgrib2 -h
+RUN wgrib2 -h | grep netcdf
+
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
 WORKDIR /workspace
