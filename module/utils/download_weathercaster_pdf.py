@@ -14,13 +14,14 @@ from datetime import datetime
 
 # --- 対象のPDFファイルとラベル定義 ---
 WEATHERCASTER_PDFS = {
-    "COMP12.pdf": "12時間解析図",
+    "FXXN519.pdf": "週間支援図[FXXN519]",
+    "FZCX50.pdf": "週間支援図アンサンブル［FZCX50］",
+    "FEFE19.pdf": "週間アンサンブル予想図［FEFE19］",
+    "COMP12.pdf": "12時間予想図",
     "COMP36.pdf": "36時間予想図",
     "COMP72.pdf": "72時間予想図",
-    "FXJP854.pdf": "850hPa予想",
-    "FXXN519.pdf": "500hPa渦度",
-    "FZCX50.pdf": "地上予想",
-    "FEFE19.pdf": "降水量予想",
+    "FXJP854.pdf": "850hPa相当温位[FXJP854]",
+
 }
 
 # --- 基本URL（ファイル名を末尾に付加） ---
