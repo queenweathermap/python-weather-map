@@ -13,13 +13,16 @@
 #   - WEATHERCASTER_USER
 #   - WEATHERCASTER_PASS
 #   - WEATHERCASTER_DRIVE_FOLDER_ID
+#   - GOOGLE_SERVICE_ACCOUNT_JSON
+#   - SLACK_BOT_TOKEN
+#   - SLACK_CHANNEL_ID
 # ===============================================================
 
 import os
 from dotenv import load_dotenv
 from module.utils.download_weathercaster_pdf import download_weathercaster_pdfs
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
-from module.utils.slack_utils import notify_to_slack
+from module.utils.slack_utils import send_slack_text
 
 # --- 環境変数の読み込み ---
 load_dotenv()
@@ -27,6 +30,7 @@ load_dotenv()
 USER = os.getenv("WEATHERCASTER_USER")
 PASS = os.getenv("WEATHERCASTER_PASS")
 FOLDER_ID = os.getenv("WEATHERCASTER_DRIVE_FOLDER_ID")
+SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID")
 
 # --- 1. Weathercasterの天気図PDFを日付付きで一括ダウンロード ---
 downloaded = download_weathercaster_pdfs(save_dir="./data", username=USER, password=PASS)
@@ -36,7 +40,7 @@ for label, path in downloaded:
     try:
         url = upload_to_drive(path, folder_id=FOLDER_ID)
         if url:
-            notify_to_slack(f"【Weathercaster天気図】{label}", url)
+            send_slack_text(SLACK_CHANNEL_ID, f"【Weathercaster天気図】{label}\n{url}")
     except Exception as e:
         print(f"[ERROR] アップロードまたは通知失敗: {label} - {e}")
 
