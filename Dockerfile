@@ -8,7 +8,6 @@
 
 FROM ubuntu:22.04
 
-# ---- 依存インストール ----
 RUN apt-get update && \
     apt-get install -y \
       wget git bzip2 \
@@ -18,20 +17,15 @@ RUN apt-get update && \
       fonts-ipafont-gothic \
       libnetcdf-dev netcdf-bin
 
-# ---- wgrib2 NetCDFサポート付きビルド ----
+# ↑ここまでを1つのRUNでやること（レイヤー問題回避）
+
 RUN wget https://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz && \
     tar xzf wgrib2.tgz && \
     cd grib2 && \
-    make distclean || true && \
     make && \
     cp ./wgrib2/wgrib2 /usr/local/bin/ && \
     cd .. && rm -rf grib2 wgrib2.tgz
 
-# --- NetCDFサポート確認（全文も出力）---
-RUN wgrib2 -h
-RUN wgrib2 -h | grep netcdf
-
-# ★ ここ大事！libnetcdf.soへのパス通し
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
 WORKDIR /workspace
