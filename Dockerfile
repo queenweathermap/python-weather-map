@@ -22,11 +22,13 @@ RUN apt-get update && \
 RUN wget https://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz && \
     tar xzf wgrib2.tgz && \
     cd grib2 && \
+    make distclean || true && \
     make && \
     cp ./wgrib2/wgrib2 /usr/local/bin/ && \
     cd .. && rm -rf grib2 wgrib2.tgz
 
-# --- NetCDFサポート確認 ---
+# --- NetCDFサポート確認（全文も出力）---
+RUN wgrib2 -h
 RUN wgrib2 -h | grep netcdf
 
 WORKDIR /workspace
