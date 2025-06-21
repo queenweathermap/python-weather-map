@@ -8,13 +8,14 @@
 
 FROM continuumio/miniconda3
 
-RUN conda install -c conda-forge wgrib2 python=3.11 \
- && wgrib2 -h | grep netcdf
+RUN conda install -c conda-forge wgrib2 python=3.11
 
 WORKDIR /workspace
 COPY . /workspace
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-CMD ["python", "main_weather_batch.py"]
+# NetCDFサポート確認
+RUN wgrib2 -h | grep netcdf || (echo "NetCDFサポートがありません" && exit 1)
 
+CMD ["bash"]
