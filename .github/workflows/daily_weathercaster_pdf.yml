@@ -3,6 +3,7 @@ name: Weathercaster PDF Auto
 on:
   schedule:
     - cron: '0 4 * * *'  # 日本時間13:00（UTC+9）
+  workflow_dispatch:
 
 jobs:
   download-and-notify:
