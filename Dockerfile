@@ -8,6 +8,7 @@
 
 FROM ubuntu:22.04
 
+# ---- 依存インストール ----
 RUN apt-get update && \
     apt-get install -y \
       wget git bzip2 \
@@ -17,19 +18,7 @@ RUN apt-get update && \
       fonts-ipafont-gothic \
       libnetcdf-dev netcdf-bin
 
-# Miniconda
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
-    bash /tmp/miniconda.sh -b -p /opt/conda && \
-    rm /tmp/miniconda.sh && \
-    /opt/conda/bin/conda clean -a -y && \
-    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
-    echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
-    echo "conda activate base" >> ~/.bashrc
-
-ENV PATH="/opt/conda/bin:$PATH"
-ENV PYTHONPATH=/workspace
-
-# --- NetCDFサポート付きでwgrib2ビルド ---
+# ---- wgrib2 NetCDFサポート付きビルド ----
 RUN wget https://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz && \
     tar xzf wgrib2.tgz && \
     cd grib2 && \
@@ -37,6 +26,7 @@ RUN wget https://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz && \
     cp ./wgrib2/wgrib2 /usr/local/bin/ && \
     cd .. && rm -rf grib2 wgrib2.tgz
 
+# --- NetCDFサポート確認 ---
 RUN wgrib2 -h | grep netcdf
 
 WORKDIR /workspace
