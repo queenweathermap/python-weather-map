@@ -31,8 +31,10 @@ RUN wget https://ftp.cpc.ncep.noaa.gov/wd51we/wgrib2/wgrib2.tgz && \
 RUN wgrib2 -h
 RUN wgrib2 -h | grep netcdf
 
-WORKDIR /workspace
+# ★ ここ大事！libnetcdf.soへのパス通し
+ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
+WORKDIR /workspace
 COPY . /workspace
 
 RUN pip install --upgrade pip
