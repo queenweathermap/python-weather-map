@@ -165,16 +165,28 @@ if __name__ == "__main__":
     base_dir = "./data"
     os.makedirs(base_dir, exist_ok=True)
 
+    # ===【ここでinit_dtをサーバ実在の時刻にハードコード】===
+    # 例: 2024-06-20 00:00（JSTでなくUTC!!）
+    init_dt = datetime(2024, 6, 20, 0, 0, 0)
+    print(f"[INFO] ハードコードinit_dt: {init_dt}")
+
     grib2_files = []
     nc_paths = []
-    init_time = None
 
     for pattern in GSM_PATTERNS:
-        grib2_path, itime = download_available_gpv(pattern, base_dir, GPV_MIRROR_URLS)
-        if grib2_path is not None and itime is not None:
-            grib2_files.append(grib2_path)
-            if init_time is None:
-                init_time = itime
+        # ファイル名をこの時刻で組み立ててダウンロード
+        ymdh = init_dt.strftime("%Y%m%d%H")
+        fname = f"Z__C_RJTD_{ymdh}0000_{pattern}_FD0000-0100_grib2.bin"
+        y, m, d = init_dt.strftime("%Y"), init_dt.strftime("%m"), init_dt.strftime("%d")
+        url = f"{GPV_MIRROR_URLS[0]}/{y}/{m}/{d}/{fname}"
+        fpath = os.path.join(base_dir, fname)
+        print(f"[TRY] {url}")
+        try:
+            urllib.request.urlretrieve(url, fpath)
+            print(f"[OK] DL: {fpath}")
+            grib2_files.append(fpath)
+        except Exception as e:
+            print(f"[NG] {fname}: {e}")
 
     if len(grib2_files) < 2:
         print("【ERROR】気圧面・地上のGRIB2ファイルが両方揃いません（NO DATA）")
@@ -190,4 +202,4 @@ if __name__ == "__main__":
         exit(1)
 
     print(f"[INFO] 2つのNetCDF OK: {nc_paths}")
-    print(f"[INFO] Init time: {init_time}")
+    print(f"[INFO] Init time: {init_dt}")
