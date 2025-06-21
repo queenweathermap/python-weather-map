@@ -26,6 +26,19 @@ MSM_PATTERNS = [
     "MSM_GPV_Rjp_Lsurf"     # 地上データ
 ]
 
+def check_wgrib2_netcdf():
+    try:
+        out = subprocess.check_output("wgrib2 -h", shell=True, encoding="utf-8")
+        if "netcdf" in out.lower():
+            print("[OK] wgrib2はNetCDF対応です")
+            return True
+        else:
+            print("[NG] wgrib2がNetCDF対応でありません！NO DATA確定！")
+            return False
+    except Exception as e:
+        print(f"[ERROR] wgrib2コマンド自体が実行不可: {e}")
+        return False
+
 def find_existing_init_dt(patterns, base_dir, mirror_urls, hours=[0, 12]):
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     for day_offset in range(0, 3):
@@ -145,6 +158,9 @@ def grib2_to_nc(grib2_path):
 
 # --------------------- メイン ---------------------
 if __name__ == "__main__":
+    if not check_wgrib2_netcdf():
+        print("wgrib2がNetCDF非対応のため終了します")
+        exit(1)
     base_dir = "./data"
     os.makedirs(base_dir, exist_ok=True)
 
