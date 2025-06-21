@@ -1,23 +1,16 @@
 # module/utils/slack_utils.py
-# ===============================================
-# Slackファイルアップロードユーティリティ（新API v2完全対応・英語実装）
-# -----------------------------------------------
-# ・ファイル（画像など）をSlackに外部アップロード方式（API v2）で送信
-# ・Slack推奨の3ステップ方式で method_deprecated を完全回避
-# ・ファイルアップロード時は公開URLの取得やコメント追加も可能
-# ・テキストだけの通知（chat.postMessage）も対応
-# -----------------------------------------------
-# 利用例:
-#   from module.utils.slack_utils import upload_file_slack
-#   upload_file_slack("C12345678", "weather_map.jpg")
-#   from module.utils.slack_utils import send_slack_text
-#   send_slack_text("Hello! Weather map updated.")
-# 必須パッケージ:
-#   pip install requests python-dotenv
-# ===============================================
+# ===============================================================
+# Slack通知＆ファイルアップロードユーティリティ（API v2完全対応）
+# ---------------------------------------------------------------
+# ・テキスト通知（chat.postMessage）
+# ・ファイルアップロード（推奨の外部アップロード3ステップ方式）
+# ・SlackのBotトークンを環境変数で指定：SLACK_BOT_TOKEN
+# ・画像／PDFなど各種ファイルをチャンネルに送信可能
+# ・チャンネルIDは明示的に指定（例: C12345678）
+# ===============================================================
 
-import requests
 import os
+import requests
 
 def upload_file_slack(
     channel,
@@ -26,70 +19,69 @@ def upload_file_slack(
     initial_comment="Here is the latest weather map!"
 ):
     """
-    Upload a file to a Slack channel via External Upload (API v2 recommended method).
-    channel: Channel ID (e.g., "C12345678")
-    filepath: Local file path (e.g., "weather_map.jpg")
-    title: Displayed file name in Slack
-    initial_comment: First comment text with file
+    Slackにファイル（画像やPDF）をアップロードする（推奨の外部アップロード方式）
+    channel: チャンネルID（例: C12345678）
+    filepath: ローカルファイルパス（例: weather_map.jpg）
+    title: Slack上の表示名
+    initial_comment: ファイルと共に投稿されるメッセージ
     """
-    bot_token = os.environ["SLACK_BOT_TOKEN"]
+    bot_token = os.environ.get("SLACK_BOT_TOKEN")
+    if not bot_token:
+        print("[ERROR] SLACK_BOT_TOKEN が未設定です")
+        return
     if not os.path.exists(filepath):
-        print(f"[ERROR] File does not exist: {filepath}")
+        print(f"[ERROR] ファイルが見つかりません: {filepath}")
         return
 
     filename = os.path.basename(filepath)
     length = int(os.path.getsize(filepath))
 
-    # === Step 1: Get Upload URL (files.getUploadURLExternal) ===
+    # === Step 1: アップロードURL取得 ===
     url_get = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
         "Authorization": f"Bearer {bot_token}",
         "Content-Type": "application/json; charset=utf-8"
     }
-    data = {"filename": filename, "length": length}
-    print(f"[INFO] getUploadURLExternal: {data}")
-    res1 = requests.post(url_get, headers=headers, json=data)
+    res1 = requests.post(url_get, headers=headers, json={"filename": filename, "length": length})
     res1_json = res1.json()
-    print(f"[DEBUG] getUploadURLExternal response: {res1_json}")
     if not res1_json.get("ok"):
-        print("[ERROR] Slack: Failed to get upload URL:", res1_json)
+        print("[ERROR] Slack: アップロードURL取得失敗:", res1_json)
         return
+
     upload_url = res1_json["upload_url"]
     file_id = res1_json["file_id"]
 
-    # === Step 2: PUT file body ===
-    print(f"[INFO] Slack PUT upload: {filepath}")
+    # === Step 2: PUTファイル本体 ===
     with open(filepath, "rb") as f:
         put_res = requests.put(upload_url, data=f)
     if put_res.status_code != 200:
-        print("[ERROR] Slack: PUT upload failed:", put_res.status_code, put_res.text)
+        print("[ERROR] Slack: PUT失敗:", put_res.status_code, put_res.text)
         return
 
-    # === Step 3: Complete upload (files.completeUploadExternal) ===
+    # === Step 3: アップロード完了通知 ===
     url_complete = "https://slack.com/api/files.completeUploadExternal"
     complete_data = {
         "files": [{"id": file_id, "title": title}],
         "channel_id": channel,
         "initial_comment": initial_comment
     }
-    print(f"[INFO] completeUploadExternal: {complete_data}")
     res3 = requests.post(url_complete, headers=headers, json=complete_data)
     res3_json = res3.json()
-    print(f"[DEBUG] completeUploadExternal response: {res3_json}")
     if not res3_json.get("ok"):
-        print("[ERROR] Slack file post failed:", res3_json)
+        print("[ERROR] Slackアップロード完了処理失敗:", res3_json)
     else:
-        print("[Slack upload] Done:", res3_json)
+        print(f"[Slack] ファイル送信完了: {title}")
 
 
 def send_slack_text(channel, message):
     """
-    Send a text message to a specified Slack channel via chat.postMessage API.
+    指定チャンネルにテキストメッセージを送信（chat.postMessage API）
     """
-    import requests
-    import os
+    bot_token = os.environ.get("SLACK_BOT_TOKEN")
+    if not bot_token:
+        print("[ERROR] SLACK_BOT_TOKEN が未設定です")
+        return
 
-    bot_token = os.environ["SLACK_BOT_TOKEN"]
     url = "https://slack.com/api/chat.postMessage"
     headers = {
         "Authorization": f"Bearer {bot_token}",
@@ -101,6 +93,7 @@ def send_slack_text(channel, message):
     }
     res = requests.post(url, headers=headers, json=data)
     res_json = res.json()
-    print(f"[DEBUG] send_slack_text response: {res_json}")
     if not res_json.get("ok"):
-        print("[ERROR] Slack text post failed:", res_json)
+        print("[ERROR] Slackテキスト送信失敗:", res_json)
+    else:
+        print(f"[Slack] メッセージ送信完了: {message[:30]}...")
