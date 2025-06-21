@@ -16,6 +16,7 @@ GPV_MIRROR_URLS = [
     "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 ]
 
+
 GSM_PATTERNS = [
     "GSM_GPV_Rjp_Gll0p1deg_L-pall",
     "GSM_GPV_Rjp_Gll0p1deg_Lsurf"
