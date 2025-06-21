@@ -1,0 +1,29 @@
+name: Weathercaster PDF Auto
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # 日本時間13:00（UTC+9）
+
+jobs:
+  download-and-notify:
+    runs-on: ubuntu-latest
+
+    env:
+      WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
+      WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
+      WEATHERCASTER_DRIVE_FOLDER_ID: ${{ secrets.WEATHERCASTER_DRIVE_FOLDER_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run weathercaster fetch script
+        run: python scripts/daily_weathercaster_pdf.py
