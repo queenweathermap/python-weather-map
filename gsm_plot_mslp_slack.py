@@ -23,9 +23,10 @@ print(ds)
 print(ds.data_vars)
 
 # "msl" = mean sea level pressure（Pa）
-msl = ds["msl"].isel(time=0) / 100  # Pa→hPa
+msl = ds["prmsl"].isel(step=0) / 100  # Pa→hPa
 lons = ds["longitude"]
 lats = ds["latitude"]
+print(msl.shape)
 
 # --- 描画 ---
 fig = plt.figure(figsize=(9, 7))
