@@ -1,10 +1,15 @@
-name: Slack Upload Test
+# .github/workflows/slack_test.yml
+# ===============================================
+# GSM GPVファイルを描画 → Slackへ自動投稿テスト
+# ===============================================
+
+name: GSM Weather Map Slack Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  slack-upload:
+  gsm-slack-upload:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -15,14 +20,25 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install requirements
-        run: pip install -r requirements.txt
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libeccodes0 libeccodes-dev fonts-ipafont-gothic
 
-      - name: Upload file to Slack
+      - name: Install Python requirements
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ---- ここでGSMファイルダウンロードが必要なら追加 ----
+      # 例：既にdata/以下に配置済みなら不要
+      # - name: Download latest GSM GRIB2 (オプション)
+      #   run: |
+      #     python3 scripts/download_gsm_latest.py
+
+      - name: Plot GSM weather map and post to Slack
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
-          python3 test.py
+          python3 gsm_plot_mslp_slack.py
