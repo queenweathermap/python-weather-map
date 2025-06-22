@@ -1,64 +1,70 @@
-# msm_prmsl_dl_plot.py
-# ===============================
-# MSM地上気圧をDL・描画・Driveアップ・Slack通知
-# ===============================
+# msm_plot_mslp_jp.py
+# ==================================================
+# MSM 地上気圧（ヘクトパスカル）日本語タイトル付き可視化サンプル
+# --------------------------------------------------
+# 必要: pip install matplotlib cartopy cfgrib ipafont
+# ==================================================
 
 import os
-import xarray as xr
+import urllib.request
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
-from datetime import datetime
-from module.utils.drive_utils import upload_to_drive
-from module.utils.slack_utils import send_slack_text
+import xarray as xr
 
-BASE_DIR = "./data"
-os.makedirs(BASE_DIR, exist_ok=True)
+# 日本語フォント（IPAGothic）を指定
+plt.rcParams['font.family'] = 'IPAGothic'
 
-# 対象ファイル名（自動取得も可）
-init_dt = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-ymd = init_dt.strftime("%Y%m%d")
-h = init_dt.strftime("%H")
-fname = f"Z__C_RJTD_{ymd}{h}0000_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin"
-grib2_path = os.path.join(BASE_DIR, fname)
+# MSM GPV Lsurf（地上）GRIB2ファイルURL自動取得
+GPV_MIRROR_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
+PATTERN = "MSM_GPV_Rjp_Lsurf"
+FH = "FH00-15"
+date_str = "20250622"  # 必要に応じて日付は動的に
+H = "00"
 
-# --- DLなければDL ---
-if not os.path.exists(grib2_path) or os.path.getsize(grib2_path) < 10_000_000:
-    url = f"https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original/{init_dt.year}/{init_dt.strftime('%m')}/{init_dt.strftime('%d')}/{fname}"
+fname = f"Z__C_RJTD_{date_str}{H}0000_{PATTERN}_{FH}_grib2.bin"
+y, m, d = date_str[:4], date_str[4:6], date_str[6:8]
+url = f"{GPV_MIRROR_URL}/{y}/{m}/{d}/{fname}"
+local_path = f"./data/{fname}"
+
+# サンプル: なければDL
+if not os.path.exists(local_path):
     print(f"[DL] {url}")
-    import urllib.request
-    urllib.request.urlretrieve(url, grib2_path)
-    print(f"[OK] DL: {grib2_path}")
+    try:
+        os.makedirs("./data", exist_ok=True)
+        urllib.request.urlretrieve(url, local_path)
+        print(f"[OK] DL: {local_path}")
+    except Exception as e:
+        print(f"[NG] DL失敗: {e}")
 
-# --- データ読込 ---
-ds = xr.open_dataset(grib2_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+# GRIB2ファイルからデータ展開
+ds = xr.open_dataset(local_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+# prmsl: [step, lat, lon] の場合が多い
+prmsl = ds['prmsl'].isel(step=0) / 100  # hPa換算
 
-print(ds)
-print("[VAR]", list(ds.data_vars))
-
-# --- 描画 ---
-msl = ds["prmsl"].isel(step=0) / 100  # Pa→hPa
-lons = ds["longitude"]
-lats = ds["latitude"]
-
-fig = plt.figure(figsize=(9, 7))
+# 地図作成
+fig = plt.figure(figsize=(9, 8))
 ax = plt.axes(projection=ccrs.PlateCarree())
 ax.set_extent([120, 150, 22, 48], crs=ccrs.PlateCarree())
-ax.coastlines(resolution="50m")
-cs = ax.contour(lons, lats, msl, levels=range(960, 1050, 4), colors='black')
-ax.clabel(cs, fmt="%.0f", fontsize=8)
-plt.title("MSM 地上気圧 (hPa)")
+ax.coastlines(resolution='50m')
+ax.gridlines(draw_labels=True, dms=True, x_inline=False, y_inline=False)
 
-save_path = os.path.join(BASE_DIR, "msm_prmsl_test.jpg")
-plt.savefig(save_path, bbox_inches="tight", dpi=150)
-plt.close()
-print("[OK] 保存:", save_path)
-
-# --- Google Drive & Slack ---
-drive_url = upload_to_drive(save_path)
-print("[OK] Drive:", drive_url)
-
-send_slack_text(
-    channel=os.environ["SLACK_CHANNEL_ID"],
-    message=f"MSM地上気圧天気図を自動生成・アップロードしました\n{drive_url}"
+# 等圧線プロット
+cs = ax.contour(
+    ds.longitude, ds.latitude, prmsl,
+    levels=range(960, 1040, 4), colors='k', linewidths=1.6
 )
-print("[OK] Slack通知 完了")
+
+# 日本語タイトル
+ax.set_title("MSM 地上気圧（ヘクトパスカル）", fontsize=18, pad=16)
+
+# 等圧線ラベル
+ax.clabel(cs, fmt="%d", fontsize=12)
+
+# 枠線追加（必要なら）
+for spine in ax.spines.values():
+    spine.set_edgecolor('black')
+    spine.set_linewidth(2)
+
+plt.tight_layout()
+plt.savefig("./data/msm_prmsl_jp.jpg", dpi=150)
+plt.show()
