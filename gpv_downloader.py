@@ -46,9 +46,9 @@ MODEL_CONFIG = {
     # 必要に応じて拡張
 }
 
-GPV_MIRROR_URLS = [
-    "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
-]
+GPV_MIRROR_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
+PATTERN = "MSM_GPV_Rjp_Lsurf"
+MAX_DAYS = 3
 
 def find_latest_available_init(patterns, base_dir, mirror_urls, hours=[0, 12, 18, 6], max_days=2):
     """
@@ -182,6 +182,33 @@ def run_gpv_panel_job(
     panel_func(ds, times, out_path or f"{model_name.lower()}_panel.jpg")
 
     return out_path or f"{model_name.lower()}_panel.jpg"
+
+def find_latest_msm_surface_file():
+    now = datetime.utcnow() + timedelta(hours=9)  # JST
+    for day_offset in range(MAX_DAYS):
+        dt = now - timedelta(days=day_offset)
+        for h in [0, 12]:
+            ymd = dt.strftime("%Y%m%d")
+            H = f"{h:02d}"
+            fname = f"Z__C_RJTD_{ymd}{H}0000_{PATTERN}_FH00-15_grib2.bin"
+            y, m, d = dt.strftime("%Y"), dt.strftime("%m"), dt.strftime("%d")
+            url = f"{GPV_MIRROR_URL}/{y}/{m}/{d}/{fname}"
+            try:
+                with urllib.request.urlopen(url) as res:
+                    if res.status == 200:
+                        print("[FOUND]", url)
+                        return url, fname
+            except Exception:
+                continue
+    print("[ERROR] MSMファイルが見つかりません")
+    return None, None
+
+# 実際のダウンロード
+url, fname = find_latest_msm_surface_file()
+if url:
+    urllib.request.urlretrieve(url, f"./data/{fname}")
+    print("[OK] DL:", fname)
+
 
 # ======= 単体実行テスト例 =======
 if __name__ == "__main__":
