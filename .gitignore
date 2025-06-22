@@ -6,3 +6,7 @@ data/
 *.jpg
 *.nc
 service_account.json
+/data/*.bin
+/data/*.grib2
+/data/*.grib2.bin
+/data/*.nc
