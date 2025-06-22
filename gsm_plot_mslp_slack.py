@@ -11,7 +11,7 @@ from slack_sdk import WebClient
 import os
 
 # --- 設定 ---
-GRIB2_PATH = "./data/Z__C_RJTD_20240621000000_GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin"
+GRIB2_PATH = "./data/Z__C_RJTD_20250621000000_GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin"
 SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")  # .envから自動読込
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL_ID", "#weather-test")  # チャンネル名orID
 
