@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import os
 
-from module.drive_utils import upload_to_drive
-from module.slack_utils import send_message_to_slack
+from module.utils.drive_utils import upload_to_drive
+from module.utils.slack_utils import send_message_to_slack
 
 # --- 設定 ---
 GRIB2_PATH = "./data/Z__C_RJTD_20250621000000_GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin"
