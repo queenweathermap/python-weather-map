@@ -1,12 +1,13 @@
 # gpv_downloader.py
 # ===============================================================
 # GPVファイルのダウンロード・自動パネル描画ユーティリティ
-# モデル名ごとにパターン・時刻帯自動分岐（GSM/MSM/LFM対応）
+# MSM/GSM/LFM/ローカルもモデル名で一括運用（パターン自動分岐＋時刻探索）
 # 2025-06-22 by ChatGPT
 # ===============================================================
 
 import os
 import urllib.request
+import glob
 from datetime import datetime, timedelta
 import pandas as pd
 import xarray as xr
@@ -49,149 +50,111 @@ GPV_MIRROR_URLS = [
     "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 ]
 
-def get_msm_fileblocks(ncols=12):
-    """MSM/LFM用ファイルブロック（時刻帯）リスト生成（12コマなら最初の2つだけでOK）"""
-    blocks = [
-        ("FH00-15", list(range(0, 16, 3))),
-        ("FH16-33", list(range(16, 34, 3))),
-        ("FH34-39", list(range(34, 40, 3))),
-        ("FH40-51", list(range(40, 52, 3))),
-        ("FH52-78", list(range(52, 79, 3))),
-    ]
-    result = []
-    remain = ncols
-    for block, hlist in blocks:
-        use = min(len(hlist), remain)
-        if use > 0:
-            result.append((block, hlist[:use]))
-            remain -= use
-        if remain <= 0:
-            break
-    return result
-
-def download_msm_sample(base_dir="./data"):
-    dt = datetime(2025, 6, 21, 0, 0, 0)
-    ymdh = dt.strftime("%Y%m%d%H")
-    pattern = "MSM_GPV_Rjp_Lsurf"
-    fname = f"Z__C_RJTD_{ymdh}0000_{pattern}_FH00-15_grib2.bin"
-    url = f"https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original/2025/06/21/{fname}"
-    os.makedirs(base_dir, exist_ok=True)
-    fpath = os.path.join(base_dir, fname)
-    print(f"[TRY] {url}")
-    try:
-        urllib.request.urlretrieve(url, fpath)
-        print(f"[OK] DL: {fpath}")
-    except Exception as e:
-        print(f"[NG] {e}")
-
-download_msm_sample()
-
-def download_gpv_panel_model(model, base_dir, init_dt, mirror_urls, ncols=12):
+def find_latest_available_init(patterns, base_dir, mirror_urls, hours=[0, 12, 18, 6], max_days=2):
     """
-    モデル名(GSM/MSM/LFM)で自動ダウンロード分岐
-    Returns: [ [(path1, t1), (path2, t1)], ... ]  # len=ncols
+    サーバ上で利用可能な最新のinit_dt（イニシャル時刻）を探索
     """
-    patterns = MODEL_CONFIG[model]["patterns"]
+    now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
+    for day_offset in range(max_days + 1):
+        dt = now - pd.Timedelta(days=day_offset)
+        for hour in sorted(hours, reverse=True):  # 18→12→6→0の順で探索
+            dt_h = dt.replace(hour=hour)
+            # パターンごとにファイルURL組み立て
+            all_exist = True
+            for pattern in patterns:
+                ymd = dt_h.strftime("%Y%m%d")
+                h = dt_h.strftime("%H")
+                # MSM系は複数stepまとめファイルなので、サーバで実在チェック
+                fname = f"Z__C_RJTD_{ymd}{h}0000_{pattern}_FH00-15_grib2.bin"
+                y, m, d = dt_h.strftime("%Y"), dt_h.strftime("%m"), dt_h.strftime("%d")
+                url = f"{mirror_urls[0]}/{y}/{m}/{d}/{fname}"
+                try:
+                    with urllib.request.urlopen(url) as res:
+                        if res.status != 200:
+                            all_exist = False
+                            break
+                except Exception:
+                    all_exist = False
+                    break
+            if all_exist:
+                print(f"[INFO] 使用可能init_dt: {dt_h}")
+                return dt_h
+    print("[WARN] 有効なinit_dtが見つかりません")
+    return None
+
+def download_gpv_panel(patterns, base_dir, init_dt, mirror_urls, ncols=12):
+    """
+    各パターン・時刻のGRIB2ファイルを自動ダウンロード
+    欠損があってもNone埋めで返す
+    """
     out_list = []
-
-    if model == "GSM":
-        # GSMは3時間ごとncols個
-        for i in range(ncols):
-            t = init_dt + timedelta(hours=3 * i)
-            ymdh = t.strftime("%Y%m%d%H")
-            col = []
-            for pattern in patterns:
+    for i in range(ncols):
+        t = init_dt + timedelta(hours=3 * i)
+        ymdh = t.strftime("%Y%m%d%H")
+        col = []
+        for pattern in patterns:
+            # stepまとめファイル：MSM/LFMの場合
+            if "MSM" in pattern or "LFM" in pattern:
+                fh_start = 0 + 16 * (i // 16)
+                fh_end = fh_start + 15
+                fname = f"Z__C_RJTD_{ymdh}0000_{pattern}_FH{fh_start:02d}-{fh_end:02d}_grib2.bin"
+            else:
                 fname = f"Z__C_RJTD_{ymdh}0000_{pattern}_FD0000-0100_grib2.bin"
-                fpath = os.path.join(base_dir, fname)
-                if not os.path.exists(fpath) or os.path.getsize(fpath) < 10000:
-                    ok = False
-                    for url_base in mirror_urls:
-                        y, m, d = t.strftime("%Y"), t.strftime("%m"), t.strftime("%d")
-                        url = f"{url_base}/{y}/{m}/{d}/{fname}"
-                        try:
-                            urllib.request.urlretrieve(url, fpath)
-                            if os.path.exists(fpath) and os.path.getsize(fpath) > 10000:
-                                ok = True
-                                print(f"[OK] DL: {fpath}")
-                                break
-                        except Exception as e:
-                            print(f"[NG] {url.split('/')[-1]}: {e}")
-                    if not ok:
-                        col.append(None)
-                        continue
-                col.append((fpath, t))
-            out_list.append(col if all(col) else None)
-        return out_list
-
-    elif model in ("MSM", "LFM"):
-        # MSM/LFMは時刻帯ごとDL
-        blocks = get_msm_fileblocks(ncols)
-        block_start_hour = 0
-        for block, hour_list in blocks:
-            t0 = init_dt + timedelta(hours=hour_list[0])
-            col = []
-            for pattern in patterns:
-                fname = f"Z__C_RJTD_{init_dt.strftime('%Y%m%d%H')}0000_{pattern}_{block}_grib2.bin"
-                fpath = os.path.join(base_dir, fname)
-                if not os.path.exists(fpath) or os.path.getsize(fpath) < 10000:
-                    ok = False
-                    for url_base in mirror_urls:
-                        y, m, d = init_dt.strftime('%Y'), init_dt.strftime('%m'), init_dt.strftime('%d')
-                        url = f"{url_base}/{y}/{m}/{d}/{fname}"
-                        try:
-                            urllib.request.urlretrieve(url, fpath)
-                            if os.path.exists(fpath) and os.path.getsize(fpath) > 10000:
-                                ok = True
-                                print(f"[OK] DL: {fpath}")
-                                break
-                        except Exception as e:
-                            print(f"[NG] {url.split('/')[-1]}: {e}")
-                    if not ok:
-                        col.append(None)
-                        continue
-                col.append((fpath, t0))  # MSM/LFMは同じファイルで複数時刻入る
-            # MSM/LFMは1ブロックのデータで最大6時刻分だけど、返却listは1時刻ごとに対応
-            # ファイルはブロックごと、リストは時刻ごとに展開
-            for offset, h in enumerate(hour_list):
-                # 時刻（t0+h）を使っておくと可読性UP
-                t_real = init_dt + timedelta(hours=h)
-                # ファイルが両パターン揃っていれば採用
-                if all(col):
-                    out_list.append([(col[0][0], t_real), (col[1][0], t_real)])
-                else:
-                    out_list.append(None)
-        # 必要分だけ返却
-        return out_list[:ncols]
-    else:
-        raise ValueError("未対応のモデル名です")
+            fpath = os.path.join(base_dir, fname)
+            if not os.path.exists(fpath) or os.path.getsize(fpath) < 10000:
+                ok = False
+                for url_base in mirror_urls:
+                    y, m, d = t.strftime("%Y"), t.strftime("%m"), t.strftime("%d")
+                    url = f"{url_base}/{y}/{m}/{d}/{fname}"
+                    try:
+                        urllib.request.urlretrieve(url, fpath)
+                        if os.path.exists(fpath) and os.path.getsize(fpath) > 10000:
+                            ok = True
+                            print(f"[OK] DL: {fpath}")
+                            break
+                    except Exception as e:
+                        print(f"[NG] {url.split('/')[-1]}: {e}")
+                if not ok:
+                    col.append(None)
+                    continue
+            col.append((fpath, t))
+        out_list.append(col if all(col) else None)
+    return out_list
 
 def get_gpv_nodata_times(init_dt, ncols=12):
     return [init_dt + timedelta(hours=3 * i) for i in range(ncols)]
 
 def run_gpv_panel_job(
     model_name: str,
-    init_dt: pd.Timestamp,
     base_dir: str = "./data",
     ncols: int = 12,
     out_path: str = None
 ):
     """
     モデル名でパターン選択・ダウンロード・cfgrib展開・描画まで全自動
+    最新利用可能イニシャル時刻も自動探索
     """
     import module.panel_utils as putils  # パネル関数セット
     config = MODEL_CONFIG[model_name]
     patterns = config["patterns"]
     panel_func_name = config["panel_func"]
 
-    # DL
-    panel_files = download_gpv_panel_model(model_name, base_dir, init_dt, GPV_MIRROR_URLS, ncols=ncols)
+    # 1. 最新利用可能なイニシャル時刻を探索
+    init_dt = find_latest_available_init(patterns, base_dir, GPV_MIRROR_URLS)
+    if init_dt is None:
+        print("[NO DATA] 有効なinit_dtが見つかりません")
+        putils.make_nodata_weather_panel(get_gpv_nodata_times(pd.Timestamp.now(), ncols), save_path=out_path or "nodata.jpg")
+        return None
+
+    # 2. DL
+    panel_files = download_gpv_panel(patterns, base_dir, init_dt, GPV_MIRROR_URLS, ncols=ncols)
     valid_files = [f for f in panel_files if f and None not in f]
     if not valid_files or len(valid_files) < 2:
         print("[NO DATA] 2層揃う時刻が見つからず。ダミーパネル生成")
         putils.make_nodata_weather_panel(get_gpv_nodata_times(init_dt, ncols), save_path=out_path or "nodata.jpg")
         return None
 
-    # cfgribでデータセット展開→merge
+    # 3. cfgribでデータセット展開→merge
     ds_list = []
     for files in valid_files:
         sub_ds_list = []
@@ -209,12 +172,12 @@ def run_gpv_panel_job(
         putils.make_nodata_weather_panel(get_gpv_nodata_times(init_dt, ncols), save_path=out_path or "nodata.jpg")
         return None
 
-    # アライン＆結合
+    # 4. アライン＆結合
     ds_list_aligned = putils.align_datasets_common(ds_list)
     ds = xr.concat(ds_list_aligned, dim="time")
     times = [pd.Timestamp(t).to_pydatetime() for t in ds.time.values[:ncols]]
 
-    # パネル描画関数呼び分け
+    # 5. パネル描画関数呼び分け
     panel_func = getattr(putils, panel_func_name)
     panel_func(ds, times, out_path or f"{model_name.lower()}_panel.jpg")
 
@@ -224,10 +187,8 @@ def run_gpv_panel_job(
 if __name__ == "__main__":
     # モデル名は "GSM", "MSM", "LFM", "MSM_LOCAL" など
     model = "MSM"
-    now = pd.Timestamp.now().replace(hour=0, minute=0, second=0, microsecond=0)
     save_path = run_gpv_panel_job(
         model_name=model,
-        init_dt=now,
         base_dir="./data",
         ncols=12,
         out_path=f"{model.lower()}_weather_map.jpg"
