@@ -30,15 +30,3 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ---- ここでGSMファイルダウンロードが必要なら追加 ----
-      # 例：既にdata/以下に配置済みなら不要
-      # - name: Download latest GSM GRIB2 (オプション)
-      #   run: |
-      #     python3 scripts/download_gsm_latest.py
-
-      - name: Plot GSM weather map and post to Slack
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-        run: |
-          python3 gsm_plot_mslp_slack.py
