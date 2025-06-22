@@ -29,14 +29,8 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-          with:
-            name: msm_prmsl_test
-            path: ./data/msm_prmsl_test.jpg
-      
-      - name: Upload and notify
+
+      - name: MSM plot, Drive, Slack
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
@@ -44,3 +38,9 @@ jobs:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
           python3 msm_prmsl_dl_plot.py
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: msm_prmsl_test
+          path: ./data/msm_prmsl_test.jpg
