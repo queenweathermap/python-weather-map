@@ -1,7 +1,7 @@
 # gpv_panel_daily_msm.py
 # ===============================================================
-# MSMパネル自動生成スクリプト（GRIB2直接読取 cfgrib対応）
-# 2025-06-22 by ChatGPT
+# MSMパネル自動生成スクリプト（GRIB2直接読取 cfgrib対応・ファイル後片付け付）
+# 2025-06-22 改訂 by ChatGPT
 # ===============================================================
 
 import sys
@@ -27,12 +27,23 @@ NCOLS = 12
 OUTFILE = sys.argv[1] if len(sys.argv) > 1 else "msm_weather_map.jpg"
 
 def get_gpv_nodata_times(ncols=12):
+    """NO DATAパネル用の時刻リストを生成"""
     init_dt = pd.Timestamp.now().replace(hour=0, minute=0, second=0, microsecond=0)
     return [init_dt + pd.Timedelta(hours=3*i) for i in range(ncols)]
 
+def cleanup_files(file_paths):
+    """指定ファイルをまとめて削除"""
+    for path in file_paths:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                print(f"[CLEANUP] 削除: {path}")
+        except Exception as e:
+            print(f"[CLEANUP][WARN] 削除失敗: {path} ({e})")
+
 if __name__ == "__main__":
     try:
-        print("=== MSMパネル自動生成（GRIB2ダイレクト） ===")
+        print("=== MSMパネル自動生成（GRIB2ダイレクト＆クリーンアップ付） ===")
         # 1. イニシャル時刻決定（例: 最新の0/12UTC）
         init_dt = pd.Timestamp.now().replace(hour=0, minute=0, second=0, microsecond=0)
         print(f"[INFO] init_dt: {init_dt}")
@@ -44,10 +55,12 @@ if __name__ == "__main__":
 
         # 3. 欠損・異常・Noneを除去し、2パターン揃った時刻のみ抽出
         pattern_files = []
+        grib2_paths_to_cleanup = []
         for i, f in enumerate(panel_files):
             if isinstance(f, (list, tuple)) and len(f) == len(MSM_PATTERNS):
                 if None not in f:
                     pattern_files.append(f)
+                    grib2_paths_to_cleanup.extend([x[0] for x in f])
                 else:
                     print(f"[WARN] panel_files[{i}]にNoneあり: {f}")
             else:
@@ -74,6 +87,8 @@ if __name__ == "__main__":
         if not ds_list or len(ds_list) < 2:
             print("[NO DATA] ds_list少なすぎ")
             make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
+            # クリーンアップも忘れずに
+            cleanup_files(grib2_paths_to_cleanup)
             sys.exit(0)
 
         # 5. パネル描画
@@ -90,11 +105,15 @@ if __name__ == "__main__":
             message=f"MSM天気図画像（全国域）: {drive_url}"
         )
 
-        print("=== 完了 ===")
+        # 7. DLファイルを全削除（.bin等）
+        cleanup_files(grib2_paths_to_cleanup)
+        print("=== 完了＆クリーンアップOK ===")
 
     except Exception as e:
         print("=== 重大エラー発生 ===")
         print(type(e), e)
         traceback.print_exc()
         make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
+        # クリーンアップ忘れずに
+        cleanup_files(grib2_paths_to_cleanup if "grib2_paths_to_cleanup" in locals() else [])
         sys.exit(1)
