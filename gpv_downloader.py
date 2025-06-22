@@ -19,7 +19,7 @@ MODEL_CONFIG = {
             "GSM_GPV_Rjp_Gll0p1deg_L-pall",
             "GSM_GPV_Rjp_Gll0p1deg_Lsurf"
         ],
-        "panel_func": "make_gsm_panel",  # module.panel_utils で定義
+        "panel_func": "make_gsm_panel",
     },
     "MSM": {
         "patterns": [
@@ -28,14 +28,21 @@ MODEL_CONFIG = {
         ],
         "panel_func": "make_msm_panel",
     },
+    "LFM": {
+        "patterns": [
+            "LFM_GPV_Rjp_L-pall",
+            "LFM_GPV_Rjp_Lsurf"
+        ],
+        "panel_func": "make_lfm_panel",   # 例：LFM専用パネル描画関数
+    },
     "MSM_LOCAL": {
         "patterns": [
             "MSM_GPV_Rjp_L-pall",
             "MSM_GPV_Rjp_Lsurf"
         ],
         "panel_func": "make_msm_local_panel",
-    },
-    # 必要に応じて追加可能
+    }
+    # 必要に応じて拡張
 }
 
 GPV_MIRROR_URLS = [
