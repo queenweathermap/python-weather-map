@@ -1,25 +1,16 @@
-# Dockerfile
 # ===============================================
-# python-weather-map用 Dockerfile（Slack通知専用）
-# ・wgrib2, 日本語フォント, Miniconda, pipパッケージ
-# ・main_weather_batch.py実行
-# 2025-06-16 by ChatGPT
+# python-weather-map用 Dockerfile（GRIB2直接処理/Slack通知対応）
 # ===============================================
 
 FROM continuumio/miniconda3
 
-RUN conda install -c conda-forge wgrib2 python=3.11
+# --- 必須パッケージ一発で ---
+RUN conda install -c conda-forge python=3.11 eccodes cfgrib cartopy xarray pandas numpy matplotlib metpy scipy requests python-dotenv slack_sdk google-api-python-client google-auth-httplib2 google-auth beautifulsoup4 ipython
 
-RUN apt-get update && \
-    apt-get install -y libeccodes0 libeccodes-dev
-
+# --- 日本語フォント ---
+RUN apt-get update && apt-get install -y fonts-ipafont-gothic
 
 WORKDIR /workspace
 COPY . /workspace
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
-
-# NetCDFサポート確認
-RUN wgrib2 -h | grep netcdf || (echo "NetCDFサポートがありません" && exit 1)
 
 CMD ["bash"]
