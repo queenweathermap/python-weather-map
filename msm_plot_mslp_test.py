@@ -9,7 +9,7 @@ import cartopy.crs as ccrs
 import os
 
 # MSMの地上データGRIB2パスを指定
-GRIB2_PATH = "./data/Z__C_RJTD_20250621000000_MSM_GPV_Rjp_Lsurf_FD0000-0100_grib2.bin"
+GRIB2_PATH = "./data/Z__C_RJTD_20250621000000_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin"
 
 # --- GRIB2ファイルをxarrayで開く ---
 ds = xr.open_dataset(GRIB2_PATH, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
