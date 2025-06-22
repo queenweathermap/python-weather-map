@@ -10,3 +10,7 @@ service_account.json
 /data/*.grib2
 /data/*.grib2.bin
 /data/*.nc
+*.log
+.DS_Store
+data/sample/*     # サンプルはOKにしたい場合
+!data/sample/.gitkeep  # 空フォルダ維持
