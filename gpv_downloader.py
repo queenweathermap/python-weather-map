@@ -69,6 +69,23 @@ def get_msm_fileblocks(ncols=12):
             break
     return result
 
+def download_msm_sample(base_dir="./data"):
+    dt = datetime(2025, 6, 21, 0, 0, 0)
+    ymdh = dt.strftime("%Y%m%d%H")
+    pattern = "MSM_GPV_Rjp_Lsurf"
+    fname = f"Z__C_RJTD_{ymdh}0000_{pattern}_FH00-15_grib2.bin"
+    url = f"https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original/2025/06/21/{fname}"
+    os.makedirs(base_dir, exist_ok=True)
+    fpath = os.path.join(base_dir, fname)
+    print(f"[TRY] {url}")
+    try:
+        urllib.request.urlretrieve(url, fpath)
+        print(f"[OK] DL: {fpath}")
+    except Exception as e:
+        print(f"[NG] {e}")
+
+download_msm_sample()
+
 def download_gpv_panel_model(model, base_dir, init_dt, mirror_urls, ncols=12):
     """
     モデル名(GSM/MSM/LFM)で自動ダウンロード分岐
