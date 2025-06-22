@@ -16,7 +16,8 @@ SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")  # .envから自動読込
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL_ID", "#weather-test")  # チャンネル名orID
 
 # --- GRIB2ファイルをxarrayで開く ---
-ds = xr.open_dataset(GRIB2_PATH, engine="cfgrib")
+ds = xr.open_dataset(GRIB2_PATH, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+print(ds)
 
 # 変数名の確認
 print(ds.data_vars)
