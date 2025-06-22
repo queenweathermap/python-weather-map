@@ -48,7 +48,7 @@ MODEL_CONFIG = {
 
 GPV_MIRROR_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 PATTERN = "MSM_GPV_Rjp_Lsurf"
-MAX_DAYS = 3
+FH_LIST = ["FH00-15", "FH16-33", "FH34-39", "FH40-51", "FH52-78"]
 
 def find_latest_available_init(patterns, base_dir, mirror_urls, hours=[0, 12, 18, 6], max_days=2):
     """
@@ -183,32 +183,35 @@ def run_gpv_panel_job(
 
     return out_path or f"{model_name.lower()}_panel.jpg"
 
-def find_latest_msm_surface_file():
-    now = datetime.utcnow() + timedelta(hours=9)  # JST
-    for day_offset in range(MAX_DAYS):
+def find_latest_msm_grib2():
+    now = datetime.utcnow() + timedelta(hours=9)
+    # 最新3日間×[0, 3, 6, ... 21]時刻を順に試す
+    for day_offset in range(0, 3):
         dt = now - timedelta(days=day_offset)
-        for h in [0, 12]:
-            ymd = dt.strftime("%Y%m%d")
-            H = f"{h:02d}"
-            fname = f"Z__C_RJTD_{ymd}{H}0000_{PATTERN}_FH00-15_grib2.bin"
-            y, m, d = dt.strftime("%Y"), dt.strftime("%m"), dt.strftime("%d")
-            url = f"{GPV_MIRROR_URL}/{y}/{m}/{d}/{fname}"
-            try:
-                with urllib.request.urlopen(url) as res:
-                    if res.status == 200:
-                        print("[FOUND]", url)
-                        return url, fname
-            except Exception:
-                continue
+        for h in [0, 3, 6, 9, 12, 15, 18, 21]:
+            for fh in FH_LIST:
+                ymd = dt.strftime("%Y%m%d")
+                H = f"{h:02d}"
+                fname = f"Z__C_RJTD_{ymd}{H}0000_{PATTERN}_{fh}_grib2.bin"
+                y, m, d = dt.strftime("%Y"), dt.strftime("%m"), dt.strftime("%d")
+                url = f"{GPV_MIRROR_URL}/{y}/{m}/{d}/{fname}"
+                try:
+                    with urllib.request.urlopen(url) as res:
+                        if res.status == 200:
+                            print("[FOUND]", url)
+                            return url, fname
+                except Exception:
+                    continue
     print("[ERROR] MSMファイルが見つかりません")
     return None, None
 
-# 実際のダウンロード
-url, fname = find_latest_msm_surface_file()
+# ダウンロード例
+url, fname = find_latest_msm_grib2()
 if url:
     urllib.request.urlretrieve(url, f"./data/{fname}")
     print("[OK] DL:", fname)
-
+else:
+    print("404祭りで何もDLできず")
 
 # ======= 単体実行テスト例 =======
 if __name__ == "__main__":
