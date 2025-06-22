@@ -166,6 +166,15 @@ def make_daily_weather_panel_multi_time(ds, times, save_path="weather_panel.jpg"
     plt.close(fig)
     print(f"[Weather Panel] {save_path} exported.")
 
+# module/panel_utils.py
+def make_lfm_panel(ds, times, save_path):
+    # LFM用天気図パネル描画処理
+    # ds: xarray.Dataset
+    # times: list of datetime
+    # save_path: 画像保存パス
+    pass
+
+
 # --- 公開関数リストを明示 ---
 __all__ = [
     "make_nodata_weather_panel",
