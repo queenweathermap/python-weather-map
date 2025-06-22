@@ -66,5 +66,6 @@ for spine in ax.spines.values():
     spine.set_linewidth(2)
 
 plt.tight_layout()
-plt.savefig("./data/msm_prmsl_jp.jpg", dpi=150)
+plt.savefig("./data/msm_prmsl_test.jpg", dpi=150)
 plt.show()
+print("[OK] 保存: ./data/msm_prmsl_test.jpg")
