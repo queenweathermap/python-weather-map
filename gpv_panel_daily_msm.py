@@ -12,8 +12,11 @@ import xarray as xr
 
 from gpv_downloader import (
     download_gpv_panel,
-    MSM_PATTERNS, GPV_MIRROR_URLS
+    GPV_MIRROR_URLS,
+    MODEL_CONFIG
 )
+MSM_PATTERNS = MODEL_CONFIG["MSM"]["patterns"]
+
 from module.panel_utils import (
     make_nodata_weather_panel,
     make_daily_weather_panel_multi_time,
@@ -21,6 +24,8 @@ from module.panel_utils import (
 )
 from module.utils.drive_utils import upload_to_drive
 from module.utils.slack_utils import send_slack_text
+
+
 
 BASE_DIR = "./data"
 NCOLS = 12
