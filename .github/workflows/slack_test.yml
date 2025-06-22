@@ -1,15 +1,15 @@
 # .github/workflows/slack_test.yml
 # ===============================================
-# GSM GPVファイルを描画 → Slackへ自動投稿テスト
+# MSM GPVファイルを描画 → Slackへ自動投稿テスト
 # ===============================================
 
-name: GSM Weather Map Slack Test
+name: MSM Weather Map Slack Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  gsm-slack-upload:
+  msm-slack-upload:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
