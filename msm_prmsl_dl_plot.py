@@ -48,7 +48,14 @@ def plot_prmsl_from_grib2(grib2_path, save_path="msm_prmsl_test.jpg"):
 if __name__ == "__main__":
     dt = datetime(2025, 6, 21, 0, 0, 0)
     grib2_path = download_msm_lsurf_grib2(dt)
+    save_path = "./data/msm_prmsl_test.jpg"
     if grib2_path and os.path.exists(grib2_path):
-        plot_prmsl_from_grib2(grib2_path, save_path="msm_prmsl_test.jpg")
+        plot_prmsl_from_grib2(grib2_path, save_path=save_path)
+        # Google Drive & Slack通知（オプション）
+        drive_url = upload_to_drive(save_path)
+        send_slack_text(
+            channel=os.environ["SLACK_CHANNEL_ID"],
+            message=f"MSM地上気圧図: {drive_url}"
+        )
     else:
         print("[FAIL] MSM GRIB2ファイルが取得できませんでした")
