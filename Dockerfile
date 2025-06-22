@@ -10,6 +10,10 @@ FROM continuumio/miniconda3
 
 RUN conda install -c conda-forge wgrib2 python=3.11
 
+RUN apt-get update && \
+    apt-get install -y libeccodes0 libeccodes-dev
+
+
 WORKDIR /workspace
 COPY . /workspace
 RUN pip install --upgrade pip
