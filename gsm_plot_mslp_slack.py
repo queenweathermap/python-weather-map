@@ -10,6 +10,9 @@ import cartopy.crs as ccrs
 from slack_sdk import WebClient
 import os
 
+from module.drive_utils import upload_to_drive
+from module.slack_utils import send_message_to_slack
+
 # --- 設定 ---
 GRIB2_PATH = "./data/Z__C_RJTD_20250621000000_GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin"
 SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")  # .envから自動読込
@@ -55,3 +58,5 @@ if SLACK_TOKEN:
 else:
     print("[WARN] SLACK_BOT_TOKENが未設定なので送信スキップ")
 
+drive_url = upload_to_drive("test.jpg")
+send_message_to_slack(f"GSM天気図画像: {drive_url}")
