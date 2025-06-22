@@ -10,6 +10,7 @@ import traceback
 import pandas as pd
 import xarray as xr
 
+
 from gpv_downloader import (
     download_gpv_panel,
     GPV_MIRROR_URLS,
@@ -28,6 +29,7 @@ from module.utils.slack_utils import send_slack_text
 # 日本語フォント指定（matplotlib使用前にセット）
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'IPAGothic'  # ← 日本語タイトル用
+
 
 BASE_DIR = "./data"
 NCOLS = 12
