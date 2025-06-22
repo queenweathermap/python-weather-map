@@ -29,6 +29,12 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+          
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+          with:
+            name: msm_prmsl_test
+            path: ./data/msm_prmsl_test.jpg
       
       - name: Upload and notify
         env:
