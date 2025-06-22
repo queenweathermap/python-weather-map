@@ -1,78 +1,52 @@
 # gpv_downloader.py
-# --------------------------------------------------------
-# GPVファイルのダウンロード・変換・イニシャル時刻探索ユーティリティ
-# --------------------------------------------------------
+# ===============================================================
+# GPVファイルのダウンロード・自動パネル描画ユーティリティ
+# MSM/GSM/ローカルもモデル名で一括運用（パターン自動分岐）
+# 2025-06-22 by ChatGPT
+# ===============================================================
 
 import os
 import urllib.request
-import glob
 from datetime import datetime, timedelta
-from pathlib import Path
-import subprocess
 import pandas as pd
+import xarray as xr
+from pathlib import Path
 
-# ----------- 設定 ----------
+# --- モデル定義・描画関数紐付け ---
+MODEL_CONFIG = {
+    "GSM": {
+        "patterns": [
+            "GSM_GPV_Rjp_Gll0p1deg_L-pall",
+            "GSM_GPV_Rjp_Gll0p1deg_Lsurf"
+        ],
+        "panel_func": "make_gsm_panel",  # module.panel_utils で定義
+    },
+    "MSM": {
+        "patterns": [
+            "MSM_GPV_Rjp_L-pall",
+            "MSM_GPV_Rjp_Lsurf"
+        ],
+        "panel_func": "make_msm_panel",
+    },
+    "MSM_LOCAL": {
+        "patterns": [
+            "MSM_GPV_Rjp_L-pall",
+            "MSM_GPV_Rjp_Lsurf"
+        ],
+        "panel_func": "make_msm_local_panel",
+    },
+    # 必要に応じて追加可能
+}
+
 GPV_MIRROR_URLS = [
     "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 ]
 
-
-GSM_PATTERNS = [
-    "GSM_GPV_Rjp_Gll0p1deg_L-pall",
-    "GSM_GPV_Rjp_Gll0p1deg_Lsurf"
-]
-
-MSM_PATTERNS = [
-    "MSM_GPV_Rjp_L-pall",   # 上層データ
-    "MSM_GPV_Rjp_Lsurf"     # 地上データ
-]
-
-def check_wgrib2_netcdf():
-    try:
-        out = subprocess.check_output("wgrib2 -h", shell=True, encoding="utf-8")
-        if "netcdf" in out.lower():
-            print("[OK] wgrib2はNetCDF対応です")
-            return True
-        else:
-            print("[NG] wgrib2がNetCDF対応でありません！NO DATA確定！")
-            return False
-    except Exception as e:
-        print(f"[ERROR] wgrib2コマンド自体が実行不可: {e}")
-        return False
-
-def find_existing_init_dt(patterns, base_dir, mirror_urls, hours=[0, 12]):
-    now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
-    for day_offset in range(0, 3):
-        dt = now - pd.Timedelta(days=day_offset)
-        for hour in sorted(hours, reverse=True):  # 12→0の順
-            dt_h = dt.replace(hour=hour)
-            print(f"CHECK: {dt_h}")  # ←この行を追加
-            for pattern in patterns:
-                ymd = dt_h.strftime("%Y%m%d")
-                h = dt_h.hour
-                g = glob.glob(os.path.join(
-                    base_dir,
-                    f"Z__C_RJTD_{ymd}{h:02d}0000_{pattern}*"
-                ))
-                print(f"  pattern={pattern}, files={g}")  # ←この行を追加
-                if len(g) == 0:
-                    all_exist = False
-            if all_exist:
-                return dt_h
-    return None
-
-
 def download_gpv_panel(patterns, base_dir, init_dt, mirror_urls, ncols=12):
     """
-    指定パターン（GSM/MSMなど）・イニシャル時刻・URLで
-    各時刻のファイル（3時間ごとncols個）を自動DL
-    → [[(パス,時刻), ...], ...] のリストで返す
+    各パターン・時刻のGRIB2ファイルを自動ダウンロード
     欠損があってもNone埋めで返す
     """
-    import os
-    import urllib.request
-    from datetime import timedelta
-
     out_list = []
     for i in range(ncols):
         t = init_dt + timedelta(hours=3*i)
@@ -81,9 +55,7 @@ def download_gpv_panel(patterns, base_dir, init_dt, mirror_urls, ncols=12):
         for pattern in patterns:
             fname = f"Z__C_RJTD_{ymdh}0000_{pattern}_FD0000-0100_grib2.bin"
             fpath = os.path.join(base_dir, fname)
-            # 既にファイルがあればDLしない
             if not os.path.exists(fpath) or os.path.getsize(fpath) < 10000:
-                # 各ミラーURLから順次DL
                 ok = False
                 for url_base in mirror_urls:
                     y, m, d = t.strftime("%Y"), t.strftime("%m"), t.strftime("%d")
@@ -103,103 +75,71 @@ def download_gpv_panel(patterns, base_dir, init_dt, mirror_urls, ncols=12):
         out_list.append(col if all(col) else None)
     return out_list
 
+def get_gpv_nodata_times(init_dt, ncols=12):
+    return [init_dt + timedelta(hours=3*i) for i in range(ncols)]
 
-def download_available_gpv(pattern, base_dir, mirrors):
+def run_gpv_panel_job(
+    model_name: str,
+    init_dt: pd.Timestamp,
+    base_dir: str = "./data",
+    ncols: int = 12,
+    out_path: str = None
+):
     """
-    サーバ上で最新のGPVファイルを探してDL
+    モデル名でパターン選択・ダウンロード・cfgrib展開・描画まで全自動
     """
-    now = datetime.utcnow() + timedelta(hours=9)
-    for day_offset in range(0, 2):  # 今日→昨日
-        dt = now - timedelta(days=day_offset)
-        ymd = dt.strftime("%Y%m%d")
-        y, m, d = dt.strftime("%Y"), dt.strftime("%m"), dt.strftime("%d")
-        for h in [18, 12, 6, 0]:
-            fname = f"Z__C_RJTD_{ymd}{h:02d}0000_{pattern}"
-            for url_base in mirrors:
-                url = f"{url_base}/{y}/{m}/{d}/{fname}"
-                out_path = os.path.join(base_dir, fname)
-                print(f"[TRY] {url}")
-                try:
-                    urllib.request.urlretrieve(url, out_path)
-                    print(f"[OK] DL: {out_path}")
-                    return out_path, datetime(dt.year, dt.month, dt.day, h)
-                except Exception as e:
-                    print(f"[NG] {url.split('/')[-1]}: {e}")
-    print(f"[ERROR] {pattern} どれもDLできず")
-    return None, None
+    import module.panel_utils as putils  # パネル関数セット
+    config = MODEL_CONFIG[model_name]
+    patterns = config["patterns"]
+    panel_func_name = config["panel_func"]
 
-def grib2_to_nc(grib2_path):
-    """
-    GRIB2→NetCDF変換（wgrib2使用・サイズチェック付き）
-    """
-    grib2_path = Path(grib2_path)
-    if not grib2_path.exists() or os.path.getsize(grib2_path) < 10 * 1024:
-        print(f"[SKIP] ダウンロード失敗or空ファイル: {grib2_path}")
+    # DL
+    panel_files = download_gpv_panel(patterns, base_dir, init_dt, GPV_MIRROR_URLS, ncols=ncols)
+    valid_files = [f for f in panel_files if f and None not in f]
+    if not valid_files or len(valid_files) < 2:
+        print("[NO DATA] 2層揃う時刻が見つからず。ダミーパネル生成")
+        putils.make_nodata_weather_panel(get_gpv_nodata_times(init_dt, ncols), save_path=out_path or "nodata.jpg")
         return None
-    nc_path = grib2_path.with_suffix(grib2_path.suffix + ".nc")
-    cmd = f"wgrib2 {grib2_path} -netcdf {nc_path}"
-    print(f"[wgrib2] 実行: {cmd}")
-    try:
-        result = subprocess.run(
-            cmd, shell=True, check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding="utf-8"
-        )
-        print("[wgrib2] stdout:", result.stdout)
-        print("[wgrib2] stderr:", result.stderr)
-    except subprocess.CalledProcessError as e:
-        print(f"[SKIP] NetCDF変換失敗: {nc_path}")
-        print(f"[wgrib2 error]: {e.stderr}")
-        return None
-    if not nc_path.exists() or os.path.getsize(nc_path) < 10 * 1024:
-        print(f"[SKIP] NetCDF出力異常: {nc_path}")
-        return None
-    return str(nc_path)
 
-# --------------------- メイン ---------------------
+    # cfgribでデータセット展開→merge
+    ds_list = []
+    for files in valid_files:
+        sub_ds_list = []
+        for path, _ in files:
+            try:
+                ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+                sub_ds_list.append(ds)
+            except Exception as e:
+                print(f"[SKIP] GRIB2 open失敗: {path} ({e})")
+        if len(sub_ds_list) == len(patterns):
+            ds_merged = xr.merge(sub_ds_list, compat="override", join="outer")
+            ds_list.append(ds_merged)
+    if not ds_list or len(ds_list) < 2:
+        print("[NO DATA] ds_list少なすぎ")
+        putils.make_nodata_weather_panel(get_gpv_nodata_times(init_dt, ncols), save_path=out_path or "nodata.jpg")
+        return None
+
+    # アライン＆結合
+    ds_list_aligned = putils.align_datasets_common(ds_list)
+    ds = xr.concat(ds_list_aligned, dim="time")
+    times = [pd.Timestamp(t).to_pydatetime() for t in ds.time.values[:ncols]]
+
+    # パネル描画関数呼び分け
+    panel_func = getattr(putils, panel_func_name)
+    panel_func(ds, times, out_path or f"{model_name.lower()}_panel.jpg")
+
+    return out_path or f"{model_name.lower()}_panel.jpg"
+
+# ======= 単体実行テスト例 =======
 if __name__ == "__main__":
-    if not check_wgrib2_netcdf():
-        print("wgrib2がNetCDF非対応のため終了します")
-        exit(1)
-    base_dir = "./data"
-    os.makedirs(base_dir, exist_ok=True)
-
-    # ===【ここでinit_dtをサーバ実在の時刻にハードコード】===
-    # 例: 2024-06-20 00:00（JSTでなくUTC!!）
-    init_dt = datetime(2024, 6, 20, 0, 0, 0)
-    print(f"[INFO] ハードコードinit_dt: {init_dt}")
-
-    grib2_files = []
-    nc_paths = []
-
-    for pattern in GSM_PATTERNS:
-        # ファイル名をこの時刻で組み立ててダウンロード
-        ymdh = init_dt.strftime("%Y%m%d%H")
-        fname = f"Z__C_RJTD_{ymdh}0000_{pattern}_FD0000-0100_grib2.bin"
-        y, m, d = init_dt.strftime("%Y"), init_dt.strftime("%m"), init_dt.strftime("%d")
-        url = f"{GPV_MIRROR_URLS[0]}/{y}/{m}/{d}/{fname}"
-        fpath = os.path.join(base_dir, fname)
-        print(f"[TRY] {url}")
-        try:
-            urllib.request.urlretrieve(url, fpath)
-            print(f"[OK] DL: {fpath}")
-            grib2_files.append(fpath)
-        except Exception as e:
-            print(f"[NG] {fname}: {e}")
-
-    if len(grib2_files) < 2:
-        print("【ERROR】気圧面・地上のGRIB2ファイルが両方揃いません（NO DATA）")
-        exit(1)
-
-    for path in grib2_files:
-        nc = grib2_to_nc(path)
-        if nc is not None:
-            nc_paths.append(nc)
-
-    if len(nc_paths) < 2:
-        print("【ERROR】NetCDF変換が両方成功せず（NO DATA）")
-        exit(1)
-
-    print(f"[INFO] 2つのNetCDF OK: {nc_paths}")
-    print(f"[INFO] Init time: {init_dt}")
+    # モデル名は "GSM", "MSM", "MSM_LOCAL" など
+    model = "MSM"
+    now = pd.Timestamp.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    save_path = run_gpv_panel_job(
+        model_name=model,
+        init_dt=now,
+        base_dir="./data",
+        ncols=12,
+        out_path=f"{model.lower()}_weather_map.jpg"
+    )
+    print("[完了] 生成ファイル:", save_path)
