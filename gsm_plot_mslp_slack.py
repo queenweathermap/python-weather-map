@@ -5,6 +5,9 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import os
+import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'IPAGothic'  # ← これを冒頭で！
+
 
 from module.utils.drive_utils import upload_to_drive
 from module.utils.slack_utils import upload_file_slack, send_slack_text
