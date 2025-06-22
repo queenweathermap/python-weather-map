@@ -1,6 +1,6 @@
 # gpv_panel_daily_msm.py
 # ===============================================================
-# MSMパネル自動生成スクリプト（GRIB2直接読取 cfgrib対応・ファイル後片付け付）
+# MSMパネル自動生成スクリプト（GRIB2直接読取 cfgrib対応・Drive保存・Slack通知・クリーンアップ付き）
 # 2025-06-22 改訂 by ChatGPT
 # ===============================================================
 
@@ -25,7 +25,9 @@ from module.panel_utils import (
 from module.utils.drive_utils import upload_to_drive
 from module.utils.slack_utils import send_slack_text
 
-
+# 日本語フォント指定（matplotlib使用前にセット）
+import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'IPAGothic'  # ← 日本語タイトル用
 
 BASE_DIR = "./data"
 NCOLS = 12
@@ -92,7 +94,6 @@ if __name__ == "__main__":
         if not ds_list or len(ds_list) < 2:
             print("[NO DATA] ds_list少なすぎ")
             make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
-            # クリーンアップも忘れずに
             cleanup_files(grib2_paths_to_cleanup)
             sys.exit(0)
 
@@ -119,6 +120,5 @@ if __name__ == "__main__":
         print(type(e), e)
         traceback.print_exc()
         make_nodata_weather_panel(get_gpv_nodata_times(), save_path=OUTFILE)
-        # クリーンアップ忘れずに
         cleanup_files(grib2_paths_to_cleanup if "grib2_paths_to_cleanup" in locals() else [])
         sys.exit(1)
