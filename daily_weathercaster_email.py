@@ -53,10 +53,11 @@ if image_paths:
         for img in image_paths:
             zipf.write(img, arcname=os.path.basename(img))
     send_mail(
-        to_addr=TO_ADDR,
-        subject="【自動送信】本日の天気図 JPG",
-        body="本日分のWeathercaster天気図をお送りします（JPG形式ZIP添付）。",
-        attachment_path=zip_path
+        to_addr=to_addr,
+        subject=subject,
+        body=body,
+        attachment_paths=jpg_files,  # 正しい引数名に変更
+        ...
     )
 else:
     print("[INFO] 添付対象なし（メール送信スキップ）")
