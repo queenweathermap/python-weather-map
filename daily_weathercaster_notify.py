@@ -1,36 +1,40 @@
-# daily_weathercaster_email.py
+# daily_weathercaster_notify.py
 # ===============================================================
-# Weathercaster 天気図PDFを → JPG変換して → メール添付送信
+# Weathercaster 天気図PDFを → JPG変換して → Slackにzipで送信
 # ---------------------------------------------------------------
 # ・PDFは全種DL（COMP12など）
 # ・PDF→JPG（1ページ目のみ）
-# ・JPGをzipにまとめて1通で送信
+# ・JPGをzipにまとめてSlackチャンネルに送信
+# ・チャンネルID／トークンは .env または Secrets 経由で取得
 # ===============================================================
 
 import os
-from dotenv import load_dotenv
-from module.utils.download_weathercaster_pdf import download_weathercaster_pdfs
-from module.utils.mail_utils import send_mail
-from pdf2image import convert_from_path
 import zipfile
+from dotenv import load_dotenv
+from pdf2image import convert_from_path
 
-# --- .env読込 ---
+from module.utils.download_weathercaster_pdf import download_weathercaster_pdfs
+from module.utils.slack_utils import upload_file_slack
+
+# --- 環境変数読込 ---
 load_dotenv()
 
-# --- 固定設定 ---
-TO_ADDR = "wx@queenw.com"
+# --- 保存ディレクトリ & Slack設定 ---
 SAVE_DIR = "./data"
-SUBJECT = "【自動送信】本日の天気図（Weathercasterより）"
-BODY = "本日分のWeathercaster天気図を添付いたします。\nご確認ください。"
-
+SLACK_CHANNEL = os.getenv("SLACK_CHANNEL_ID")
+SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-# --- 1. PDFダウンロード ---
+# --- 定数メッセージ ---
+TITLE = "本日の天気図"
+COMMENT = "Weathercaster提供の最新天気図（JPGまとめ）をお届けします。"
+
+# --- 1. Weathercaster PDF全種ダウンロード ---
 USER = os.getenv("WEATHERCASTER_USER")
 PASS = os.getenv("WEATHERCASTER_PASS")
 pdf_files = download_weathercaster_pdfs(save_dir=SAVE_DIR, username=USER, password=PASS)
 
-# --- 2. PDF → JPG変換 ---
+# --- 2. PDF → JPG（1ページ目のみ） ---
 jpg_paths = []
 for label, pdf_path in pdf_files:
     try:
@@ -45,17 +49,18 @@ for label, pdf_path in pdf_files:
     except Exception as e:
         print(f"[ERROR] JPG変換失敗: {pdf_path} - {e}")
 
-# --- 3. メール送信（JPGまとめてzip添付） ---
+# --- 3. JPG群をzip化してSlack送信 ---
 if jpg_paths:
     zip_path = os.path.join(SAVE_DIR, "weathercharts.zip")
     with zipfile.ZipFile(zip_path, "w") as zipf:
         for img_path in jpg_paths:
             zipf.write(img_path, arcname=os.path.basename(img_path))
-    send_mail(
-        to_addr=TO_ADDR,
-        subject=SUBJECT,
-        body=BODY,
-        attachment_paths=[zip_path]
+
+    upload_file_slack(
+        channel=SLACK_CHANNEL,
+        filepath=zip_path,
+        title=TITLE,
+        initial_comment=COMMENT
     )
 else:
-    print("[INFO] 添付ファイルなし、メール送信スキップ")
+    print("[INFO] 添付ファイルなし、Slack送信スキップ")
