@@ -1,8 +1,10 @@
+# .github/workflows/daily_weathercaster_notify.yml
+
 name: Weathercaster JMA
 
 on:
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 4 * * *' # 毎日13時JST
   workflow_dispatch:
 
 jobs:
