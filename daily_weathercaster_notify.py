@@ -1,63 +1,93 @@
 # daily_weathercaster_notify.py
 # ===============================================================
-# 気象庁Weathercaster PDFをJPGに変換し、ZIP化して
-# Google Driveへアップ、Slack通知する自動処理スクリプト
+# 気象庁PDF → JPG(300dpi)変換 → ZIP化 → Driveアップロード
+# Slackには「実行ログ＋Driveリンク」のみ通知
 # ===============================================================
 
 import os
-import glob
+import datetime
+import subprocess
 import zipfile
-import shutil
-from datetime import datetime
+from io import StringIO
+import sys
 
 from module.utils.download_weathercaster_pdf import download_weathercaster_pdf
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
-from module.utils.slack_utils import send_slack_message
+from module.utils.slack_utils import send_slack_text
 
-# --- 出力ディレクトリ ---
-output_dir = "output"
-os.makedirs(output_dir, exist_ok=True)
+# --- 保存先 ---
+SAVE_DIR = "./data"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-# --- 日付をファイル名に使用（例: 20250621） ---
-today_str = datetime.now().strftime("%Y%m%d")
-zip_filename = f"{today_str}_COMP12.zip"
-zip_path = os.path.join(output_dir, zip_filename)
+# --- 日付 ---
+today = datetime.datetime.now().strftime("%Y%m%d")
+pdf_filename = f"{today}_COMP12.pdf"
+pdf_path = os.path.join(SAVE_DIR, pdf_filename)
+jpg_filename = f"{today}_COMP12.jpg"
+jpg_path = os.path.join(SAVE_DIR, jpg_filename)
+zip_path = os.path.join(SAVE_DIR, f"{today}_weathercharts.zip")
 
-# --- ステップ1: PDFダウンロード ---
-print("== PDFダウンロード ==")
-pdf_paths = download_weathercaster_pdf(output_dir=output_dir)
+# --- ログ収集のため出力を一時的に捕捉 ---
+log_buffer = StringIO()
+sys.stdout = sys.stderr = log_buffer
 
-# --- ステップ2: PDF → JPG変換 ---
-print("== JPG変換 ==")
-jpg_paths = []
-for pdf_path in pdf_paths:
-    base = os.path.splitext(os.path.basename(pdf_path))[0]
-    output_prefix = os.path.join(output_dir, base)
-    cmd = f"pdftoppm -jpeg -singlefile {pdf_path} {output_prefix}"
-    print(f"[CMD] {cmd}")
-    os.system(cmd)  # jpgファイルが {output_prefix}.jpg として出力される
-    jpg_path = f"{output_prefix}.jpg"
-    if os.path.exists(jpg_path):
-        jpg_paths.append(jpg_path)
+print(f"[START] {today} 気象庁Weathercaster天気図処理")
 
-# --- ステップ3: ZIP圧縮 ---
-print("== ZIP圧縮 ==")
-with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-    for jpg in jpg_paths:
-        zipf.write(jpg, arcname=os.path.basename(jpg))
-print(f"[OK] ZIPファイル作成: {zip_path}")
+try:
+    # --- STEP 1: PDFダウンロード ---
+    print("[STEP1] PDFダウンロード")
+    username = os.environ["WEATHERCASTER_USER"]
+    password = os.environ["WEATHERCASTER_PASS"]
+    success = download_weathercaster_pdf(username, password, pdf_path)
+    if not success:
+        raise RuntimeError("PDFダウンロードに失敗しました")
 
-# --- ステップ4: Google Driveへアップロード ---
-print("== Google Driveアップロード ==")
-drive_url = upload_to_drive(file_path=zip_path, folder_id=os.environ["WEATHERCASTER_DRIVE_FOLDER_ID"])
-print(f"[OK] Drive URL: {drive_url}")
+    # --- STEP 2: JPG変換（300dpi） ---
+    print("[STEP2] PDFをJPGに変換（300dpi）")
+    cmd = f"pdftoppm -jpeg -singlefile -r 300 {pdf_path} {jpg_path[:-4]}"
+    subprocess.run(cmd, shell=True, check=True)
+    if not os.path.exists(jpg_path):
+        raise FileNotFoundError("JPG変換に失敗しました")
+    print(f"[OK] JPG出力: {jpg_path}")
 
-# --- ステップ5: Slack通知 ---
-print("== Slack通知 ==")
-send_slack_message(f"📡 本日の気象庁天気図をアップロードしました（JPG ZIP）\n{drive_url}")
+    # --- STEP 3: ZIP作成 ---
+    print("[STEP3] ZIP圧縮")
+    with zipfile.ZipFile(zip_path, "w") as zipf:
+        zipf.write(jpg_path, arcname=os.path.basename(jpg_path))
+    print(f"[OK] ZIP作成: {zip_path}")
 
-# --- ステップ6: 30日より古いファイルをDriveから削除 ---
-print("== 古いファイルの削除 ==")
-delete_old_files_from_drive(folder_id=os.environ["WEATHERCASTER_DRIVE_FOLDER_ID"], older_than_days=30)
+    # --- STEP 4: Google Driveにアップ ---
+    print("[STEP4] Google Driveにアップロード")
+    drive_url = upload_to_drive(zip_path, folder_id=os.environ["WEATHERCASTER_DRIVE_FOLDER_ID"])
+    print(f"[OK] アップロード完了: {drive_url}")
 
-print("== 完了 ==")
+    # --- STEP 5: Slack通知（ログ＋URLのみ） ---
+    print("[STEP5] Slack通知（URLのみ）")
+    channel_id = os.environ["SLACK_CHANNEL_ID"]
+    full_log = log_buffer.getvalue()
+    slack_message = (
+        f":white_check_mark: {today} 天気図処理が完了しました。\n"
+        f"ZIPファイル（JPG 300dpi）はこちら:\n{drive_url}\n\n"
+        f"--- 実行ログ ---\n```{full_log[-1800:]}```"
+    )
+    send_slack_text(channel=channel_id, message=slack_message)
+
+    # --- STEP 6: Drive古いファイル削除 ---
+    print("[STEP6] 古いファイル削除（30日以上）")
+    delete_old_files_from_drive(
+        folder_id=os.environ["WEATHERCASTER_DRIVE_FOLDER_ID"],
+        older_than_days=30
+    )
+
+except Exception as e:
+    error_log = log_buffer.getvalue()
+    send_slack_text(
+        channel=os.environ["SLACK_CHANNEL_ID"],
+        message=f":x: {today} 実行エラーが発生しました\n```{str(e)}\n{error_log[-1500:]}```"
+    )
+    raise
+
+finally:
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    log_buffer.close()
