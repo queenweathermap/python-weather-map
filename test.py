@@ -13,23 +13,8 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import numpy as np
 
-
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.slack_utils import send_slack_message
-
-# === 最新のMSM L-pallファイルURL・ローカル名を生成 ===
-def get_latest_gpv_file(model='MSM', level='L-pall', fh_range='FH00-15'):
-    now_utc = datetime.datetime.utcnow()
-    hour_cycle = (now_utc.hour // 3) * 3 - 3  # MSMは3時間おきサイクルの1つ前
-    target_dt = now_utc.replace(hour=hour_cycle, minute=0, second=0, microsecond=0)
-    ymd = target_dt.strftime("%Y%m%d")
-    hh = target_dt.strftime("%H")
-    base_url = f"https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original/{target_dt.year}/{target_dt.month:02}/{target_dt.day:02}/"
-    if model == 'MSM':
-        fname = f"Z__C_RJTD_{ymd}{hh}0000_MSM_GPV_Rjp_{level}_{fh_range}_grib2.bin"
-    elif model == 'GSM':
-        fname = f"Z__C_RJTD_{ymd}{hh}0000_GSM_GPV_Rgl_L-pall_FD0000_grib2.bin"
-    return base_url + fname, fname
 
 # === GRIB2ファイルをダウンロード ===
 def download_file(url, fname):
@@ -42,10 +27,6 @@ def download_file(url, fname):
         return True
     print(f"[NG] Download failed: {url}")
     return False
-
-# === cfgribでxarrayデータセットとして読み込み ===
-def load_gpv_grib2(file_path):
-    return xr.open_dataset(file_path, engine='cfgrib')
 
 def open_grib_select_var(fname, var_name, level):
     ds = xr.open_dataset(
@@ -61,16 +42,6 @@ def open_grib_select_var(fname, var_name, level):
     print(var_name, "shape after squeeze:", arr.shape)
     return arr
 
-
-
-# 例: 高度（geopotential, shortName='gh', 500hPa）、渦度（'vo', 500hPa）
-# hgt_500 = open_grib_select_var(fname, 'gh', 500) / 10
-# try:
-#     vort_500 = open_grib_select_var(fname, 'vo', 500) * 1e5
-# except Exception:
-#     vort_500 = None
-
-
 # === 500hPa高度・渦度マップ可視化 ===
 def plot_500hpa_height_vorticity_grib(fname, out_path):
     hgt = open_grib_select_var(fname, 'gh', 500) / 10
@@ -81,7 +52,6 @@ def plot_500hpa_height_vorticity_grib(fname, out_path):
     print("hgt shape:", hgt.shape)
     lats = hgt.latitude.values
     lons = hgt.longitude.values
-   
 
     proj = ccrs.PlateCarree()
     fig, ax = plt.subplots(figsize=(8,8), subplot_kw={'projection': proj})
@@ -97,11 +67,16 @@ def plot_500hpa_height_vorticity_grib(fname, out_path):
     plt.close()
     print(f"[OK] Plot saved: {out_path}")
 
-
-
-# === メイン処理 ===
+# === メイン処理（テスト用：日付・時刻をハードコーディング）===
 def main():
-    # ファイル名・日付つき生成
+    # 必ず存在する過去データでハードコーディング例
+    ymd = '20240622'    # ← ここは必ずRISHに実在する日付に合わせて変更
+    hh = '12'           # ← 00,03,06,09,12,15,18,21 のどれか
+    fname = f"Z__C_RJTD_{ymd}{hh}0000_MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin"
+    base_url = f"https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original/2024/06/22/"
+    url = base_url + fname
+    print("[DL]", url)
+
     now = datetime.datetime.now()
     img_name = f"msm_500hpa_{now.strftime('%Y%m%d_%H%M')}.jpg"
     img_dir = "data"
@@ -109,22 +84,23 @@ def main():
 
     # 保存先ディレクトリを必ず作成
     os.makedirs(img_dir, exist_ok=True)
-    
+
     # GRIB2ファイルダウンロード
-    url, fname = get_latest_gpv_file('MSM', 'L-pall', 'FH00-15')
     if not download_file(url, fname):
         send_slack_message("ダウンロード失敗")
         return
 
-    # ここで "fname" を引数として渡す（グローバル変数にはしない）
+    # 500hPa天気図を描画
     plot_500hpa_height_vorticity_grib(fname, img_path)
 
-    # 以下同じ...
+    # Google Driveの30日自動削除
     delete_old_files_from_drive(
         folder_id=os.environ["DRIVE_FOLDER_ID"],
         creds_json=os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"],
         days=30
     )
+
+    # Google Driveにアップロードし、Slack通知
     gdrive_url = upload_to_drive(img_path)
     msg = f"【自動配信】500hPa高層天気図 ({now.strftime('%Y/%m/%d %H:%M')})\n{gdrive_url}"
     send_slack_message(msg)
