@@ -122,22 +122,16 @@ def main():
         send_slack_message("MSM L-pall高層データのダウンロードに失敗しました")
         return
 
-    # xarrayでデータロード
-    ds = load_gpv_grib2(fname)
-    # 画像生成
+    # ここで "fname" を引数として渡す（グローバル変数にはしない）
     plot_500hpa_height_vorticity_grib(fname, img_path)
 
-    # 30日超のDrive画像自動削除
+    # 以下同じ...
     delete_old_files_from_drive(
         folder_id=os.environ["DRIVE_FOLDER_ID"],
         creds_json=os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"],
         days=30
     )
-
-    # Google Driveへアップロード→URL取得
     gdrive_url = upload_to_drive(img_path)
-
-    # Slack通知
     msg = f"【自動配信】500hPa高層天気図 ({now.strftime('%Y/%m/%d %H:%M')})\n{gdrive_url}"
     send_slack_message(msg)
 
