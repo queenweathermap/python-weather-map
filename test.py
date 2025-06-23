@@ -70,27 +70,15 @@ def open_grib_select_var(fname, var_name, level):
 
 # === 500hPa高度・渦度マップ可視化 ===
 def plot_500hpa_height_vorticity_grib(fname, out_path):
-    # ここは "fname" を必ず引数でもらう
-    def open_grib_select_var(fname, var_name, level):
-        ds = xr.open_dataset(
-            fname,
-            engine='cfgrib',
-            filter_by_keys={'typeOfLevel': 'isobaricInhPa', 'shortName': var_name, 'level': level}
-        )
-        if 'time' in ds.dims:
-            arr = ds[var_name].isel(time=0)
-        else:
-            arr = ds[var_name]
-        return arr
-
     hgt = open_grib_select_var(fname, 'gh', 500) / 10
     try:
         vort = open_grib_select_var(fname, 'vo', 500) * 1e5
     except Exception:
         vort = None
+    print("hgt shape:", hgt.shape)
     lats = hgt.latitude.values
     lons = hgt.longitude.values
-    
+   
 
     proj = ccrs.PlateCarree()
     fig, ax = plt.subplots(figsize=(8,8), subplot_kw={'projection': proj})
