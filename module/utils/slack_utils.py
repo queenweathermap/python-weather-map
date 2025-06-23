@@ -12,6 +12,11 @@
 import os
 import requests
 
+# --- 共通トークン取得 ---
+def get_slack_token():
+    return os.environ.get("SLACK_BOT_TOKEN")
+
+# --- ファイルアップロード処理 ---
 def upload_file_slack(
     channel,
     filepath,
@@ -20,12 +25,8 @@ def upload_file_slack(
 ):
     """
     Slackにファイル（画像やPDF）をアップロードする（推奨の外部アップロード方式）
-    channel: チャンネルID（例: C12345678）
-    filepath: ローカルファイルパス（例: weather_map.jpg）
-    title: Slack上の表示名
-    initial_comment: ファイルと共に投稿されるメッセージ
     """
-    bot_token = os.environ.get("SLACK_BOT_TOKEN")
+    bot_token = get_slack_token()
     if not bot_token:
         print("[ERROR] SLACK_BOT_TOKEN が未設定です")
         return
@@ -72,12 +73,12 @@ def upload_file_slack(
     else:
         print(f"[Slack] ファイル送信完了: {title}")
 
-
+# --- テキストメッセージ送信 ---
 def send_slack_text(channel, message):
     """
     指定チャンネルにテキストメッセージを送信（chat.postMessage API）
     """
-    bot_token = os.environ.get("SLACK_BOT_TOKEN")
+    bot_token = get_slack_token()
     if not bot_token:
         print("[ERROR] SLACK_BOT_TOKEN が未設定です")
         return
@@ -97,3 +98,15 @@ def send_slack_text(channel, message):
         print("[ERROR] Slackテキスト送信失敗:", res_json)
     else:
         print(f"[Slack] メッセージ送信完了: {message[:30]}...")
+
+# --- 汎用関数名（他モジュールと統一） ---
+def send_slack_message(message, channel=None):
+    """
+    channel省略時はSLACK_CHANNEL_IDを使用してメッセージ送信
+    """
+    if not channel:
+        channel = os.environ.get("SLACK_CHANNEL_ID")
+    if not channel:
+        print("[ERROR] チャンネルIDが未指定です")
+        return
+    send_slack_text(channel, message)
