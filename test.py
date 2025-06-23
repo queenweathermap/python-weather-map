@@ -45,37 +45,68 @@ def download_file(url, fname):
 def load_gpv_grib2(file_path):
     return xr.open_dataset(file_path, engine='cfgrib')
 
-# === 500hPa高度・渦度マップ可視化 ===
-def plot_500hpa_height_vorticity(ds, out_path):
-    # -- 0時刻目だけ抜き出す（データによっては'time'がない場合もあるが、通常はある） --
-    if 'time' in ds.dims:
-        hgt = ds['gh'].sel(isobaricInhPa=500).isel(time=0) / 10  # (gpdm)
-        try:
-            vort = ds['vo'].sel(isobaricInhPa=500).isel(time=0) * 1e5  # (1e-5/s)
-        except KeyError:
-            vort = None
+def open_grib_select_var(fname, var_name, level):
+    """GRIB2から特定変数・レベルだけ抜き出してDataArray化"""
+    import cfgrib
+    ds = xr.open_dataset(
+        fname,
+        engine='cfgrib',
+        filter_by_keys={'typeOfLevel': 'isobaricInhPa', 'shortName': var_name, 'level': level}
+    )
+    # shape: (time, lat, lon) or (lat, lon)
+    if 'time' in ds:
+        arr = ds[var_name].isel(time=0)
     else:
-        hgt = ds['gh'].sel(isobaricInhPa=500) / 10
-        try:
-            vort = ds['vo'].sel(isobaricInhPa=500) * 1e5
-        except KeyError:
-            vort = None
-    lons = ds['longitude'].values
-    lats = ds['latitude'].values
+        arr = ds[var_name]
+    return arr
+
+# 例: 高度（geopotential, shortName='gh', 500hPa）、渦度（'vo', 500hPa）
+hgt_500 = open_grib_select_var(fname, 'gh', 500) / 10
+try:
+    vort_500 = open_grib_select_var(fname, 'vo', 500) * 1e5
+except Exception:
+    vort_500 = None
+
+
+# === 500hPa高度・渦度マップ可視化 ===
+def plot_500hpa_height_vorticity_grib(fname, out_path):
+    import numpy as np
+
+    def open_grib_select_var(fname, var_name, level):
+        ds = xr.open_dataset(
+            fname,
+            engine='cfgrib',
+            filter_by_keys={'typeOfLevel': 'isobaricInhPa', 'shortName': var_name, 'level': level}
+        )
+        if 'time' in ds.dims:
+            arr = ds[var_name].isel(time=0)
+        else:
+            arr = ds[var_name]
+        return arr
+
+    hgt = open_grib_select_var(fname, 'gh', 500) / 10
+    try:
+        vort = open_grib_select_var(fname, 'vo', 500) * 1e5
+    except Exception:
+        vort = None
+
+    lats = hgt.latitude.values
+    lons = hgt.longitude.values
 
     proj = ccrs.PlateCarree()
     fig, ax = plt.subplots(figsize=(8,8), subplot_kw={'projection': proj})
     ax.set_extent([120, 150, 22, 48], crs=proj)
     ax.coastlines()
-    cs = ax.contour(lons, lats, hgt, levels=range(500, 600, 6), colors='black')
+    cs = ax.contour(lons, lats, hgt, levels=np.arange(500, 600, 6), colors='black')
     ax.clabel(cs, fmt='%d', fontsize=8)
     if vort is not None:
-        vplot = ax.contourf(lons, lats, vort, levels=range(-30, 40, 5), cmap='RdBu', alpha=0.6)
+        vplot = ax.contourf(lons, lats, vort, levels=np.arange(-30, 40, 5), cmap='RdBu', alpha=0.6)
         fig.colorbar(vplot, ax=ax, label="Vorticity ($10^{-5}$/s)")
     plt.title("500hPa Height/Vorticity")
     plt.savefig(out_path, dpi=150)
     plt.close()
     print(f"[OK] Plot saved: {out_path}")
+
 
 
 # === メイン処理 ===
@@ -94,7 +125,7 @@ def main():
     # xarrayでデータロード
     ds = load_gpv_grib2(fname)
     # 画像生成
-    plot_500hpa_height_vorticity(ds, img_path)
+    plot_500hpa_height_vorticity_grib(fname, img_path)
 
     # 30日超のDrive画像自動削除
     delete_old_files_from_drive(
