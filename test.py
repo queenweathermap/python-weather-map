@@ -47,11 +47,19 @@ def load_gpv_grib2(file_path):
 
 # === 500hPa高度・渦度マップ可視化 ===
 def plot_500hpa_height_vorticity(ds, out_path):
-    hgt = ds['gh'].sel(isobaricInhPa=500) / 10  # (gpdm)
-    try:
-        vort = ds['vo'].sel(isobaricInhPa=500) * 1e5  # (1e-5/s)
-    except KeyError:
-        vort = None
+    # -- 0時刻目だけ抜き出す（データによっては'time'がない場合もあるが、通常はある） --
+    if 'time' in ds.dims:
+        hgt = ds['gh'].sel(isobaricInhPa=500).isel(time=0) / 10  # (gpdm)
+        try:
+            vort = ds['vo'].sel(isobaricInhPa=500).isel(time=0) * 1e5  # (1e-5/s)
+        except KeyError:
+            vort = None
+    else:
+        hgt = ds['gh'].sel(isobaricInhPa=500) / 10
+        try:
+            vort = ds['vo'].sel(isobaricInhPa=500) * 1e5
+        except KeyError:
+            vort = None
     lons = ds['longitude'].values
     lats = ds['latitude'].values
 
@@ -68,6 +76,7 @@ def plot_500hpa_height_vorticity(ds, out_path):
     plt.savefig(out_path, dpi=150)
     plt.close()
     print(f"[OK] Plot saved: {out_path}")
+
 
 # === メイン処理 ===
 def main():
