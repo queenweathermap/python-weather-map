@@ -70,8 +70,7 @@ except Exception:
 
 # === 500hPa高度・渦度マップ可視化 ===
 def plot_500hpa_height_vorticity_grib(fname, out_path):
-    import numpy as np
-
+    # ここは "fname" を必ず引数でもらう
     def open_grib_select_var(fname, var_name, level):
         ds = xr.open_dataset(
             fname,
@@ -89,9 +88,9 @@ def plot_500hpa_height_vorticity_grib(fname, out_path):
         vort = open_grib_select_var(fname, 'vo', 500) * 1e5
     except Exception:
         vort = None
-
     lats = hgt.latitude.values
     lons = hgt.longitude.values
+    
 
     proj = ccrs.PlateCarree()
     fig, ax = plt.subplots(figsize=(8,8), subplot_kw={'projection': proj})
@@ -119,7 +118,7 @@ def main():
     # GRIB2ファイルダウンロード
     url, fname = get_latest_gpv_file('MSM', 'L-pall', 'FH00-15')
     if not download_file(url, fname):
-        send_slack_message("MSM L-pall高層データのダウンロードに失敗しました")
+        send_slack_message("ダウンロード失敗")
         return
 
     # ここで "fname" を引数として渡す（グローバル変数にはしない）
