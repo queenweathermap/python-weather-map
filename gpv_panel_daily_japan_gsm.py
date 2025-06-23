@@ -1,4 +1,4 @@
-# gpv_panel_daily_gsm.py
+# gpv_panel_daily_japan_gsm.py
 # ===============================================
 # GSMパネル自動生成スクリプト（GRIB2直接読取 cfgrib対応版）
 # 2025-06-22 改訂 by ChatGPT
