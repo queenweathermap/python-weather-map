@@ -104,7 +104,11 @@ def main():
     # ファイル名・日付つき生成
     now = datetime.datetime.now()
     img_name = f"msm_500hpa_{now.strftime('%Y%m%d_%H%M')}.jpg"
-    img_path = os.path.join("data", img_name)
+    img_dir = "data"
+    img_path = os.path.join(img_dir, img_name)
+
+    # 保存先ディレクトリを必ず作成
+    os.makedirs(img_dir, exist_ok=True)
     
     # GRIB2ファイルダウンロード
     url, fname = get_latest_gpv_file('MSM', 'L-pall', 'FH00-15')
