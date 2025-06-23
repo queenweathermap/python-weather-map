@@ -11,6 +11,8 @@ import datetime
 import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
+import numpy as np
+
 
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.slack_utils import send_slack_message
