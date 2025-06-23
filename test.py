@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
-from module.utils.slack_utils import notify_slack
+from module.utils.slack_utils import send_slack_message
 
 # === 最新のMSM L-pallファイルURL・ローカル名を生成 ===
 def get_latest_gpv_file(model='MSM', level='L-pall', fh_range='FH00-15'):
@@ -79,7 +79,7 @@ def main():
     # GRIB2ファイルダウンロード
     url, fname = get_latest_gpv_file('MSM', 'L-pall', 'FH00-15')
     if not download_file(url, fname):
-        notify_slack("MSM L-pall高層データのダウンロードに失敗しました")
+        send_slack_message("MSM L-pall高層データのダウンロードに失敗しました")
         return
 
     # xarrayでデータロード
@@ -99,7 +99,7 @@ def main():
 
     # Slack通知
     msg = f"【自動配信】500hPa高層天気図 ({now.strftime('%Y/%m/%d %H:%M')})\n{gdrive_url}"
-    notify_slack(msg)
+    send_slack_message(msg)
 
 if __name__ == "__main__":
     main()
