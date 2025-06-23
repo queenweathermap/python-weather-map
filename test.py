@@ -7,7 +7,7 @@
 
 import os
 import requests
-import datetime
+from datetime import datetime, timedelta  # ←ここを追加
 import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
@@ -77,10 +77,11 @@ def main():
     url = base_url + fname
     print("[DL]", url)
 
-    now = datetime.datetime.now()
+    now = datetime.now()  # ←ここも修正
     img_name = f"msm_500hpa_{now.strftime('%Y%m%d_%H%M')}.jpg"
     img_dir = "data"
     img_path = os.path.join(img_dir, img_name)
+    now_utc = datetime.utcnow()  # ←ここも修正
 
     # 保存先ディレクトリを必ず作成
     os.makedirs(img_dir, exist_ok=True)
