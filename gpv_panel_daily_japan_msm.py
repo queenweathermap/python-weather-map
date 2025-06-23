@@ -1,4 +1,4 @@
-# gpv_panel_daily_msm.py
+# gpv_panel_daily_japan_msm.py
 # ===============================================================
 # MSMパネル自動生成スクリプト（GRIB2直接読取 cfgrib対応・Drive保存・Slack通知・クリーンアップ付き）
 # 2025-06-22 改訂 by ChatGPT
