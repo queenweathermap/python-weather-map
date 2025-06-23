@@ -3,7 +3,7 @@
 # MSM GPVファイルを描画 → Slackへ自動投稿テスト
 # ===============================================
 
-name: MSM Weather Map Slack Test
+name: Test
 
 on:
   workflow_dispatch:
