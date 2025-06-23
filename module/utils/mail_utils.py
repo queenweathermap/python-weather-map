@@ -88,11 +88,17 @@ def send_mail(
             )
             msg.attach(part)
 
-    # SMTP送信
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.send_message(msg, from_addr=from_addr, to_addrs=recipients)
+    # --- SMTP送信 ---
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg, from_addr=from_addr, to_addrs=recipients)
+    else:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg, from_addr=from_addr, to_addrs=recipients)
+
     print("✅ メール送信完了")
 
 # ------------------------------------------------
