@@ -48,19 +48,17 @@ def load_gpv_grib2(file_path):
     return xr.open_dataset(file_path, engine='cfgrib')
 
 def open_grib_select_var(fname, var_name, level):
-    """GRIB2から特定変数・レベルだけ抜き出してDataArray化"""
-    import cfgrib
     ds = xr.open_dataset(
         fname,
         engine='cfgrib',
         filter_by_keys={'typeOfLevel': 'isobaricInhPa', 'shortName': var_name, 'level': level}
     )
-    # shape: (time, lat, lon) or (lat, lon)
-    if 'time' in ds:
-        arr = ds[var_name].isel(time=0)
-    else:
-        arr = ds[var_name]
+    arr = ds[var_name]
+    # 1要素次元を全て落とす
+    arr = arr.squeeze()
+    print(var_name, "shape after squeeze:", arr.shape)
     return arr
+
 
 # 例: 高度（geopotential, shortName='gh', 500hPa）、渦度（'vo', 500hPa）
 # hgt_500 = open_grib_select_var(fname, 'gh', 500) / 10
