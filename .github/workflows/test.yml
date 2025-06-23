@@ -1,4 +1,4 @@
-# .github/workflows/slack_test.yml
+# .github/workflows/test.yml
 # ===============================================
 # MSM GPVファイルを描画 → Slackへ自動投稿テスト
 # ===============================================
