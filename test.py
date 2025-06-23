@@ -61,11 +61,11 @@ def open_grib_select_var(fname, var_name, level):
     return arr
 
 # 例: 高度（geopotential, shortName='gh', 500hPa）、渦度（'vo', 500hPa）
-hgt_500 = open_grib_select_var(fname, 'gh', 500) / 10
-try:
-    vort_500 = open_grib_select_var(fname, 'vo', 500) * 1e5
-except Exception:
-    vort_500 = None
+# hgt_500 = open_grib_select_var(fname, 'gh', 500) / 10
+# try:
+#     vort_500 = open_grib_select_var(fname, 'vo', 500) * 1e5
+# except Exception:
+#     vort_500 = None
 
 
 # === 500hPa高度・渦度マップ可視化 ===
