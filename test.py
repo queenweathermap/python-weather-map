@@ -54,10 +54,9 @@ def open_grib_select_var(fname, var_name, level):
         filter_by_keys={'typeOfLevel': 'isobaricInhPa', 'shortName': var_name, 'level': level}
     )
     arr = ds[var_name]
-    # step, time, other1次元があれば最初の値だけを抜き出す
-    for dim in arr.dims:
-        if arr.sizes[dim] > 1 and dim in ['step', 'time', 'ensemble', 'valid_time']:
-            arr = arr.isel({dim: 0})
+    # 2Dになるまで次元を落とす
+    while arr.ndim > 2:
+        arr = arr.isel({arr.dims[0]: 0})
     arr = arr.squeeze()
     print(var_name, "shape after squeeze:", arr.shape)
     return arr
