@@ -56,8 +56,13 @@ if image_paths:
         to_addr=to_addr,
         subject=subject,
         body=body,
-        attachment_paths=jpg_files,  # 正しい引数名に変更
-        ...
+        attachment_paths=[zip_path],
+        from_addr=os.getenv("MAIL_FROM"),
+        smtp_server=os.getenv("MAIL_SMTP_SERVER"),
+        smtp_port=int(os.getenv("MAIL_PORT")),
+        smtp_user=os.getenv("MAIL_USER"),
+        smtp_password=os.getenv("MAIL_PASS")
     )
+
 else:
     print("[INFO] 添付対象なし（メール送信スキップ）")
