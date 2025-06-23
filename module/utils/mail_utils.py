@@ -28,22 +28,34 @@ def send_mail(
     to_addr,
     subject,
     body,
-    attachments=None,
+    attachment_paths=None,
     from_addr=None,
     smtp_server=None,
     smtp_port=None,
     smtp_user=None,
-    smtp_password=None
+    smtp_password=None,
+    cc_addrs=None,
+    bcc_addrs=None,
+    is_html=False,
 ):
     """
-    メールを送信する関数（添付ファイル対応）
+    メールを送信する関数（複数添付ファイル対応・HTML可）
 
     Parameters:
     - to_addr: 送信先アドレス（str or list[str]）
     - subject: 件名（str）
     - body: 本文（str）
-    - attachments: 添付ファイルパスのリスト（list[str]）
+    - attachment_paths: 添付ファイルのパス一覧（list[str] or None）
+    - from_addr: 差出人メールアドレス（None時は.envから）
+    - smtp_server: SMTPサーバ（None時は.envから）
+    - smtp_port: ポート番号（None時は.envから）
+    - smtp_user: SMTPログインユーザー（None時は.envから）
+    - smtp_password: SMTPログインパスワード（None時は.envから）
+    - cc_addrs: CCアドレス（str or list[str] or None）
+    - bcc_addrs: BCCアドレス（str or list[str] or None）
+    - is_html: 本文をHTMLとして送信するか（bool）
     """
+
 
     # --- 引数 or 環境変数から情報取得 ---
     from_addr = from_addr or os.environ.get("MAIL_FROM")
