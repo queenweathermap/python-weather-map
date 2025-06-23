@@ -2,16 +2,20 @@
 # ===============================================
 # メール送信ユーティリティ（SMTP/添付ファイル対応・.env運用）
 # -----------------------------------------------
-# ・テキスト本文、件名、添付ファイル付きで送信可能
-# ・.envの設定 or 引数でSMTP情報を柔軟に指定可
-# ・複数アドレスやHTMLメール等、拡張も容易
+# ・テキスト/HTML、複数宛先、添付対応
+# ・.envまたは引数から柔軟設定可
 # -----------------------------------------------
-# 必要パッケージ: python-dotenv
+# 必要パッケージ:
 #   pip install python-dotenv
 # -----------------------------------------------
 # 利用例:
 #   from module.utils.mail_utils import send_mail
-#   send_mail("recipient@example.com", "件名", "本文", ["添付ファイル.jpg"])
+#   send_mail(
+#       to_addr="recipient@example.com",
+#       subject="件名",
+#       body="本文",
+#       attachment_paths=["file.pdf"]
+#   )
 # ===============================================
 
 import os
@@ -21,7 +25,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from dotenv import load_dotenv
 
-# --- .envの自動読込（他で実施済なら不要） ---
+# --- .env 読み込み（他でも実施済でも安全） ---
 load_dotenv()
 
 def send_mail(
@@ -38,67 +42,51 @@ def send_mail(
     bcc_addrs=None,
     is_html=False,
 ):
-    """
-    メールを送信する関数（複数添付ファイル対応・HTML可）
-
-    Parameters:
-    - to_addr: 送信先アドレス（str or list[str]）
-    - subject: 件名（str）
-    - body: 本文（str）
-    - attachment_paths: 添付ファイルのパス一覧（list[str] or None）
-    - from_addr: 差出人メールアドレス（None時は.envから）
-    - smtp_server: SMTPサーバ（None時は.envから）
-    - smtp_port: ポート番号（None時は.envから）
-    - smtp_user: SMTPログインユーザー（None時は.envから）
-    - smtp_password: SMTPログインパスワード（None時は.envから）
-    - cc_addrs: CCアドレス（str or list[str] or None）
-    - bcc_addrs: BCCアドレス（str or list[str] or None）
-    - is_html: 本文をHTMLとして送信するか（bool）
-    """
-
-
-    # --- 引数 or 環境変数から情報取得 ---
+    """SMTPメール送信（添付・HTML・複数宛先対応）"""
     from_addr = from_addr or os.environ.get("MAIL_FROM")
     smtp_server = smtp_server or os.environ.get("MAIL_SMTP_SERVER")
     smtp_port = int(smtp_port or os.environ.get("MAIL_PORT", 587))
     smtp_user = smtp_user or os.environ.get("MAIL_USER")
     smtp_password = smtp_password or os.environ.get("MAIL_PASS")
 
-    # --- メール作成 ---
+    # --- メール構築 ---
     msg = MIMEMultipart()
     msg["From"] = from_addr
     msg["To"] = to_addr if isinstance(to_addr, str) else ", ".join(to_addr)
     msg["Subject"] = subject
+    if cc_addrs:
+        msg["Cc"] = cc_addrs if isinstance(cc_addrs, str) else ", ".join(cc_addrs)
+    recipients = [to_addr] if isinstance(to_addr, str) else to_addr
+    if cc_addrs:
+        recipients += cc_addrs if isinstance(cc_addrs, list) else [cc_addrs]
+    if bcc_addrs:
+        recipients += bcc_addrs if isinstance(bcc_addrs, list) else [bcc_addrs]
 
-    msg.attach(MIMEText(body, "plain"))
+    msg.attach(MIMEText(body, "html" if is_html else "plain"))
 
-    # --- 添付ファイル（任意） ---
-    if attachments:
-        for path in attachments:
+    # --- 添付ファイル ---
+    if attachment_paths:
+        for path in attachment_paths:
             if not os.path.exists(path):
                 print(f"[WARN] 添付ファイルが見つかりません: {path}")
                 continue
             with open(path, "rb") as f:
                 part = MIMEApplication(f.read(), Name=os.path.basename(path))
-                part["Content-Disposition"] = f'attachment; filename="{os.path.basename(path)}"'
+                part.add_header("Content-Disposition", "attachment", filename=os.path.basename(path))
                 msg.attach(part)
-                print(f"[OK] 添付ファイル: {path}")
+                print(f"[OK] 添付: {path}")
 
     # --- SMTP送信 ---
     try:
         if smtp_port == 465:
             server = smtplib.SMTP_SSL(smtp_server, smtp_port)
-            server.ehlo()
         else:
             server = smtplib.SMTP(smtp_server, smtp_port)
-            server.ehlo()
             server.starttls()
-            server.ehlo()
-
         server.login(smtp_user, smtp_password)
-        server.send_message(msg)
+        server.sendmail(from_addr, recipients, msg.as_string())
         server.quit()
-        print(f"[OK] メール送信成功: {to_addr}")
+        print(f"[OK] メール送信成功: {recipients}")
     except Exception as e:
         print(f"[ERROR] メール送信失敗: {e}")
         raise
