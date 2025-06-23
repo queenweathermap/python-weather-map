@@ -1,40 +1,40 @@
 # daily_weathercaster_notify.py
 # ===============================================================
-# Weathercaster 天気図PDFを → JPG変換して → Slackにzipで送信
+# Weathercaster 天気図PDF → JPG → ZIP → Google Drive & Slack通知
 # ---------------------------------------------------------------
-# ・PDFは全種DL（COMP12など）
-# ・PDF→JPG（1ページ目のみ）
-# ・JPGをzipにまとめてSlackチャンネルに送信
-# ・チャンネルID／トークンは .env または Secrets 経由で取得
+# ・Google Drive: ZIPファイルを日付名で保存
+# ・Slack: URL通知
+# ・30日以上前のファイルをDriveから削除
 # ===============================================================
 
 import os
 import zipfile
+from datetime import datetime
 from dotenv import load_dotenv
 from pdf2image import convert_from_path
-
 from module.utils.download_weathercaster_pdf import download_weathercaster_pdfs
-from module.utils.slack_utils import upload_file_slack
+from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
+from module.utils.slack_utils import send_slack_text
 
-# --- 環境変数読込 ---
+# --- .env読み込み ---
 load_dotenv()
 
-# --- 保存ディレクトリ & Slack設定 ---
+# --- 固定設定 ---
 SAVE_DIR = "./data"
-SLACK_CHANNEL = os.getenv("SLACK_CHANNEL_ID")
-SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-# --- 定数メッセージ ---
-TITLE = "本日の天気図"
-COMMENT = "Weathercaster提供の最新天気図（JPGまとめ）をお届けします。"
+SLACK_CHANNEL = os.getenv("SLACK_CHANNEL_ID")
+DRIVE_FOLDER_ID = os.getenv("WEATHERCASTER_DRIVE_FOLDER_ID")
+today_str = datetime.now().strftime("%Y%m%d")
+ZIP_FILENAME = f"{today_str}_weathercharts.zip"
+ZIP_PATH = os.path.join(SAVE_DIR, ZIP_FILENAME)
 
-# --- 1. Weathercaster PDF全種ダウンロード ---
-USER = os.getenv("WEATHERCASTER_USER")
-PASS = os.getenv("WEATHERCASTER_PASS")
-pdf_files = download_weathercaster_pdfs(save_dir=SAVE_DIR, username=USER, password=PASS)
+# --- 1. PDFダウンロード ---
+user = os.getenv("WEATHERCASTER_USER")
+password = os.getenv("WEATHERCASTER_PASS")
+pdf_files = download_weathercaster_pdfs(SAVE_DIR, user, password)
 
-# --- 2. PDF → JPG（1ページ目のみ） ---
+# --- 2. PDF → JPG変換 ---
 jpg_paths = []
 for label, pdf_path in pdf_files:
     try:
@@ -44,23 +44,24 @@ for label, pdf_path in pdf_files:
             pages[0].save(jpg_path, "JPEG")
             jpg_paths.append(jpg_path)
             print(f"[OK] JPG変換: {jpg_path}")
-        else:
-            print(f"[SKIP] PDFが空: {pdf_path}")
     except Exception as e:
         print(f"[ERROR] JPG変換失敗: {pdf_path} - {e}")
 
-# --- 3. JPG群をzip化してSlack送信 ---
+# --- 3. JPGをZIPにまとめる ---
 if jpg_paths:
-    zip_path = os.path.join(SAVE_DIR, "weathercharts.zip")
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        for img_path in jpg_paths:
-            zipf.write(img_path, arcname=os.path.basename(img_path))
+    with zipfile.ZipFile(ZIP_PATH, "w") as zipf:
+        for img in jpg_paths:
+            zipf.write(img, arcname=os.path.basename(img))
+    print(f"[OK] ZIP作成: {ZIP_PATH}")
 
-    upload_file_slack(
-        channel=SLACK_CHANNEL,
-        filepath=zip_path,
-        title=TITLE,
-        initial_comment=COMMENT
-    )
+    # --- 4. Google Driveにアップロード ---
+    drive_url = upload_to_drive(ZIP_PATH, DRIVE_FOLDER_ID)
+    if drive_url:
+        # --- 5. Slack通知 ---
+        send_slack_text(SLACK_CHANNEL, f"📦 {ZIP_FILENAME} をアップロードしました\n{drive_url}")
+
+    # --- 6. 古いファイル削除（30日以上前）---
+    delete_old_files_from_drive(DRIVE_FOLDER_ID, days=30)
+
 else:
-    print("[INFO] 添付ファイルなし、Slack送信スキップ")
+    print("[INFO] JPGが生成されなかったため処理スキップ")
