@@ -1,4 +1,4 @@
-name: Weathercaster PDF Auto
+name: Weathercaster Slack Notify
 
 on:
   schedule:
@@ -6,15 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  download-and-notify:
+  notify-weathercaster:
     runs-on: ubuntu-latest
 
     env:
       WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
       WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
-      WEATHERCASTER_DRIVE_FOLDER_ID: ${{ secrets.WEATHERCASTER_DRIVE_FOLDER_ID }}
-      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
     steps:
       - name: Checkout repository
@@ -26,8 +25,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
 
-      - name: Run weathercaster script
-        run: python daily_weathercaster_pdf.py  # ✅ プロジェクト直下
-
+      - name: Run Weathercaster Slack Notify Script
+        run: python daily_weathercaster_notify.py
