@@ -63,3 +63,18 @@ def delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30):
     for f in files:
         print(f"[DELETE] {f['name']} ({f['createdTime']})")
         service.files().delete(fileId=f["id"]).execute()
+
+
+def delete_old_files_from_drive(folder_id, creds_json, days=30):
+    creds_dict = json.loads(creds_json)
+    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    service = build('drive', 'v3', credentials=creds)
+    # 30日より前の日付
+    dt_limit = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).isoformat() + 'Z'
+    query = f"'{folder_id}' in parents and trashed = false and createdTime < '{dt_limit}'"
+    results = service.files().list(q=query, fields="files(id, name, createdTime)").execute()
+    old_files = results.get('files', [])
+    for f in old_files:
+        service.files().delete(fileId=f['id']).execute()
+        print(f"Deleted old file: {f['name']} ({f['createdTime']})")
+
