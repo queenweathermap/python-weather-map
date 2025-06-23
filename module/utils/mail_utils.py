@@ -89,32 +89,18 @@ def send_mail(
             msg.attach(part)
 
     # --- SMTP送信 ---
-    if smtp_port == 465:
-        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg, from_addr=from_addr, to_addrs=recipients)
-    else:
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg, from_addr=from_addr, to_addrs=recipients)
-
-    print("✅ メール送信完了")
-
-# ------------------------------------------------
-# 使い方例
-# send_mail(
-#   to_addr="recipient@example.com",
-#   subject="テスト件名",
-#   body="本文テスト",
-#   attachment_path="添付ファイルパス.jpg"
-# )
-# ------------------------------------------------
-
-# ---- 日本語コメント多めのヘッダで安心・拡張性重視 ----
-# ・CC/BCC、HTMLメール送信にも柔軟対応
-# ・.envと引数、どちらでも設定指定可能
-# ・環境変数例:
-#   MAIL_FROM, MAIL_SMTP_SERVER, MAIL_PORT, MAIL_USER, MAIL_PASS
-# ・例外処理やロギングは用途に応じて追加
-# ・メール大量送信/業務用はAPI（SendGrid等）併用も検討
+    try:
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg, from_addr=from_addr, to_addrs=recipients)
+        else:
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg, from_addr=from_addr, to_addrs=recipients)
+        print("✅ メール送信完了")
+    except Exception as e:
+        print("❌ メール送信失敗:", e)
+        raise
