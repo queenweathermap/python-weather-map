@@ -1,18 +1,11 @@
 # ===============================================
 # module/panel_utils.py
-# 天気図パネル作成ユーティリティ（GSM/MSM/局地共通／全世界仕様）
-# 2025-06-18 by ChatGPT
-# -----------------------------------------------
-# ・GSM/MSM/任意ローカルパネルの可視化パネルを生成する各種関数群
-# ・NO DATA画像もグローバル英語化 描画前の整形・共通処理」をまとめるための場所
-# ・地図プロットの共通機能や、ラベル・メタ情報自動化対応
-# ・多段構成やカスタムラベルにも柔軟対応
+# パネル可視化・NO DATA生成など可視化ユーティリティ
 # ===============================================
-
-import os
 import numpy as np
 import pandas as pd
-import xarray as xr
+import matplotlib.pyplot as plt
+from module.utils.var_utils import get_var
 
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'sans-serif'
@@ -20,21 +13,7 @@ plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
 from module.utils.xr_utils import align_datasets_common
 
-# --- 変数名マッピング辞書 ---
-VAR_ALIASES = {
-    # 標準名         cfgrib名   NetCDF名 等 (追加はここだけ！)
-    "TMP_500mb":    ["t@500", "t_500hPa", "temperature_500"],
-    "TMP_700mb":    ["t@700", "t_700hPa"],
-    "TMP_850mb":    ["t@850", "t_850hPa"],
-    "UGRD_850mb":   ["u@850", "u_850hPa"],
-    "VGRD_850mb":   ["v@850", "v_850hPa"],
-    "RH_850mb":     ["r@850", "rh_850hPa"],
-    "VVEL_700mb":   ["w@700", "w_700hPa"],
-    "HGT_500mb":    ["gh@500", "z_500hPa"],
-    # ...他も同様に登録
-    "longitude":    ["lon", "longitude"],
-    "latitude":     ["lat", "latitude"],
-}
+
 
 def get_var(ds, key):
     """
