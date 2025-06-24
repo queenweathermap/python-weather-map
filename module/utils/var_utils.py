@@ -25,21 +25,28 @@ VAR_ALIASES = {
 
 # 既存のVAR_ALIASES & get_var ここにある想定
 def get_var_2d(ds, key, level=None, time_idx=0):
+    """
+    - ds: xarray.Dataset
+    - key: variable名
+    - level: isobaricInhPaで指定する高度（Noneなら無視）
+    - time_idx: 時間次元のインデックス
+    """
     arr = get_var(ds, key)
     if arr is None:
         return None
-    # 時刻次元に対応（time or step）
-    if "time" in arr.dims:
-        arr = arr.isel(time=time_idx)
-    elif "step" in arr.dims:
-        arr = arr.isel(step=time_idx)
-    # 高度次元対応
+    # 時刻軸（time, step）を抜く
+    for tdim in ["time", "step"]:
+        if tdim in arr.dims:
+            arr = arr.isel({tdim: time_idx})
+    # 高度軸（isobaricInhPa）を抜く
     if level is not None and "isobaricInhPa" in arr.dims:
         arr = arr.sel(isobaricInhPa=level, method="nearest")
     arr2d = np.asarray(arr.squeeze())
+    # shapeが(253, 241)等になっているかチェック
     if arr2d.ndim != 2:
         raise ValueError(f"Output is not 2D: shape={arr2d.shape}")
     return arr2d
+
 
 
 
