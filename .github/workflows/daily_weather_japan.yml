@@ -12,38 +12,25 @@ on:
     - cron: '0 4 * * *'   # JST 13時
   workflow_dispatch:
 
+# daily_weather_japan.yml の一部例
 jobs:
-  run-weather-batch:
-    runs-on: ubuntu-22.04
+  panel_msm:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libeccodes0 libeccodes-dev \
-            libgeos-dev proj-bin proj-data libproj-dev \
-            fonts-ipafont-gothic
-
-      - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install --upgrade setuptools wheel
-          pip install eccodes cfgrib xarray cartopy pandas numpy matplotlib metpy scipy requests python-dotenv slack_sdk google-api-python-client google-auth-httplib2 google-auth beautifulsoup4 ipython
-          pip install -r requirements.txt
-
-      - name: Run weather batch (main_weather_batch.py)
+          python-version: 3.11
+      - name: Install requirements
+        run: pip install -r requirements.txt
+      - name: Run MSM daily panel
+        run: python gpv_panel_daily_japan_msm.py
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-        run: |
-          python3 main_weather_batch.py
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          run: |
+            python3 main_weather_batch.py
