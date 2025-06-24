@@ -1,9 +1,33 @@
+# ===============================================
 # module/utils/var_utils.py
-# ==========================================
-# # xarray変数取得 共通ユーティリティ
-# ==========================================
+# 変数名吸収ユーティリティ　xarrayから変数名で吸収取得」専用。
+# ===============================================
+VAR_ALIASES = {
+    # 標準名 : [cfgrib名, NetCDF名, 他の可能性ある呼び名, ...]
+    "TMP_850mb": ["t@850", "t_850hPa", "temperature_850"],
+    # ... 必要なだけ追加
+    "longitude": ["lon", "longitude"],
+    "latitude": ["lat", "latitude"],
+}
 
-# module/utils/var_utils.py
+def get_var(ds, key):
+    """多様な命名にも対応してxarray.Datasetから安全に取得"""
+    # 直接
+    if key in ds.variables:
+        return ds[key]
+    # 別名で
+    aliases = VAR_ALIASES.get(key, [])
+    for alias in aliases:
+        if alias in ds.variables:
+            return ds[alias]
+    # 小文字も試す
+    if key.lower() in ds.variables:
+        return ds[key.lower()]
+    return None
+
+__all__ = ["get_var"]
+
+
 def get_var(ds, var):
     """
     ds: xarray.Dataset (cfgrib: JMA GPV) or dict-like
