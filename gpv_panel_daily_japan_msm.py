@@ -51,10 +51,16 @@ def main():
     print("ds_surf_accum.variables:", list(ds_surf_accum.variables))
 
     # --- パネル作成 ---
-    fig, axes = plt.subplots(nrows=6, ncols=1, figsize=(8, 48), constrained_layout=True)
+    fig, axes = plt.subplots(
+        nrows=6, ncols=1, figsize=(8, 48),
+        constrained_layout=True,
+        subplot_kw=dict(projection=ccrs.PlateCarree())
+    )
     fig.suptitle(f"MSM日本全域 天気図6種 {ymd} {hh}00", fontsize=22)
 
+
     plot_700hpa_dindex_500hpa_temp(axes[0], ds)
+    axes[0].set_title("700hPa D-index / 500hPa 気温")
     # ...（省略、他プロットも同様）
 
     # --- 保存・Driveアップロード・Slack通知 ---
