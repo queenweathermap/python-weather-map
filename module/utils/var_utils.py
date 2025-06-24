@@ -29,38 +29,23 @@ def get_var(ds, key):
     
 
 # 既存のVAR_ALIASES & get_var ここにある想定
-def get_var_2d(
-    ds, key, level=None, time_idx=0, step_idx=0, ensemble_idx=0, **kwargs
-):
+def get_var_2d(ds, key, level=None, time_idx=0):
     """
-    dsからkeyを抽出し、「残った多次元軸は全部1つに固定」して2Dで返す。
-    - ds: xarray.Dataset
-    - key: 変数名
-    - level: pressure level, e.g. 850
-    - time_idx, step_idx, ensemble_idx: 指定軸のindex
-    - kwargs: 追加の.isel/.sel用
+    dsからkeyを取得し、指定level/時刻で2D配列に絞って返す
     """
     arr = get_var(ds, key)
     if arr is None:
         return None
-
-    # 柔軟に全次元を2Dになるまで落とす
-    # よくある「代表的な軸」だけ特別扱いでindex指定
-    for dim, idx in [("time", time_idx), ("step", step_idx), ("ensemble", ensemble_idx)]:
-        if dim in arr.dims and arr.sizes[dim] > 1:
-            arr = arr.isel({dim: idx})
-    # isobaricInhPa, level, pressure のどれかに対応
-    if level is not None:
-        for lev_name in ["isobaricInhPa", "level", "pressure"]:
-            if lev_name in arr.dims:
-                arr = arr.sel({lev_name: level}, method="nearest")
-    # 他に未指定の次元が残っていたら、先頭indexでスライス（順次2Dになるまで繰り返す）
-    while arr.ndim > 2:
-        arr = arr.isel({arr.dims[0]: 0})
+    # 時間・レベル軸があるならきちんと1つに絞る
+    if "time" in arr.dims:
+        arr = arr.isel(time=time_idx)
+    if level is not None and "isobaricInhPa" in arr.dims:
+        arr = arr.sel(isobaricInhPa=level, method="nearest")
     arr2d = np.asarray(arr.squeeze())
     if arr2d.ndim != 2:
-        raise ValueError(f"Output is not 2D: shape={arr2d.shape}, dims={getattr(arr, 'dims', None)}")
+        raise ValueError(f"Output is not 2D: shape={arr2d.shape} dims={arr.dims}")
     return arr2d
+
     
 
 def get_var(ds, key):
