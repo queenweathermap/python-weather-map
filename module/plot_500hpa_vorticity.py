@@ -53,9 +53,19 @@ def plot_500hpa_vorticity(ax, ds, model="GSM", prop=None):
     from metpy.units import units
 
     hgt   = get_var(ds, "HGT_500mb")
-    ugrd  = get_var(ds, "UGRD_500mb") * units('m/s')
-    vgrd  = get_var(ds, "VGRD_500mb") * units('m/s')
+    ugrd  = get_var(ds, "UGRD_500mb")
+    vgrd  = get_var(ds, "VGRD_500mb")
+
+    # ---- テスト用途: 欠損時はスキップ、エラー回避 ----
+    if hgt is None or ugrd is None or vgrd is None:
+        print("[WARN] 500hPaの必要変数がありません（hgt/ugrd/vgrd）→空描画")
+        return  # ※描画せず抜ける
+
+    # (MSMだと片方しか無いケースがある)
+    ugrd = ugrd * units('m/s')
+    vgrd = vgrd * units('m/s')
     lon2d, lat2d = get_lon_lat(ds)
+
 
     # --- メトピー流の格子間隔（m単位）を計算 ---
     dy, dx = mpcalc.lat_lon_grid_deltas(lon2d, lat2d)
