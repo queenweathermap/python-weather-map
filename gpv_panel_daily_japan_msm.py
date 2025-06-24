@@ -13,7 +13,8 @@ from module.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
 from module.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
 from module.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
 from module.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
-from module.plot_surface_pressure_wind_precip import plot_surface_pressure_wind_precip
+from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+
 
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.slack_utils import send_slack_message
@@ -29,9 +30,10 @@ def main():
         raise FileNotFoundError("必要なGRIB2ファイルが見つかりません")
 
     ds = xr.open_dataset(grib_fname, engine='cfgrib')
-    ds_surf = xr.open_dataset(grib_surf, engine='cfgrib')
+    # 地上天気図用GRIB2を読む（例: Lsurfファイル）
+    ds_surf = xr.open_dataset("Z__C_RJTD_20240622120000_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin", engine="cfgrib")
 
-    # --- パネル作成 ---
+    # === パネル作成 ===
     fig, axes = plt.subplots(nrows=6, ncols=1, figsize=(8, 48), constrained_layout=True)
     fig.suptitle(f"MSM日本全域 天気図6種 {ymd} {hh}00", fontsize=22)
 
@@ -50,7 +52,7 @@ def main():
     plot_925hpa_temp_wind_dindex(axes[4], ds)
     axes[4].set_title("925hPa気温・風・D-index")
 
-    plot_surface_pressure_wind_precip(axes[5], ds_surf)  # ←ここ修正
+    plot_surface_pressure_and_wind_msm(axes[5], ds_surf)
     axes[5].set_title("地上: 等圧線・風・降水")
 
     # --- 保存 ---
