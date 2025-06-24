@@ -24,22 +24,23 @@ VAR_ALIASES = {
 
 
 # 既存のVAR_ALIASES & get_var ここにある想定
-
 def get_var_2d(ds, key, level=None, time_idx=0):
     arr = get_var(ds, key)
     if arr is None:
         return None
-    # 次元減らし
+    # 時刻次元に対応（time or step）
     if "time" in arr.dims:
         arr = arr.isel(time=time_idx)
-    if "step" in arr.dims:   # cfgribのとき
+    elif "step" in arr.dims:
         arr = arr.isel(step=time_idx)
+    # 高度次元対応
     if level is not None and "isobaricInhPa" in arr.dims:
         arr = arr.sel(isobaricInhPa=level, method="nearest")
-    arr = np.asarray(arr.squeeze())
-    if arr.ndim != 2:
-        raise ValueError(f"Output is not 2D: shape {arr.shape}")
-    return arr
+    arr2d = np.asarray(arr.squeeze())
+    if arr2d.ndim != 2:
+        raise ValueError(f"Output is not 2D: shape={arr2d.shape}")
+    return arr2d
+
 
 
 def get_var(ds, key):
