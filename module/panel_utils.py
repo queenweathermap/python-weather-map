@@ -4,7 +4,7 @@
 # 2025-06-18 by ChatGPT
 # -----------------------------------------------
 # ・GSM/MSM/任意ローカルパネルの可視化パネルを生成する各種関数群
-# ・NO DATA画像もグローバル英語化
+# ・NO DATA画像もグローバル英語化 描画前の整形・共通処理」をまとめるための場所
 # ・地図プロットの共通機能や、ラベル・メタ情報自動化対応
 # ・多段構成やカスタムラベルにも柔軟対応
 # ===============================================
@@ -19,6 +19,42 @@ plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
 from module.utils.xr_utils import align_datasets_common
+
+# --- 変数名マッピング辞書 ---
+VAR_ALIASES = {
+    # 標準名         cfgrib名   NetCDF名 等 (追加はここだけ！)
+    "TMP_500mb":    ["t@500", "t_500hPa", "temperature_500"],
+    "TMP_700mb":    ["t@700", "t_700hPa"],
+    "TMP_850mb":    ["t@850", "t_850hPa"],
+    "UGRD_850mb":   ["u@850", "u_850hPa"],
+    "VGRD_850mb":   ["v@850", "v_850hPa"],
+    "RH_850mb":     ["r@850", "rh_850hPa"],
+    "VVEL_700mb":   ["w@700", "w_700hPa"],
+    "HGT_500mb":    ["gh@500", "z_500hPa"],
+    # ...他も同様に登録
+    "longitude":    ["lon", "longitude"],
+    "latitude":     ["lat", "latitude"],
+}
+
+def get_var(ds, key):
+    """
+    xarray.Datasetから、複数命名対応で安全に変数を取得
+    - ds: xarray.Dataset
+    - key: 標準変数名（例: "TMP_850mb"）
+    """
+    # まず直接探す
+    if key in ds.variables:
+        return ds[key]
+    # マッピング経由で探す
+    aliases = VAR_ALIASES.get(key, [])
+    for alias in aliases:
+        if alias in ds.variables:
+            return ds[alias]
+    # 最後にkeyを小文字などで試す（拡張性）
+    if key.lower() in ds.variables:
+        return ds[key.lower()]
+    # 見つからなければNone
+    return None
 
 def make_nodata_weather_panel(
     times, 
@@ -48,6 +84,25 @@ def make_nodata_weather_panel(
     fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
     print(f"[NO DATA panel] {save_path} exported.")
+
+def get_lon_lat(ds):
+    """
+    xarray.Datasetから2Dのlongitude/latitude配列を返す
+    （必ず2D化して返す：可視化全関数で共通利用！）
+    """
+    lon = get_var(ds, "longitude")
+    lat = get_var(ds, "latitude")
+    if lon is None or lat is None:
+        raise ValueError("longitude/latitudeがありません")
+    lon = np.asarray(lon)
+    lat = np.asarray(lat)
+    if lon.ndim == 1 and lat.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon, lat)
+    elif lon.ndim == 2 and lat.ndim == 2:
+        lon2d, lat2d = lon, lat
+    else:
+        raise ValueError("緯度経度配列の形状が不正")
+    return lon2d, lat2d
 
 
 def make_local_weather_panel(
