@@ -120,3 +120,34 @@ def get_var(ds, var):
     if var in ds.variables:
         return ds[var]
     return None
+
+
+def get_var_2d(ds, var_name, level=None, time_idx=0):
+    """
+    - ds: xarray.Dataset
+    - var_name: 例 "TMP_850mb"
+    - level: 気圧面（hPa）例: 850
+    - time_idx: 何番目の時刻か
+    """
+    da = get_var(ds, var_name)
+    if da is None:
+        return None
+    arr = da
+    # 時間・気圧面を持つ場合、スライス
+    if "time" in da.dims and "isobaricInhPa" in da.dims:
+        level_vals = da.coords["isobaricInhPa"].values
+        # もっとも近いレベルを取得
+        ilevel = np.abs(level_vals - level).argmin()
+        arr = da.isel(time=time_idx, isobaricInhPa=ilevel)
+    elif "time" in da.dims:
+        arr = da.isel(time=time_idx)
+    elif "isobaricInhPa" in da.dims:
+        level_vals = da.coords["isobaricInhPa"].values
+        ilevel = np.abs(level_vals - level).argmin()
+        arr = da.isel(isobaricInhPa=ilevel)
+    # 最後に2Dであることを保証
+    arr2d = np.asarray(arr)
+    if arr2d.ndim != 2:
+        raise ValueError(f"Output is not 2D: shape={arr2d.shape}")
+    return arr2d
+
