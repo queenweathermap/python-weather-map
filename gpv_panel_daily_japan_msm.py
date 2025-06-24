@@ -37,6 +37,12 @@ def main():
         raise FileNotFoundError(grib_fname)
     ds = xr.open_dataset(grib_fname, engine='cfgrib')
 
+    ds_surf = xr.open_dataset("Z__C_RJTD_20240622120000_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin", engine="cfgrib")
+
+    fig, ax = plt.subplots(figsize=(8,8))
+    plot_surface_pressure_wind_precip(ax, ds_surf)
+    plt.show()
+
     # === パネル作成 ===
     fig, axes = plt.subplots(nrows=6, ncols=1, figsize=(8, 48), constrained_layout=True)
     fig.suptitle(f"MSM日本全域 天気図6種 {ymd} {hh}00", fontsize=22)
