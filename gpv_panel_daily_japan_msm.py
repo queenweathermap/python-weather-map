@@ -9,6 +9,7 @@ import datetime
 import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs   # ← これ重要！
+import cfgrib
 
 from gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 
@@ -37,11 +38,13 @@ def main():
     l_pall_fname, _ = panel_files[0][0]
     lsurf_fname, _ = panel_files[0][1]
 
-    # -- 必要なレベルだけfilterで読む！ --
-    ds = xr.open_dataset(
-        l_pall_fname, engine="cfgrib",
-        filter_by_keys={"typeOfLevel": "isobaricInhPa"}
-    )
+    # GRIB2 ファイル内の全てのサブセット（データセット）を開く
+    ds_list = cfgrib.open_datasets(l_pall_fname)
+    
+    # 使いたい「層」を条件で絞り込む（例: isobaricInhPa 層のみ）
+    ds = [d for d in ds_list if "isobaricInhPa" in d.variables][0]  # 1番目でOKなら[0]だけ
+    
+    # 地表・積算は従来どおり
     ds_surf_instant = xr.open_dataset(
         lsurf_fname, engine="cfgrib",
         filter_by_keys={"stepType": "instant"}
