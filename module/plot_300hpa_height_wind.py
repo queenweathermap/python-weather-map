@@ -40,32 +40,26 @@ def get_lon_lat(ds):
 # 300hPaパネル描画のメイン関数
 # -------------------------------------------------
 def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
-    """
-    Plot 300hPa geopotential height (contour), wind speed (contour), and wind vector.
-    (日本語解説: 300hPa高度線＋風速線＋風ベクトルのパネルを描画。H/L/W/Cマークも可)
-    - ax: matplotlib axes (with PlateCarree projection)
-    - ds: xarray.Dataset
-    - model: "GSM" or "MSM"
-    - skip: ベクトル描画の間引き間隔
-    """
     lon2d, lat2d = get_lon_lat(ds)
     hgt = get_var(ds, "HGT_300mb")
     u    = get_var(ds, "UGRD_300mb")
     v    = get_var(ds, "VGRD_300mb")
     temp = get_var(ds, "TMP_300mb")
 
+    # 1. 必要変数がなければreturn（落とさない）
     if hgt is None or u is None or v is None:
-        raise ValueError("300hPa required variables are missing in Dataset.")
+        print("[WARN] 300hPa 必須変数(hgt, u, v)が不足 → 描画スキップ")
+        return
 
-    # 風速[m/s]→[kt]に変換
+    # 以下はそのままでOK
     wspd = np.sqrt(u**2 + v**2) * 1.94384
 
-    # --- 地図の範囲・海岸線 ---
+    # 地図の範囲・海岸線
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
-    # --- 気温等値線（任意） ---
+    # 気温等値線（tempがあれば描く。なければ飛ばす）
     if temp is not None:
         temp_c = temp - 273.15 if np.nanmax(temp) > 100 else temp
         t_levels = np.arange(-60, 6, 6)
