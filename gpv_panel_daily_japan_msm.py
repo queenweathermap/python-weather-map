@@ -23,6 +23,14 @@ from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_w
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.slack_utils import send_slack_message
 
+from module.utils.var_utils import get_var_2d
+
+temp_850 = get_var_2d(ds, "TMP_850mb", time_idx=0)    # 850hPa温度 2D
+rh_700   = get_var_2d(ds, "RH_700mb",  time_idx=0)    # 700hPa相対湿度 2D
+
+
+
+
 def main():
     ymd = '20240622'
     hh = '12'
