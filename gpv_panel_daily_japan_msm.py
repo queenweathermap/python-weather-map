@@ -1,8 +1,14 @@
+# gpv_panel_daily_japan_msm.py
+# ===============================================================
+# MSMパネル自動生成スクリプト（GRIB2ダウンロード・cfgrib対応・Drive保存・Slack通知・クリーンアップ付き）
+# 2025-06-23 ChatGPT改訂・デバッグ用print追加
+# ===============================================================
+
 import os
 import datetime
 import xarray as xr
 import matplotlib.pyplot as plt
-import cartopy.crs as ccrs   # ←←← これが必要！
+import cartopy.crs as ccrs   # ← これ重要！
 
 from gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 
@@ -36,7 +42,6 @@ def main():
         l_pall_fname, engine="cfgrib",
         filter_by_keys={"typeOfLevel": "isobaricInhPa"}
     )
-
     ds_surf_instant = xr.open_dataset(
         lsurf_fname, engine="cfgrib",
         filter_by_keys={"stepType": "instant"}
@@ -47,9 +52,12 @@ def main():
     )
 
     # --- 必要な変数が取れるかデバッグ用print
-    print("ds.variables:", list(ds.variables))
-    print("ds_surf_instant.variables:", list(ds_surf_instant.variables))
-    print("ds_surf_accum.variables:", list(ds_surf_accum.variables))
+    print("==== DEBUG: ds.variables ====")
+    print(list(ds.variables))
+    print("==== DEBUG: ds_surf_instant.variables ====")
+    print(list(ds_surf_instant.variables))
+    print("==== DEBUG: ds_surf_accum.variables ====")
+    print(list(ds_surf_accum.variables))
 
     # --- パネル作成 ---
     fig, axes = plt.subplots(
@@ -59,10 +67,48 @@ def main():
     )
     fig.suptitle(f"MSM日本全域 天気図6種 {ymd} {hh}00", fontsize=22)
 
+    # --- 各段で変数存在チェックprint（省略せず推奨）---
+    try:
+        print("[パネル1] plot_700hpa_dindex_500hpa_temp 実行")
+        plot_700hpa_dindex_500hpa_temp(axes[0], ds)
+        axes[0].set_title("700hPa D-index / 500hPa 気温")
+    except Exception as e:
+        print("[ERROR] plot_700hpa_dindex_500hpa_temp:", e)
 
-    plot_700hpa_dindex_500hpa_temp(axes[0], ds)
-    axes[0].set_title("700hPa D-index / 500hPa 気温")
-    # ...（省略、他プロットも同様）
+    try:
+        print("[パネル2] plot_850hpa_temp_wind_700hpa_w 実行")
+        plot_850hpa_temp_wind_700hpa_w(axes[1], ds)
+        axes[1].set_title("850hPa気温・風 + 700hPa鉛直流")
+    except Exception as e:
+        print("[ERROR] plot_850hpa_temp_wind_700hpa_w:", e)
+
+    try:
+        print("[パネル3] plot_850hpa_thetae_stream 実行")
+        plot_850hpa_thetae_stream(axes[2], ds)
+        axes[2].set_title("850hPa θe + Stream")
+    except Exception as e:
+        print("[ERROR] plot_850hpa_thetae_stream:", e)
+
+    try:
+        print("[パネル4] plot_975hpa_temp_wind_dindex 実行")
+        plot_975hpa_temp_wind_dindex(axes[3], ds)
+        axes[3].set_title("975hPa気温・風・D-index")
+    except Exception as e:
+        print("[ERROR] plot_975hpa_temp_wind_dindex:", e)
+
+    try:
+        print("[パネル5] plot_925hpa_temp_wind_dindex 実行")
+        plot_925hpa_temp_wind_dindex(axes[4], ds)
+        axes[4].set_title("925hPa気温・風・D-index")
+    except Exception as e:
+        print("[ERROR] plot_925hpa_temp_wind_dindex:", e)
+
+    try:
+        print("[パネル6] plot_surface_pressure_and_wind_msm 実行")
+        plot_surface_pressure_and_wind_msm(axes[5], ds_surf_instant)
+        axes[5].set_title("地上: 等圧線・風・降水")
+    except Exception as e:
+        print("[ERROR] plot_surface_pressure_and_wind_msm:", e)
 
     # --- 保存・Driveアップロード・Slack通知 ---
     now = datetime.datetime.now()
