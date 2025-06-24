@@ -2,12 +2,21 @@
 # module/utils/var_utils.py
 # 変数名吸収ユーティリティ　xarrayから変数名で吸収取得」専用。
 # ===============================================
+
+# --- 変数名マッピング辞書 ---
 VAR_ALIASES = {
-    # 標準名 : [cfgrib名, NetCDF名, 他の可能性ある呼び名, ...]
-    "TMP_850mb": ["t@850", "t_850hPa", "temperature_850"],
-    # ... 必要なだけ追加
-    "longitude": ["lon", "longitude"],
-    "latitude": ["lat", "latitude"],
+    # 標準名         cfgrib名   NetCDF名 等 (追加はここだけ！)
+    "TMP_500mb":    ["t@500", "t_500hPa", "temperature_500"],
+    "TMP_700mb":    ["t@700", "t_700hPa"],
+    "TMP_850mb":    ["t@850", "t_850hPa"],
+    "UGRD_850mb":   ["u@850", "u_850hPa"],
+    "VGRD_850mb":   ["v@850", "v_850hPa"],
+    "RH_850mb":     ["r@850", "rh_850hPa"],
+    "VVEL_700mb":   ["w@700", "w_700hPa"],
+    "HGT_500mb":    ["gh@500", "z_500hPa"],
+    # ...他も同様に登録
+    "longitude":    ["lon", "longitude"],
+    "latitude":     ["lat", "latitude"],
 }
 
 def get_var(ds, key):
