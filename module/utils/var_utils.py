@@ -3,6 +3,9 @@
 # 変数取得＋2D保証（標準名マッピング付き）
 # ===============================================
 
+import numpy as np
+
+
 # --- 変数名マッピング辞書 ---
 VAR_ALIASES = {
     # 標準名         cfgrib名   NetCDF名 等 (追加はここだけ！)
@@ -19,8 +22,6 @@ VAR_ALIASES = {
     "latitude":     ["lat", "latitude"],
 }
 
-
-import numpy as np
 
 # 既存のVAR_ALIASES & get_var ここにある想定
 
