@@ -26,27 +26,31 @@ VAR_ALIASES = {
 # 既存のVAR_ALIASES & get_var ここにある想定
 def get_var_2d(ds, key, level=None, time_idx=0):
     """
-    - ds: xarray.Dataset
-    - key: variable名
-    - level: isobaricInhPaで指定する高度（Noneなら無視）
-    - time_idx: 時間次元のインデックス
+    xarray.DataArray（3D,4D…）から2D抽出
+    - まず time/step/forecastTime/valid_time など主要な「時系列」次元名で1つだけ抜く
+    - 高度レベルも同様
     """
     arr = get_var(ds, key)
     if arr is None:
         return None
-    # 時刻軸（time, step）を抜く
-    for tdim in ["time", "step"]:
-        if tdim in arr.dims:
-            arr = arr.isel({tdim: time_idx})
-    # 高度軸（isobaricInhPa）を抜く
-    if level is not None and "isobaricInhPa" in arr.dims:
-        arr = arr.sel(isobaricInhPa=level, method="nearest")
-    arr2d = np.asarray(arr.squeeze())
-    # shapeが(253, 241)等になっているかチェック
-    if arr2d.ndim != 2:
-        raise ValueError(f"Output is not 2D: shape={arr2d.shape}")
-    return arr2d
 
+    # === 主要な時刻次元名すべてトライ ===
+    time_dims = [d for d in ["time", "step", "forecastTime", "valid_time"] if d in arr.dims]
+    if len(time_dims) > 0:
+        arr = arr.isel({time_dims[0]: time_idx})
+    # （時刻が複数次元あれば最初のだけsliceする）
+
+    # === isobaricInhPa/level/pressure もトライ ===
+    level_dims = [d for d in ["isobaricInhPa", "level", "pressure"] if d in arr.dims]
+    if level is not None and len(level_dims) > 0:
+        arr = arr.sel({level_dims[0]: level}, method="nearest")
+
+    arr2d = np.asarray(arr.squeeze())
+    if arr2d.ndim != 2:
+        raise ValueError(
+            f"Output is not 2D: shape={arr2d.shape} (dims={arr.dims if hasattr(arr,'dims') else '?'})"
+        )
+    return arr2d
 
 
 
