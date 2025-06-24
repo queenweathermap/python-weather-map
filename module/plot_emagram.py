@@ -24,10 +24,6 @@ plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 # xarrayデータセットから1地点（lat/lon/時刻）の鉛直プロファイルを抽出
 # -------------------------------------------------
 def extract_profile_gpv(ds, lat, lon, time_idx=0):
-    """
-    指定した緯度経度・時刻で気温、露点、風（u/v）を各気圧面ごとに抽出
-    （GPV型の3次元変数を対象・水平方向は最も近いグリッドを自動選択）
-    """
     lat_arr = get_var(ds, "latitude")
     lon_arr = get_var(ds, "longitude")
     ilat = np.abs(lat_arr - lat).argmin()
@@ -55,6 +51,12 @@ def extract_profile_gpv(ds, lat, lon, time_idx=0):
             levels.append(level)
             u.append(u_arr[time_idx, ilat, ilon] if u_arr is not None else np.nan)
             v.append(v_arr[time_idx, ilat, ilon] if v_arr is not None else np.nan)
+        else:
+            # 欠損時：appendしない（そのlevelは飛ばす）
+            continue
+    if not levels:
+        # 全て欠損の場合、空配列を返す（落ちない対策）
+        return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
     idx = np.argsort(levels)[::-1]  # 高い気圧→低い気圧順
     return (np.array(levels)[idx], np.array(temp)[idx], np.array(dew)[idx], np.array(u)[idx], np.array(v)[idx])
 
@@ -62,26 +64,12 @@ def extract_profile_gpv(ds, lat, lon, time_idx=0):
 # SkewT（エマグラム）への描画本体
 # -------------------------------------------------
 def plot_emagram_skewt(ax, ds, lat, lon, time_idx=0, title="Emagram"):
-    """
-    SkewT/エマグラムへの鉛直断面プロット（気温・露点・風バーブ・凡例付き）
-    """
     levels, temp, dew, u, v = extract_profile_gpv(ds, lat, lon, time_idx)
-    p = levels * units.hPa
-    t = temp * units.degC
-    td = dew * units.degC
-    u = u * units.meter / units.second
-    v = v * units.meter / units.second
-
-    skew = SkewT(ax, rotation=45)
-    skew.plot(p, t, 'r', label='Temperature')
-    skew.plot(p, td, 'g', label='Dewpoint')
-    skew.plot_barbs(p, u.to('knots'), v.to('knots'))
-    skew.ax.set_ylim(1050, 100)
-    skew.ax.set_xlim(-40, 40)
-    skew.ax.grid(True, which='major', color='gray', linestyle='--', alpha=0.6)
-    skew.ax.set_title(title, fontsize=9)
-    skew.ax.legend(loc='upper right', fontsize=7)
-    return ax
+    if len(levels) == 0:
+        # データ欠損時はグレーで「No Data」テキスト
+        ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
+        ax.set_axis_off()
+        return ax
 
 # -------------------------------------------------
 # 複数時刻パネルでエマグラムを並べて表示（横並び最大6枚程度まで）
