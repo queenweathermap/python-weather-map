@@ -22,38 +22,46 @@ VAR_ALIASES = {
     "latitude":     ["lat", "latitude"],
 }
 
+def get_var(ds, key):
+    # あなたの既存実装でOK（VAR_ALIASESも使ってね）
+    # 例: ds[key] かエイリアス
+    return ds[key] if key in ds.variables else None
+    
 
 # 既存のVAR_ALIASES & get_var ここにある想定
-def get_var_2d(ds, key, level=None, time_idx=0, step_idx=0):
+def get_var_2d(
+    ds, key, level=None, time_idx=0, step_idx=0, ensemble_idx=0, **kwargs
+):
     """
-    ds から key（例: TMP_850mb など）を取得し、
-    必要な次元(time, step, level, lat, lon)をスライスして **必ず2D** にして返す。
+    dsからkeyを抽出し、「残った多次元軸は全部1つに固定」して2Dで返す。
+    - ds: xarray.Dataset
+    - key: 変数名
+    - level: pressure level, e.g. 850
+    - time_idx, step_idx, ensemble_idx: 指定軸のindex
+    - kwargs: 追加の.isel/.sel用
     """
     arr = get_var(ds, key)
     if arr is None:
         return None
 
-    # --- time 次元を1つに絞る ---
-    if "time" in arr.dims:
-        arr = arr.isel(time=time_idx)
-    if "step" in arr.dims:
-        arr = arr.isel(step=step_idx)
-    # --- 気圧面/レベルを1つに ---
-    # cfgribは isobaricInhPa, NetCDFは level など
+    # 柔軟に全次元を2Dになるまで落とす
+    # よくある「代表的な軸」だけ特別扱いでindex指定
+    for dim, idx in [("time", time_idx), ("step", step_idx), ("ensemble", ensemble_idx)]:
+        if dim in arr.dims and arr.sizes[dim] > 1:
+            arr = arr.isel({dim: idx})
+    # isobaricInhPa, level, pressure のどれかに対応
     if level is not None:
         for lev_name in ["isobaricInhPa", "level", "pressure"]:
             if lev_name in arr.dims:
                 arr = arr.sel({lev_name: level}, method="nearest")
-                break
-
-    # --- squeezeして2D化 ---
+    # 他に未指定の次元が残っていたら、先頭indexでスライス（順次2Dになるまで繰り返す）
+    while arr.ndim > 2:
+        arr = arr.isel({arr.dims[0]: 0})
     arr2d = np.asarray(arr.squeeze())
     if arr2d.ndim != 2:
         raise ValueError(f"Output is not 2D: shape={arr2d.shape}, dims={getattr(arr, 'dims', None)}")
     return arr2d
-
-
-
+    
 
 def get_var(ds, key):
     """多様な命名にも対応してxarray.Datasetから安全に取得"""
