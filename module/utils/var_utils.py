@@ -24,33 +24,34 @@ VAR_ALIASES = {
 
 
 # 既存のVAR_ALIASES & get_var ここにある想定
-def get_var_2d(ds, key, level=None, time_idx=0):
+def get_var_2d(ds, key, level=None, time_idx=0, step_idx=0):
     """
-    xarray.DataArray（3D,4D…）から2D抽出
-    - まず time/step/forecastTime/valid_time など主要な「時系列」次元名で1つだけ抜く
-    - 高度レベルも同様
+    ds から key（例: TMP_850mb など）を取得し、
+    必要な次元(time, step, level, lat, lon)をスライスして **必ず2D** にして返す。
     """
     arr = get_var(ds, key)
     if arr is None:
         return None
 
-    # === 主要な時刻次元名すべてトライ ===
-    time_dims = [d for d in ["time", "step", "forecastTime", "valid_time"] if d in arr.dims]
-    if len(time_dims) > 0:
-        arr = arr.isel({time_dims[0]: time_idx})
-    # （時刻が複数次元あれば最初のだけsliceする）
+    # --- time 次元を1つに絞る ---
+    if "time" in arr.dims:
+        arr = arr.isel(time=time_idx)
+    if "step" in arr.dims:
+        arr = arr.isel(step=step_idx)
+    # --- 気圧面/レベルを1つに ---
+    # cfgribは isobaricInhPa, NetCDFは level など
+    if level is not None:
+        for lev_name in ["isobaricInhPa", "level", "pressure"]:
+            if lev_name in arr.dims:
+                arr = arr.sel({lev_name: level}, method="nearest")
+                break
 
-    # === isobaricInhPa/level/pressure もトライ ===
-    level_dims = [d for d in ["isobaricInhPa", "level", "pressure"] if d in arr.dims]
-    if level is not None and len(level_dims) > 0:
-        arr = arr.sel({level_dims[0]: level}, method="nearest")
-
+    # --- squeezeして2D化 ---
     arr2d = np.asarray(arr.squeeze())
     if arr2d.ndim != 2:
-        raise ValueError(
-            f"Output is not 2D: shape={arr2d.shape} (dims={arr.dims if hasattr(arr,'dims') else '?'})"
-        )
+        raise ValueError(f"Output is not 2D: shape={arr2d.shape}, dims={getattr(arr, 'dims', None)}")
     return arr2d
+
 
 
 
