@@ -26,36 +26,20 @@ VAR_ALIASES = {
 # 既存のVAR_ALIASES & get_var ここにある想定
 
 def get_var_2d(ds, key, level=None, time_idx=0):
-    """
-    xarray.Datasetから key/level/time_idxで2D(lat, lon)配列を取得
-    - ds: xarray.Dataset
-    - key: 標準変数名（例: "TMP_850mb"）
-    - level: 指定気圧面（整数hPa、例: 500, 700 など。不要ならNone）
-    - time_idx: 何番目の時刻か（0=先頭, 1=2番目…）
-    """
-    var = get_var(ds, key)
-    if var is None:
-        return None  # 変数なければNone
-    arr = var
-    # 時刻次元
+    arr = get_var(ds, key)
+    if arr is None:
+        return None
+    # 次元減らし
     if "time" in arr.dims:
         arr = arr.isel(time=time_idx)
-    # 気圧面次元
-    if level is not None:
-        # cfgribは isobaricInhPa, NetCDFはlev等 → 近いものを吸収
-        for lev_dim in ["isobaricInhPa", "level", "lev"]:
-            if lev_dim in arr.dims:
-                arr = arr.sel({lev_dim: level}, method="nearest")
-    # 緯度経度のみ残す
-    arr_np = arr.values
-    # 万一3Dや1D等の事故対応
-    if arr_np.ndim == 3:
-        arr_np = arr_np[0]
-    elif arr_np.ndim == 1:
-        # lat or lonだけ→meshgrid化推奨
-        pass
-    return arr_np  # shape=(lat, lon)
-
+    if "step" in arr.dims:   # cfgribのとき
+        arr = arr.isel(step=time_idx)
+    if level is not None and "isobaricInhPa" in arr.dims:
+        arr = arr.sel(isobaricInhPa=level, method="nearest")
+    arr = np.asarray(arr.squeeze())
+    if arr.ndim != 2:
+        raise ValueError(f"Output is not 2D: shape {arr.shape}")
+    return arr
 
 
 def get_var(ds, key):
