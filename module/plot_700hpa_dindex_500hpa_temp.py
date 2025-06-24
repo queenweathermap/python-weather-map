@@ -9,6 +9,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib.colors import LinearSegmentedColormap
 from module.utils.var_utils import get_var
+from module.utils.var_utils import get_var_2d
 
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'sans-serif'
@@ -44,6 +45,29 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds, model="GSM"):
         temp_700_c = temp_700 - 273.15
     else:
         temp_700_c = None
+
+
+def plot_700hpa_dindex_500hpa_temp(ax, ds, time_idx=0):
+    # ---- 必要な変数（700hPa, 500hPa）を2D取得 ----
+    temp_700_c = get_var_2d(ds, "TMP_700mb", level=700, time_idx=time_idx)
+    rh_700     = get_var_2d(ds, "RH_700mb",  level=700, time_idx=time_idx)
+    temp_500_c = get_var_2d(ds, "TMP_500mb", level=500, time_idx=time_idx)
+
+    # Kelvin→Celsius
+    if temp_700_c is not None and np.nanmax(temp_700_c) > 100:
+        temp_700_c = temp_700_c - 273.15
+    if temp_500_c is not None and np.nanmax(temp_500_c) > 100:
+        temp_500_c = temp_500_c - 273.15
+
+    # 緯度経度
+    lon2d, lat2d = get_lon_lat(ds)
+
+    # 700hPa湿数
+    if rh_700 is not None and temp_700_c is not None:
+        dewpoint_700 = temp_700_c - (100 - rh_700) / 5
+        dindex_700 = temp_700_c - dewpoint_700
+        # ...contourfで可視化...
+    
 
     # --- 700hPa湿数（Dewpoint Depression） ---
     if rh_700 is not None and temp_700_c is not None:
@@ -93,6 +117,20 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds, model="GSM"):
         )
         ax.clabel(cs, fmt="%d", fontsize=6)
     ax.set_title("700hPa D-index/Temp & 500hPa Temp (TEST ver)", fontsize=10, pad=10)
+
+def get_lon_lat(ds):
+    lon = get_var(ds, "longitude")
+    lat = get_var(ds, "latitude")
+    lon = np.asarray(lon)
+    lat = np.asarray(lat)
+    if lon.ndim == 1 and lat.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon, lat)
+    elif lon.ndim == 2:
+        lon2d, lat2d = lon, lat
+    else:
+        raise ValueError("緯度経度次元エラー")
+    return lon2d, lat2d
+
 
 def plot_700hpa_dindex_500hpa_temp_gsm(ax, ds):
     return plot_700hpa_dindex_500hpa_temp(ax, ds, model="GSM")
