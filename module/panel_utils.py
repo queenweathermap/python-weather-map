@@ -5,35 +5,11 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from module.utils.var_utils import get_var
-
-import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
+from module.utils.var_utils import get_var
 from module.utils.xr_utils import align_datasets_common
-
-
-
-def get_var(ds, key):
-    """
-    xarray.Datasetから、複数命名対応で安全に変数を取得
-    - ds: xarray.Dataset
-    - key: 標準変数名（例: "TMP_850mb"）
-    """
-    # まず直接探す
-    if key in ds.variables:
-        return ds[key]
-    # マッピング経由で探す
-    aliases = VAR_ALIASES.get(key, [])
-    for alias in aliases:
-        if alias in ds.variables:
-            return ds[alias]
-    # 最後にkeyを小文字などで試す（拡張性）
-    if key.lower() in ds.variables:
-        return ds[key.lower()]
-    # 見つからなければNone
-    return None
 
 def make_nodata_weather_panel(
     times, 
@@ -43,19 +19,10 @@ def make_nodata_weather_panel(
 ):
     """
     Generate a NO DATA panel image for missing or failed data downloads.
-    - times: list of forecast datetimes to display (for context)
-    - save_path: Output image filename
-    - title: Panel main title (default: "NO DATA")
-    - city_name: (optional) City/region label to show (e.g. "Akita City")
     """
     fig, ax = plt.subplots(figsize=(16, 6))
     ax.axis("off")
-
-    if city_name:
-        main_title = f"{title}  [{city_name}]"
-    else:
-        main_title = title
-
+    main_title = f"{title}  [{city_name}]" if city_name else title
     msg = f"{main_title}\n\nWeather data could not be retrieved.\n\n"
     msg += "\n".join([str(pd.Timestamp(t).strftime("%Y-%m-%d %H:%M")) for t in times])
     ax.text(0.5, 0.5, msg, fontsize=20, ha="center", va="center", wrap=True)
@@ -66,8 +33,7 @@ def make_nodata_weather_panel(
 
 def get_lon_lat(ds):
     """
-    xarray.Datasetから2Dのlongitude/latitude配列を返す
-    （必ず2D化して返す：可視化全関数で共通利用！）
+    xarray.Datasetから2Dのlongitude/latitude配列を返す（2D保証）
     """
     lon = get_var(ds, "longitude")
     lat = get_var(ds, "latitude")
@@ -83,7 +49,6 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の形状が不正")
     return lon2d, lat2d
 
-
 def make_local_weather_panel(
     ds, times, save_path,
     pin_lat, pin_lon, city_name,
@@ -93,17 +58,7 @@ def make_local_weather_panel(
 ):
     """
     Generate a local weather panel (with emagram) for a specified city/point.
-    - ds: xarray.Dataset (forecast data, all times/levels included)
-    - times: time list for panels
-    - save_path: output image filename
-    - pin_lat, pin_lon: point coordinates for emagram
-    - city_name: str
-    - lat_range, lon_range: tuple or list (min, max) for restricted region (optional)
-    - plot_func_list: [func, ...] (first = emagram, others for map)
-    - nrows, ncols: panel grid
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
     import cartopy.crs as ccrs
 
     fig = plt.figure(figsize=(ncols * 2.5, nrows * 3.5))
@@ -157,7 +112,6 @@ def make_local_weather_panel(
             gl.top_labels = False
             gl.right_labels = False
 
-    # English title, globally sharable!
     fig.suptitle(
         f"[{city_name} Local] Weather Panel (incl. Emagram)\nInit: {init_time.strftime('%Y%m%d %HUTC')} | Forecasts: {', '.join(hh_labels)}",
         fontsize=12, y=1.02
@@ -169,11 +123,6 @@ def make_local_weather_panel(
 def make_daily_weather_panel_multi_time(ds, times, save_path="weather_panel.jpg", plot_func_list=None, nrows=6, ncols=12):
     """
     Draw a multi-time, multi-row weather panel for a given day.
-    - ds: xarray.Dataset
-    - times: list of datetimes to plot
-    - save_path: output image filename
-    - plot_func_list: [func, ...] for each row (or column)
-    - nrows, ncols: grid size
     """
     fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 2.5, nrows * 2.2), constrained_layout=True)
     axes = axes.flatten() if isinstance(axes, np.ndarray) else [axes]
@@ -200,7 +149,6 @@ def make_daily_weather_panel_multi_time(ds, times, save_path="weather_panel.jpg"
     plt.close(fig)
     print(f"[Weather Panel] {save_path} exported.")
 
-# module/panel_utils.py
 def make_lfm_panel(ds, times, save_path):
     # LFM用天気図パネル描画処理
     # ds: xarray.Dataset
@@ -208,11 +156,11 @@ def make_lfm_panel(ds, times, save_path):
     # save_path: 画像保存パス
     pass
 
-
 # --- 公開関数リストを明示 ---
 __all__ = [
     "make_nodata_weather_panel",
     "make_local_weather_panel",
     "make_daily_weather_panel_multi_time",
+    "get_lon_lat",
     "align_datasets_common",
 ]
