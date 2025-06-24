@@ -66,6 +66,24 @@ def main():
         subplot_kw=dict(projection=ccrs.PlateCarree())
     )
     fig.suptitle(f"MSM日本全域 天気図6種 {ymd} {hh}00", fontsize=22)
+    
+    plot_700hpa_dindex_500hpa_temp(axes[0], ds)
+    axes[0].set_title("700hPa D-index / 500hPa 気温")
+    
+    plot_850hpa_temp_wind_700hpa_w(axes[1], ds)
+    axes[1].set_title("850hPa気温・風 + 700hPa鉛直流")
+    
+    plot_850hpa_thetae_stream(axes[2], ds)
+    axes[2].set_title("850hPa θe + Stream")
+    
+    plot_975hpa_temp_wind_dindex(axes[3], ds)
+    axes[3].set_title("975hPa気温・風・D-index")
+    
+    plot_925hpa_temp_wind_dindex(axes[4], ds)
+    axes[4].set_title("925hPa気温・風・D-index")
+    
+    plot_surface_pressure_and_wind_msm(axes[5], ds_surf_instant)
+    axes[5].set_title("地上: 等圧線・風・降水")
 
     # --- 各段で変数存在チェックprint（省略せず推奨）---
     try:
