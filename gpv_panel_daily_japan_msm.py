@@ -25,11 +25,6 @@ from module.utils.slack_utils import send_slack_message
 
 from module.utils.var_utils import get_var_2d
 
-temp_850 = get_var_2d(ds, "TMP_850mb", time_idx=0)    # 850hPa温度 2D
-rh_700   = get_var_2d(ds, "RH_700mb",  time_idx=0)    # 700hPa相対湿度 2D
-
-
-
 
 def main():
     ymd = '20240622'
@@ -46,11 +41,17 @@ def main():
     l_pall_fname, _ = panel_files[0][0]
     lsurf_fname, _ = panel_files[0][1]
 
-    # GRIB2 ファイル内の全てのサブセット（データセット）を開く
+    # -- 必要なレベルだけfilterで読む！ --
     ds_list = cfgrib.open_datasets(l_pall_fname)
+    ds = [d for d in ds_list if "isobaricInhPa" in d.variables][0]
+
+    # --- ここで変数取得OK ---
+    temp_850 = get_var_2d(ds, "TMP_850mb", time_idx=0)    # 850hPa温度 2D
+    rh_700   = get_var_2d(ds, "RH_700mb",  time_idx=0)    # 700hPa相対湿度 2D
+
+    print("temp_850 shape:", temp_850.shape if temp_850 is not None else None)
+    print("rh_700 shape:", rh_700.shape if rh_700 is not None else None)
     
-    # 使いたい「層」を条件で絞り込む（例: isobaricInhPa 層のみ）
-    ds = [d for d in ds_list if "isobaricInhPa" in d.variables][0]  # 1番目でOKなら[0]だけ
     
     # 地表・積算は従来どおり
     ds_surf_instant = xr.open_dataset(
