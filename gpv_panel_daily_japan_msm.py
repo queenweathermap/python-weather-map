@@ -2,6 +2,7 @@ import os
 import datetime
 import xarray as xr
 import matplotlib.pyplot as plt
+import cartopy.crs as ccrs   # ←←← これが必要！
 
 from gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 
