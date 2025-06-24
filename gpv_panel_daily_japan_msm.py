@@ -42,7 +42,10 @@ def main():
 
     # === データ読み込み ===
     ds = xr.open_dataset(l_pall_fname, engine="cfgrib")
-    ds_surf = xr.open_dataset(lsurf_fname, engine="cfgrib")
+
+    # 地上は stepType で分けて読む
+    ds_surf_instant = xr.open_dataset(lsurf_fname, engine="cfgrib", filter_by_keys={"stepType": "instant"})
+    ds_surf_accum = xr.open_dataset(lsurf_fname, engine="cfgrib", filter_by_keys={"stepType": "accum"})
 
     # === パネル作成 ===
     fig, axes = plt.subplots(nrows=6, ncols=1, figsize=(8, 48), constrained_layout=True)
@@ -63,7 +66,8 @@ def main():
     plot_925hpa_temp_wind_dindex(axes[4], ds)
     axes[4].set_title("925hPa気温・風・D-index")
 
-    plot_surface_pressure_and_wind_msm(axes[5], ds_surf)
+    # 地上天気図は両方渡す（ラッパーが必要なら合わせる）
+    plot_surface_pressure_and_wind_msm(axes[5], ds_surf_instant, ds_surf_accum)
     axes[5].set_title("地上: 等圧線・風・降水")
 
     # === 保存 ===
