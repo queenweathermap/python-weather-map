@@ -5,7 +5,7 @@
 # 毎日 JST 5時 / 12時 / 17時 に実行（GSM → MSM移行も可）
 # ===============================================
 
-name: Akita　Daily Weather
+name: Akita　Weather Panel
 
 on:
   schedule:
