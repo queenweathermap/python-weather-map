@@ -62,7 +62,7 @@ def get_var_2d(ds, var_name, level=None, time_idx=0):
     - time_idx: 取得したい時刻index
     """
     da = get_var(ds, var_name)
-        print(f"[DEBUG] get_var_2d({var_name}) got {da}")
+    print(f"[DEBUG] get_var_2d({var_name}) got {da}")
     if da is None:
         return None
     print(f"[DEBUG] get_var({var_name}) →", type(da), "dims:", getattr(da, "dims", None))
