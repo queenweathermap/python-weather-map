@@ -51,7 +51,14 @@ def main():
 
     print("temp_850 shape:", temp_850.shape if temp_850 is not None else None)
     print("rh_700 shape:", rh_700.shape if rh_700 is not None else None)
+
+    print("==== isobaricInhPa levels ====")
+    print(ds.coords["isobaricInhPa"].values)
     
+    for level in [850, 700, 500]:
+        arr = get_var_2d(ds, "TMP_{}mb".format(level), level=level)
+        print(f"T at {level}hPa:", None if arr is None else arr.shape)
+
     
     # 地表・積算は従来どおり
     ds_surf_instant = xr.open_dataset(
