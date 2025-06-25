@@ -101,7 +101,7 @@ try:
 
     # --- STEP 6: Drive古いファイル削除（30日以上） ---
     print("[STEP6] Google Drive内の古いファイル削除")
-    delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30)
+    delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, days=30)
 
 except Exception as e:
     error_log = log_buffer.getvalue()
