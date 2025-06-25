@@ -50,6 +50,12 @@ def get_var_2d(ds, var_name, level=None, time_idx=0):
         m = re.match(r"[A-Z]+_(\d+)mb", var_name)
         if m:
             level = int(m.group(1))
+    print("==== isobaricInhPa ====")
+    if "isobaricInhPa" in ds.coords:
+        print(ds.coords["isobaricInhPa"].values)
+    else:
+        print("No isobaricInhPa in ds.coords")
+
 
     # --- 時間・気圧面をもつ多次元配列なら正しくスライス ---
     if "time" in arr.dims and "isobaricInhPa" in arr.dims:
