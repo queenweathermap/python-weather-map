@@ -5,7 +5,7 @@
 # 2025-06-21 by ChatGPT
 # ===============================================
 
-name: JAPAN Daily Weather Map
+name: JAPAN Weather Panel
 
 on:
   schedule:
