@@ -1,6 +1,6 @@
 # ===============================================
 # module/plot_700hpa_dindex_500hpa_temp.py
-# 700hPa Dewpoint Depression + 500hPa Temperature Contour Plot Module
+# 700hPa Dewpoint Depression (D-index) + 500hPa Temperature Contour Plot
 # Compatible with GSM/MSM (by wrapper function)
 # ===============================================
 import numpy as np
@@ -28,12 +28,11 @@ def get_lon_lat(ds):
 
 def plot_700hpa_dindex_500hpa_temp(ax, ds, time_idx=0):
     """
-    700hPa湿数（色塗り）＋500hPa気温等値線（navy）を描画
+    700hPa湿数（D-index/露点差, 色塗り）＋500hPa気温等値線（navy）を描画
     - ax: matplotlib axes
     - ds: xarray.Dataset（全時刻分OK）
     - time_idx: 何番目の時刻を描画するか
     """
-    # --- 必要な変数を2Dで取得 ---
     try:
         temp_700 = get_var_2d(ds, "TMP_700mb", level=700, time_idx=time_idx)
         rh_700   = get_var_2d(ds, "RH_700mb",  level=700, time_idx=time_idx)
@@ -53,10 +52,11 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds, time_idx=0):
     # --- 緯度経度2D ---
     lon2d, lat2d = get_lon_lat(ds)
 
-    # --- 700hPa湿数D-index ---
+    # --- 700hPa湿数D-index計算と描画 ---
     if rh_700 is not None:
+        # 露点温度Td=気温-((100-相対湿度)/5) → D-index = 気温 - Td
         dewpoint_700 = temp_700_c - (100 - rh_700) / 5
-        dindex_700 = temp_700_c - dewpoint_700
+        dindex_700 = temp_700_c - dewpoint_700  # = (100 - RH) / 5
         # カラーマップ設定
         colors = [
             (0.0, "#006400"),
@@ -109,4 +109,3 @@ def plot_700hpa_dindex_500hpa_temp_msm(ax, ds, time_idx=0):
 # ===============================================
 # END OF FILE
 # ===============================================
-
