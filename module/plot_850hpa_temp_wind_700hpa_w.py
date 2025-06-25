@@ -14,14 +14,19 @@ plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
 def get_lon_lat(ds):
-    lon = get_var_2d(ds, "longitude")
-    lat = get_var_2d(ds, "latitude")
+    lon = get_var(ds, "longitude")
+    lat = get_var(ds, "latitude")
+    lon = np.asarray(lon)
+    lat = np.asarray(lat)
     # meshgrid必要な場合（1D→2D）
     if lon.ndim == 1 and lat.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon, lat)
-    else:
+    elif lon.ndim == 2 and lat.ndim == 2:
         lon2d, lat2d = lon, lat
+    else:
+        raise ValueError("緯度経度配列の形状が不正")
     return lon2d, lat2d
+
 
 def plot_850hpa_temp_wind_700hpa_w(ax, ds, model="GSM", prop=None, skip=5):
     """
