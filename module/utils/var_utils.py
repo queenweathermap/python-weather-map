@@ -42,10 +42,23 @@ def get_var_2d(ds, var_name, level=None, time_idx=0):
     da = get_var(ds, var_name)
     print(f"[DEBUG] get_var_2d({var_name}) got {da}")
     if da is None:
-        print(f"[WARN] get_var_2d({var_name}) -> None")
         return None
     print(f"[DEBUG] get_var({var_name}) →", type(da), "dims:", getattr(da, "dims", None))
+    if da is None:
+        print(f"[WARN] {var_name}: get_var returns None")
+        return None
     arr = da
+    # 気圧面名抽出（例 TMP_850mb → 850）
+    if level is None:
+        m = re.match(r"[A-Z]+_(\d+)mb", var_name)
+        if m:
+            level = int(m.group(1))
+    print("==== isobaricInhPa ====")
+    if "isobaricInhPa" in arr.dims:
+        print(f"[DEBUG] {var_name}: isobaricInhPa:", arr.coords["isobaricInhPa"].values)
+        print(ds.coords["isobaricInhPa"].values)
+    else:
+        print("No isobaricInhPa in ds.coords")
 
     # 気圧面名抽出（例 TMP_850mb → 850）
     if level is None:
@@ -53,18 +66,20 @@ def get_var_2d(ds, var_name, level=None, time_idx=0):
         if m:
             level = int(m.group(1))
 
+
     # --- 多次元配列のスライス処理 ---
-    # もし isobaricInhPa があるなら level 指定でスライス
-    if "isobaricInhPa" in arr.dims:
-        if level is not None:
-            level_vals = arr.coords["isobaricInhPa"].values
-            ilevel = np.abs(level_vals - level).argmin()
-            arr = arr.isel(isobaricInhPa=ilevel)
-    # 時間次元もある場合は time_idxでスライス
+    # step選択（もし存在する場合）
+    if "step" in arr.dims:
+        arr = arr.isel(step=step_idx)
+    # isobaricInhPa選択
+    if "isobaricInhPa" in arr.dims and level is not None:
+        level_vals = arr.coords["isobaricInhPa"].values
+        ilevel = np.abs(level_vals - level).argmin()
+        arr = arr.isel(isobaricInhPa=ilevel)
+    # time選択（もし存在する場合）
     if "time" in arr.dims:
         arr = arr.isel(time=time_idx)
 
-    # --- 必ず2Dになるまでsqueeze ---
     arr2d = np.asarray(arr.squeeze())
     if arr2d.ndim != 2:
         raise ValueError(f"Output is not 2D: shape={arr2d.shape}, dims={arr.dims}")
