@@ -6,6 +6,26 @@
 import numpy as np
 import re
 
+def get_var(ds, var):
+    """
+    ds: xarray.Dataset
+    var: 標準名（例：TMP_850mb, UGRD_850mb など）
+    GRIB2/JMA GPVの温度・風・湿度等は "t", "u", "v", "r", "gh" で格納されている
+    """
+    # まず完全一致
+    if var in ds.variables:
+        return ds[var]
+    # "TMP_850mb" → "t" + isobaricInhPa=850 などに自動分解
+    m = re.match(r"([A-Z]+)_(\d+)mb", var)
+    if m:
+        short, lvl = m.groups()
+        shortname_map = {
+            "TMP": "t", "UGRD": "u", "VGRD": "v", "VVEL": "w", "RH": "r", "HGT": "gh"
+        }
+        shortname = shortname_map.get(short)
+        if shortname and shortname in ds.variables:
+            return ds[shortname]
+
 # --- 標準名エイリアス辞書 ---
 VAR_ALIASES = {
     # 標準名         cfgrib名   NetCDF名 等 (追加はここだけ！)
@@ -42,6 +62,9 @@ def get_var_2d(ds, var_name, level=None, time_idx=0):
     - time_idx: 取得したい時刻index
     """
     da = get_var(ds, var_name)
+        print(f"[DEBUG] get_var_2d({var_name}) got {da}")
+    if da is None:
+        return None
     print(f"[DEBUG] get_var({var_name}) →", type(da), "dims:", getattr(da, "dims", None))
     if da is None:
         print(f"[WARN] {var_name}: get_var returns None")
