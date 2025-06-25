@@ -53,12 +53,11 @@ def main():
         # returnまたはcontinueで安全に抜ける
     else:   
 
+        print("temp_850 shape:", temp_850.shape if temp_850 is not None else None)
+        print("rh_700 shape:", rh_700.shape if rh_700 is not None else None)
     
-    print("temp_850 shape:", temp_850.shape if temp_850 is not None else None)
-    print("rh_700 shape:", rh_700.shape if rh_700 is not None else None)
-
-    print("==== isobaricInhPa levels ====")
-    print(ds.coords["isobaricInhPa"].values)
+        print("==== isobaricInhPa levels ====")
+        print(ds.coords["isobaricInhPa"].values)
     
     for level in [850, 700, 500]:
         arr = get_var_2d(ds, "TMP_{}mb".format(level), level=level, step_idx=0)
