@@ -47,7 +47,7 @@ def main():
 
     # --- ここで変数取得OK ---
     temp_850 = get_var_2d(ds, "TMP_850mb", time_idx=0, step_idx=0)
-    rh_700   = get_var_2d(ds, "RH_700mb",  time_idx=0, step_idx=0rh_700 = get_var_2d("RH_700mb")
+    rh_700   = get_var_2d(ds, "RH_700mb",  time_idx=0, step_idx=0)
     if rh_700 is None:
         print("[WARN] RH_700mb is missing. Skip drawing related figure.")
         # returnまたはcontinueで安全に抜ける
