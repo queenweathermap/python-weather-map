@@ -8,7 +8,8 @@ import numpy as np
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
-from module.utils.var_utils import get_var_2d
+from module.utils.var_utils import get_var, get_var_2d
+
 
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
