@@ -32,22 +32,23 @@ def get_var(ds, key):
         return ds[key.lower()]
     return None
 
-def get_var_2d(ds, var_name, level=None, time_idx=0):
+def get_var_2d(ds, var_name, level=None, time_idx=0, step_idx=0):
     """
     - ds: xarray.Dataset
     - var_name: 標準名
     - level: 取得したい気圧面（例 850, 700）
     - time_idx: 取得したい時刻index
+    - step_idx: 取得したい予報ステップindex
     """
     da = get_var(ds, var_name)
     print(f"[DEBUG] get_var_2d({var_name}) got {da}")
     if da is None:
+        print(f"[WARN] get_var_2d({var_name}) -> None")
         return None
     print(f"[DEBUG] get_var({var_name}) →", type(da), "dims:", getattr(da, "dims", None))
-    if da is None:
-        print(f"[WARN] {var_name}: get_var returns None")
-        return None
     arr = da
+
+    
     # 気圧面名抽出（例 TMP_850mb → 850）
     if level is None:
         m = re.match(r"[A-Z]+_(\d+)mb", var_name)
