@@ -42,7 +42,9 @@ def get_var_2d(ds, var_name, level=None, time_idx=0):
     - time_idx: 取得したい時刻index
     """
     da = get_var(ds, var_name)
+    print(f"[DEBUG] get_var({var_name}) →", type(da), "dims:", getattr(da, "dims", None))
     if da is None:
+        print(f"[WARN] {var_name}: get_var returns None")
         return None
     arr = da
     # 気圧面名抽出（例 TMP_850mb → 850）
@@ -51,7 +53,8 @@ def get_var_2d(ds, var_name, level=None, time_idx=0):
         if m:
             level = int(m.group(1))
     print("==== isobaricInhPa ====")
-    if "isobaricInhPa" in ds.coords:
+    if "isobaricInhPa" in arr.dims:
+        print(f"[DEBUG] {var_name}: isobaricInhPa:", arr.coords["isobaricInhPa"].values)
         print(ds.coords["isobaricInhPa"].values)
     else:
         print("No isobaricInhPa in ds.coords")
