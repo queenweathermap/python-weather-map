@@ -18,11 +18,9 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from datetime import datetime, timedelta, timezone
 
-# --- 環境変数から取得（.envまたはSecrets） ---
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
 DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
 
-# --- スコープ定義 ---
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 def get_drive_service():
@@ -40,10 +38,8 @@ def upload_to_drive(file_path, folder_id=DRIVE_FOLDER_ID):
     service = get_drive_service()
     metadata = {"name": os.path.basename(file_path), "parents": [folder_id]}
     media = MediaFileUpload(file_path, resumable=True)
-
     uploaded = service.files().create(body=metadata, media_body=media, fields="id").execute()
     service.permissions().create(fileId=uploaded["id"], body={"type": "anyone", "role": "reader"}).execute()
-
     file_id = uploaded["id"]
     return f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
 
@@ -55,26 +51,11 @@ def delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30):
     """
     service = get_drive_service()
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
-
-    query = f"'{folder_id}' in parents and createdTime < '{cutoff.isoformat()}'"
+    # RFC3339形式 (例: '2023-06-01T00:00:00+00:00')
+    cutoff_str = cutoff.isoformat()
+    query = f"'{folder_id}' in parents and trashed = false and createdTime < '{cutoff_str}'"
     results = service.files().list(q=query, fields="files(id, name, createdTime)").execute()
     files = results.get("files", [])
-
     for f in files:
         print(f"[DELETE] {f['name']} ({f['createdTime']})")
         service.files().delete(fileId=f["id"]).execute()
-
-
-def delete_old_files_from_drive(folder_id, creds_json, days=30):
-    creds_dict = json.loads(creds_json)
-    creds = service_account.Credentials.from_service_account_info(creds_dict)
-    service = build('drive', 'v3', credentials=creds)
-    # 30日より前の日付
-    dt_limit = (datetime.utcnow() - timedelta(days=days)).isoformat() + 'Z'  # ←ここも修正
-    query = f"'{folder_id}' in parents and trashed = false and createdTime < '{dt_limit}'"
-    results = service.files().list(q=query, fields="files(id, name, createdTime)").execute()
-    old_files = results.get('files', [])
-    for f in old_files:
-        service.files().delete(fileId=f['id']).execute()
-        print(f"Deleted old file: {f['name']} ({f['createdTime']})")
-
