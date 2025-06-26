@@ -1,4 +1,4 @@
-# daily_weathercaster_notify.py
+# scripts/daily_weathercaster_notify.py
 # ===============================================================
 # 気象庁Weathercaster PDF天気図を一括DL→300dpi JPG変換→ZIP化
 # → Google Driveへアップ→Slackに実行ログ+DriveURL通知→古いファイル削除
