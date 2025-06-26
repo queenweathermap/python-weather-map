@@ -101,12 +101,14 @@ def send_slack_text(channel, message):
 
 # --- 汎用関数名（他モジュールと統一） ---
 def send_slack_message(message, channel=None):
-    """
-    channel省略時はSLACK_CHANNEL_IDを使用してメッセージ送信
-    """
-    if not channel:
-        channel = os.environ.get("SLACK_CHANNEL_ID")
-    if not channel:
-        print("[ERROR] チャンネルIDが未指定です")
+    token = os.environ.get("SLACK_BOT_TOKEN")
+    channel = channel or os.environ.get("SLACK_CHANNEL_ID")
+    if not (token and channel):
+        print("[ERROR] SLACK_BOT_TOKEN / SLACK_CHANNEL_ID 未設定")
         return
-    send_slack_text(channel, message)
+    res = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"channel": channel, "text": message}
+    )
+    print("[Slack]", res.text)
