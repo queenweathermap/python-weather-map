@@ -20,18 +20,20 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_300hpa_height_wind(ax, ds, step=0):
+# module/plot/plot_300hpa_height_wind.py
+def plot_300hpa_height_wind(ax, ds):
     """300hPa等高度・風"""
     lon2d, lat2d = get_lon_lat(ds)
-    hgt = get_var(ds, "HGT_300mb", step=step)
-    u    = get_var(ds, "UGRD_300mb", step=step)
-    v    = get_var(ds, "VGRD_300mb", step=step)
-    temp = get_var(ds, "TMP_300mb", step=step)
+    hgt = get_var(ds, "HGT_300mb")
+    u   = get_var(ds, "UGRD_300mb")
+    v   = get_var(ds, "VGRD_300mb")
+    temp = get_var(ds, "TMP_300mb")
 
     if hgt is None or u is None or v is None:
         ax.text(0.5, 0.5, "NO DATA", fontsize=12, color="gray", ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
         return
+
 
     wspd = np.sqrt(u**2 + v**2) * 1.94384
 
