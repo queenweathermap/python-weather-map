@@ -28,6 +28,9 @@ from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_
 import cfgrib
 import xarray as xr
 
+DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+
 def generate_japan_panel_and_notify(
     ymd,
     hh,
@@ -63,9 +66,7 @@ def generate_japan_panel_and_notify(
     )
 
     # --- 2. パネル構成定義 ---
-    # 8段例（全国）：各段に（関数, データ, タイトル, データ種）をセット
     panel_def = [
-        # (関数,         データセット,       タイトル)
         (plot_300hpa_height_wind, ds_isobaric, "300hPa高度・風"),
         (plot_500hpa_vorticity, ds_isobaric, "500hPa渦度"),
         (plot_700hpa_dindex_500hpa_temp, ds_isobaric, "700hPa湿数＋500hPa気温"),
@@ -84,13 +85,19 @@ def generate_japan_panel_and_notify(
             constrained_layout=True,
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
-    
+
         for row, (plot_func, ds, title) in enumerate(panel_def):
+            n_steps = ds.dims["step"] if "step" in ds.dims else 1
             for col in range(ncols):
-                step = page * ncols + col   # +0h, +3h...などを計算
+                step = page * ncols + col
+                # indexエラー防止ガード
+                if step >= n_steps:
+                    axes[row, col].axis("off")
+                    axes[row, col].set_title(f"{title} (no data)")
+                    continue
                 try:
-                    ds_step = ds.isel(step=step)  # <- ここでスライス！！
-                    plot_func(axes[row, col], ds_step)  # step引数なしで渡す
+                    ds_step = ds.isel(step=step)
+                    plot_func(axes[row, col], ds_step)
                     axes[row, col].set_title(f"{title} (+{step*3}h)")
                 except Exception as e:
                     axes[row, col].set_title(f"{title} (エラー)")
@@ -112,11 +119,11 @@ def generate_japan_panel_and_notify(
         # --- 5. Drive整理・アップロード ---
         if drive_folder:
             delete_old_files_from_drive(
-                folder_id=DRIVE_FOLDER_ID,        # ← OK!
+                folder_id=DRIVE_FOLDER_ID,
                 older_than_days=30,
-                creds_json=...
+                creds_json=GOOGLE_SERVICE_ACCOUNT_JSON
             )
-            gdrive_url = upload_to_drive(out_path)
+            gdrive_url = upload_to_drive(out_path, creds_json=GOOGLE_SERVICE_ACCOUNT_JSON)
         else:
             gdrive_url = "(未アップロード)"
 
@@ -128,5 +135,3 @@ def generate_japan_panel_and_notify(
         send_slack_message(msg)
 
     print("[DONE] 全国天気図パネルの自動生成・通知が完了しました")
-
-# GSM+MSM合成
