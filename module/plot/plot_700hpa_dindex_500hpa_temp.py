@@ -29,12 +29,12 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の次元不正")
     return lon2d, lat2d
 
-def plot_700hpa_dindex_500hpa_temp(ax, ds, step=0):
-    """700hPa湿数・500hPa気温（stepで時系列指定）"""
+def plot_700hpa_dindex_500hpa_temp(ax, ds):
+    """700hPa湿数・500hPa気温（stepで時系列指定、呼び出し元でスライス済み）"""
     try:
-        temp_700 = get_var_2d(ds, "TMP_700mb", level=700, step=step)
-        rh_700   = get_var_2d(ds, "RH_700mb",  level=700, step=step)
-        temp_500 = get_var_2d(ds, "TMP_500mb", level=500, step=step)
+        temp_700 = get_var_2d(ds, "TMP_700mb", level=700)
+        rh_700   = get_var_2d(ds, "RH_700mb",  level=700)
+        temp_500 = get_var_2d(ds, "TMP_500mb", level=500)
     except Exception as e:
         ax.text(0.5, 0.5, f"NO DATA ({str(e)})", fontsize=12, color="gray", ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
@@ -44,6 +44,8 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds, step=0):
         ax.text(0.5, 0.5, "NO DATA", fontsize=14, color="gray", ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
         return
+        
+    # ...（以降はプロット処理）
 
     temp_700_c = temp_700 - 273.15
     temp_500_c = temp_500 - 273.15
