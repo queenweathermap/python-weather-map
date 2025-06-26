@@ -25,20 +25,21 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の形状が不正")
     return lon2d, lat2d
 
-def plot_850hpa_temp_wind_700hpa_w(ax, ds, step=0):
+def plot_850hpa_temp_wind_700hpa_w(ax, ds):
     """
     850hPa気温・風・700hPa鉛直流
-    ax: PlateCarree axes, ds: xarray.Dataset, step: int
+    ax: PlateCarree axes, ds: xarray.Dataset（stepで既にスライス済み！）
     """
-    temp_850 = get_var_2d(ds, "TMP_850mb", level=850, step=step)
-    u_850    = get_var_2d(ds, "UGRD_850mb", level=850, step=step)
-    v_850    = get_var_2d(ds, "VGRD_850mb", level=850, step=step)
-    w_700    = get_var_2d(ds, "VVEL_700mb", level=700, step=step)
+    temp_850 = get_var_2d(ds, "TMP_850mb", level=850)
+    u_850    = get_var_2d(ds, "UGRD_850mb", level=850)
+    v_850    = get_var_2d(ds, "VGRD_850mb", level=850)
+    w_700    = get_var_2d(ds, "VVEL_700mb", level=700)
 
     if temp_850 is None or u_850 is None or v_850 is None or w_700 is None:
         ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
         ax.set_axis_off()
         return
+    # ...以降は描画処理（そのまま継続）
 
     temp = temp_850 - 273.15 if np.nanmax(temp_850) > 100 else temp_850
     w700 = w_700 * 3600   # 700hPa vertical velocity [hPa/h]
