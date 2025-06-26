@@ -32,13 +32,11 @@ def get_var(ds, key):
         return ds[key.lower()]
     return None
 
-def get_var_2d(ds, var_name, level=None, time_idx=0, step_idx=0):
+def get_var_2d(ds, var_name, level=None):
     """
-    - ds: xarray.Dataset
-    - var_name: 標準名
-    - level: 取得したい気圧面（例 850, 700）
-    - time_idx: 取得したい時刻index
-    - step_idx: 取得したい予報ステップindex
+    ds: xarray.Dataset（時刻・stepで既にスライス済みで渡す！）
+    var_name: 標準名
+    level: 取得したい気圧面（例 850, 700）
     """
     da = get_var(ds, var_name)
     print(f"[DEBUG] get_var_2d({var_name}) got {da}")
@@ -47,6 +45,12 @@ def get_var_2d(ds, var_name, level=None, time_idx=0, step_idx=0):
         return None
     print(f"[DEBUG] get_var({var_name}) →", type(da), "dims:", getattr(da, "dims", None))
     arr = da
+    if level is not None:
+        # "isobaricInhPa" or "level" で切る。存在しなければスキップ
+        for lev_key in ["isobaricInhPa", "level"]:
+            if lev_key in arr.dims or lev_key in arr.coords:
+                arr = arr.sel({lev_key: level}, method="nearest")
+    return arr
 
     
     # 気圧面名抽出（例 TMP_850mb → 850）
