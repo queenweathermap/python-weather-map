@@ -5,41 +5,42 @@
 # 2025-06-27 by ChatGPT
 # ========================================================
 
+# GSM/MSM天気図パネル → Drive → Slack 一発スクリプト
 import os
-import sys
 from datetime import datetime
 from dotenv import load_dotenv
+
 from module.utils.drive_utils import upload_to_drive
 from module.utils.slack_utils import send_slack_message
-
-# .env ロード
-load_dotenv()
-SLACK_CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
-
-# パネル画像出力名
-init_time = datetime.now().strftime("%Y%m%d_%H%M")
-IMG_GSM = f"gsm_panel_{init_time}.jpg"
-
-# 1. 天気図パネル自動生成
 from module.plotter.gpv_plotter_hybrid import generate_japan_panel_and_notify
 
+
+# --- .env自動読込 ---
+load_dotenv()
+
+# --- 出力パラメータ ---
+today = datetime.now().strftime("%Y%m%d")
+hour  = datetime.now().strftime("%H")
+out_file = f"gsm_panel_{today}_{hour}.jpg"
+
+# --- パネル生成 ---
 generate_japan_panel_and_notify(
-    ymd=datetime.now().strftime("%Y%m%d"),
-    hh=datetime.now().strftime("%H"),
-    model="GSM",         # or "HYBRID" など運用に合わせて
+    ymd=today,
+    hh=hour,
+    model="HYBRID",            # "GSM"でもOK
     output_dir="./data",
-    drive_folder="DRIVE_FOLDER_ID",
+    drive_folder=os.environ.get("DRIVE_FOLDER_ID"),
     ncols=8,
     npages=2,
-    only_make=True,      # 通知やDrive処理は下で行う
-    out_file=IMG_GSM,
+    only_make=True,            # パネル生成のみ
+    out_file=out_file,
 )
 
-# 2. Google Driveアップロード
-url = upload_to_drive(os.path.join("./data", IMG_GSM))
+# --- Google Driveアップロード ---
+drive_url = upload_to_drive(os.path.join("./data", out_file))
 
-# 3. Slack通知
-message = f"GSM日本域天気図をアップロードしました：\n{url}"
-send_slack_message(message, channel=SLACK_CHANNEL_ID)
+# --- Slack通知 ---
+message = f"【自動配信】GSM/MSM天気図（全国パネル）\n{drive_url}"
+send_slack_message(message)
 
-print("[OK] 天気図パネル出力・Driveアップ・Slack通知まで正常終了")
+print("[OK] 全処理正常終了")
