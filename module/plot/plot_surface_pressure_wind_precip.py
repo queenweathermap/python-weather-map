@@ -37,7 +37,9 @@ def get_lon_lat(ds):
 # ------------------------------------------------------
 # 地上天気図（気圧・風・降水量）描画本体
 # ------------------------------------------------------
-def plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=None, skip=5):
+def plot_surface_pressure_and_wind_msm(ax, ds, step=0):
+    """地上気圧・風・降水量（MSM）"""
+    pass
     """
     地上海面更正気圧・風ベクトル・降水量を天気図として描画
     - ax: matplotlib axis（ccrs.PlateCarree() 必須）
