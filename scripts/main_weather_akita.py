@@ -1,8 +1,7 @@
-# /scripts/main_weather_akita.py
+# scripts/main_weather_akita.py
 # ========================================================
-# 秋田局地 MSMパネル（6段×12列）全FH帯DL・index.htmlパース自動化
-# どちらか単独（L-pall/Lsurf）でもパネル生成可
-# 2025-06-18 by ChatGPT（講座・実運用ベース最適化）
+# 秋田局地 MSMパネル（6段×12列）index.htmlパース自動化
+# 2025-06-27 ChatGPT core/plot対応リファクタ
 # ========================================================
 
 import os
@@ -12,7 +11,8 @@ import xarray as xr
 import pandas as pd
 
 from module.utils.gpv_html_parser import find_existing_msm_files
-from gpv_downloader import grib2_to_nc
+from module.core.gpv_converter import grib2_to_netcdf
+from module.core.gpv_data_loader import load_dataset
 from module.panel_utils import (
     make_nodata_weather_panel,
     make_local_weather_panel,
@@ -39,7 +39,6 @@ def get_gpv_nodata_times(ncols=12):
 try:
     os.makedirs(BASE_DIR, exist_ok=True)
 
-    # 1. サーバindex.htmlからL-pall/Lsurfファイルを抽出（どちらかだけでもOK）
     files = find_existing_msm_files(BASE_URL, YMD)
     if not files:
         print("NO DATA: サーバ上にファイルが見つかりません")
@@ -50,7 +49,6 @@ try:
         )
         sys.exit(0)
 
-    # 2. 最新init時刻のものをNCOLS件ピックアップ（どちらかあれば採用）
     latest_init = max([f["init"] for f in files])
     use_files = [f for f in files if f["init"] == latest_init][:NCOLS]
     if not use_files or len(use_files) < 2:
@@ -62,15 +60,14 @@ try:
         )
         sys.exit(0)
 
-    # 3. NetCDF変換（どちらかだけでも揃った分だけ）
     nc_paths = []
     for f in use_files:
         if f["l_pall_url"]:
-            nc1 = grib2_to_nc(f["l_pall_url"])
+            nc1 = grib2_to_netcdf(f["l_pall_url"], f["l_pall_url"].replace(".bin", ".nc"))
             if nc1:
                 nc_paths.append(nc1)
         if f["lsurf_url"]:
-            nc2 = grib2_to_nc(f["lsurf_url"])
+            nc2 = grib2_to_netcdf(f["lsurf_url"], f["lsurf_url"].replace(".bin", ".nc"))
             if nc2:
                 nc_paths.append(nc2)
     if not nc_paths or len(nc_paths) < 1:
@@ -82,11 +79,10 @@ try:
         )
         sys.exit(0)
 
-    # 4. xarrayで合成（利用可能な分だけ）
     ds_list = []
     for nc in nc_paths:
         try:
-            ds = xr.open_dataset(nc)
+            ds = load_dataset(nc)
             ds_list.append(ds)
         except Exception as e:
             print(f"[WARN] open_dataset失敗: {nc} ({e})")
@@ -102,15 +98,12 @@ try:
     ds = align_datasets_common(ds_list, ncols=NCOLS)
     times = ds.time.values[:NCOLS] if hasattr(ds, "time") else get_gpv_nodata_times(NCOLS)
 
-    # 5. MSM描画関数リスト
-    from module.gpv_plotter_msm import (
-        plot_emagram_msm_panel,
-        plot_700hpa_dindex_500hpa_temp_msm,
-        plot_850hpa_temp_wind_700hpa_w_msm,
-        plot_850hpa_thetae_stream_msm,
-        plot_925hpa_temp_wind_dindex_msm,
-        plot_surface_pressure_and_wind_msm,
-    )
+    from module.plot.plot_emagram import plot_emagram_msm_panel
+    from module.plot.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp_msm
+    from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w_msm
+    from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream_msm
+    from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex_msm
+    from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
     plot_func_list = [
         plot_emagram_msm_panel,
         plot_700hpa_dindex_500hpa_temp_msm,
@@ -120,7 +113,6 @@ try:
         plot_surface_pressure_and_wind_msm,
     ]
 
-    # 6. パネル描画/NO DATA分岐
     if len(times) >= NCOLS:
         make_local_weather_panel(
             ds, times, OUTFILE,
