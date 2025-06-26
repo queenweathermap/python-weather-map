@@ -112,9 +112,8 @@ def generate_japan_panel_and_notify(
         # --- 5. Drive整理・アップロード ---
         if drive_folder:
             delete_old_files_from_drive(
-                folder_id=drive_folder,
-                creds_json=os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"],
-                days=30
+                drive_folder_id=...,
+                days=30,
             )
             gdrive_url = upload_to_drive(out_path)
         else:
