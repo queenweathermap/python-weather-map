@@ -94,7 +94,6 @@ def plot_500hpa_vorticity(ax, ds, step=0):
     # --- タイトル（フォントプロパティ付与可） ---
     ax.set_title("500hPa Vorticity", fontsize=10, pad=10, fontproperties=prop)
 
-    pass  # 本実装は各関数で
 
 # -------------------------------------------------
 # ラッパー関数（GSM/MSM両対応でimportしやすく）
