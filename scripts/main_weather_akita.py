@@ -1,4 +1,4 @@
-# gpv_panel_daily_local_akita.py
+# /scripts/main_weather_akita.py
 # ========================================================
 # 秋田局地 MSMパネル（6段×12列）全FH帯DL・index.htmlパース自動化
 # どちらか単独（L-pall/Lsurf）でもパネル生成可
