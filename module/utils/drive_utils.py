@@ -24,11 +24,25 @@ DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 def get_drive_service(creds_json=None):
-    # creds_jsonが与えられた場合のみそれで認証
+    """
+    Google Drive APIサービスを返す（サービスアカウント認証）
+    - creds_json: サービスアカウントJSON（str/dict or Noneで環境変数利用）
+    """
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    import json, os
+
     if creds_json:
-        credentials = service_account.Credentials.from_service_account_info(json.loads(creds_json))
+        if isinstance(creds_json, str):
+            info = json.loads(creds_json)
+        else:
+            info = creds_json
+        credentials = service_account.Credentials.from_service_account_info(info)
     else:
-        credentials = ... # デフォルトの方法（環境変数など）
+        env_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+        if not env_json:
+            raise RuntimeError("Google認証情報が環境変数 GOOGLE_SERVICE_ACCOUNT_JSON にありません")
+        credentials = service_account.Credentials.from_service_account_info(json.loads(env_json))
     service = build('drive', 'v3', credentials=credentials)
     return service
 
