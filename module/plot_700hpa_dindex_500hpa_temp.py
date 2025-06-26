@@ -26,13 +26,18 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度次元エラー")
     return lon2d, lat2d
 
-def plot_700hpa_dindex_500hpa_temp(ax, ds, time_idx=0):
+def plot_700hpa_dindex_500hpa_temp(ax, ds):
     """
     700hPa湿数（D-index/露点差, 色塗り）＋500hPa気温等値線（navy）を描画
     - ax: matplotlib axes
     - ds: xarray.Dataset（全時刻分OK）
     - time_idx: 何番目の時刻を描画するか
     """
+    rh_700 = get_var_2d(ds, "RH_700mb")
+    if rh_700 is None:
+        ax.text(0.5, 0.5, "NO DATA", fontsize=20, color="gray", ha="center", va="center", transform=ax.transAxes)
+        ax.set_axis_off()
+        return
     try:
         temp_700 = get_var_2d(ds, "TMP_700mb", level=700, time_idx=time_idx)
         rh_700   = get_var_2d(ds, "RH_700mb",  level=700, time_idx=time_idx)
