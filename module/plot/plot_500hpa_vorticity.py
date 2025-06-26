@@ -100,11 +100,11 @@ def plot_500hpa_vorticity(ax, ds, step=0):
 # -------------------------------------------------
 def plot_500hpa_vorticity_gsm(ax, ds, prop=None):
     """GSM向け500hPa渦度描画ラッパー"""
-    return plot_500hpa_vorticity(ax, ds, model="GSM", prop=prop)
+    return plot_500hpa_vorticity(ax, ds)  # propなど余分な引数も整理
 
 def plot_500hpa_vorticity_msm(ax, ds, prop=None):
     """MSM向け500hPa渦度描画ラッパー"""
-    return plot_500hpa_vorticity(ax, ds, model="MSM", prop=prop)
+    return plot_500hpa_vorticity(ax, ds)
 
 # ===============================================
 # END OF FILE
