@@ -57,4 +57,78 @@ def main():
     OUTFILE = args.output or f"{args.city}_local_{args.model}_map.jpg"
 
     # === モデル別に描画関数とパターン設定 ===
-    if args.mo
+    if args.model == "gsm":
+        from module.plot.plot_emagram import plot_emagram_gsm_panel
+        from module.plot.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp_gsm
+        from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w_gsm
+        from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream_gsm
+        from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex_gsm
+        from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_gsm
+        PATTERNS = MODEL_CONFIG["GSM"]["patterns"]
+        plot_func_list = [
+            plot_emagram_gsm_panel,
+            plot_700hpa_dindex_500hpa_temp_gsm,
+            plot_850hpa_temp_wind_700hpa_w_gsm,
+            plot_850hpa_thetae_stream_gsm,
+            plot_925hpa_temp_wind_dindex_gsm,
+            plot_surface_pressure_and_wind_gsm,
+        ]
+    else:
+        from module.plot.plot_emagram import plot_emagram_msm_panel
+        from module.plot.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp_msm
+        from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w_msm
+        from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream_msm
+        from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex_msm
+        from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+        PATTERNS = MODEL_CONFIG["MSM"]["patterns"]
+        plot_func_list = [
+            plot_emagram_msm_panel,
+            plot_700hpa_dindex_500hpa_temp_msm,
+            plot_850hpa_temp_wind_700hpa_w_msm,
+            plot_850hpa_thetae_stream_msm,
+            plot_925hpa_temp_wind_dindex_msm,
+            plot_surface_pressure_and_wind_msm,
+        ]
+
+    try:
+        print(f"=== {args.model.upper()}ローカルパネル生成開始：{args.city} ===")
+        # --- データ取得・処理 ---
+        dt_now = pd.Timestamp.now()
+        init_dt = dt_now.replace(minute=0, second=0, microsecond=0)
+        panel_files = download_gpv_panel(PATTERNS, BASE_DIR, init_dt, GPV_MIRROR_URLS, ncols=NCOLS)
+        file_list = [item for sublist in panel_files if sublist for item in sublist if item]
+        nc_paths = []
+        for path, _ in file_list:
+            nc_path = grib2_to_netcdf(path, path.replace(".bin", ".nc"))
+            if nc_path:
+                nc_paths.append(nc_path)
+        ds_list = [load_dataset(nc) for nc in nc_paths if os.path.exists(nc)]
+        if not ds_list or len(ds_list) < 2:
+            times = get_gpv_nodata_times(NCOLS)
+            make_nodata_weather_panel(times, OUTFILE, city_name=args.city)
+            print("【ERROR】GPVファイル未取得。NO DATAパネル送信")
+            sys.exit(0)
+        ds_list_aligned = align_datasets_common(ds_list)
+        ds = xr.merge(ds_list_aligned, compat="override", join="outer")
+        times = ds.time.values[:NCOLS] if hasattr(ds, "time") else get_gpv_nodata_times(NCOLS)
+
+        # --- パネル描画 ---
+        make_local_weather_panel(
+            ds, times, OUTFILE,
+            pin_lat=args.pin_lat, pin_lon=args.pin_lon, city_name=args.city,
+            lat_range=(args.lat_min, args.lat_max), lon_range=(args.lon_min, args.lon_max),
+            plot_func_list=plot_func_list,
+            nrows=NROWS, ncols=NCOLS,
+        )
+        print("画像生成完了\n=== 完了 ===")
+
+    except Exception as e:
+        print("=== 重大エラー発生 ===")
+        print(type(e), e)
+        traceback.print_exc()
+        times = get_gpv_nodata_times(NCOLS)
+        make_nodata_weather_panel(times, OUTFILE, city_name=args.city)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
