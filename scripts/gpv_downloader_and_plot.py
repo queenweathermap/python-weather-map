@@ -1,4 +1,4 @@
-# gpv_downloader_and_plot.py
+# scripts/gpv_downloader_and_plot.py
 # ===============================================
 # JMA GPV GSM/MSM データ自動ダウンロード＆GRIB2直読み＆天気図描画
 # NetCDF変換は不要・cfgribで直接可視化
