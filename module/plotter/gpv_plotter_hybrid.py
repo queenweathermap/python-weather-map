@@ -121,12 +121,11 @@ def generate_japan_panel_and_notify(
             delete_old_files_from_drive(
                 folder_id=DRIVE_FOLDER_ID,
                 older_than_days=30,
-                creds_json=GOOGLE_SERVICE_ACCOUNT_JSON
             )
-            gdrive_url = upload_to_drive(out_path, creds_json=GOOGLE_SERVICE_ACCOUNT_JSON)
+            gdrive_url = upload_to_drive(out_path, folder_id=DRIVE_FOLDER_ID)
         else:
             gdrive_url = "(未アップロード)"
-
+            
         # --- 6. Slack通知 ---
         msg = (
             f"【自動配信】全国天気図パネル (p{page+1}/{npages}) {ymd} {hh}:00\n"
