@@ -4,12 +4,18 @@
 # 2025-06-27 ChatGPT（module/core/plot対応リファクタ）
 # ===============================================================
 
+import os
 import sys
 import traceback
 import argparse
-import os
 import pandas as pd
 import xarray as xr
+
+
+from dotenv import load_dotenv
+from module.utils.slack_utils import send_slack_message
+from module.utils.drive_utils import upload_to_drive
+from module.panel_utils import make_local_weather_panel
 
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 from module.core.gpv_converter import grib2_to_netcdf
@@ -21,6 +27,10 @@ from module.panel_utils import (
 )
 
 DEFAULT_RANGE_WIDTH = 2.5
+
+
+# .env自動読込
+load_dotenv()
 
 def get_gpv_nodata_times(ncols=12):
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
@@ -54,7 +64,7 @@ def main():
     BASE_DIR = "./data"
     NCOLS = args.ncols
     NROWS = args.nrows
-    OUTFILE = args.output or f"{args.city}_local_{args.model}_map.jpg"
+    OUTFILE = args.output or f"{args.city}_{args.model}_panel.jpg"
 
     # === モデル別に描画関数とパターン設定 ===
     if args.model == "gsm":
@@ -121,6 +131,12 @@ def main():
             nrows=NROWS, ncols=NCOLS,
         )
         print("画像生成完了\n=== 完了 ===")
+    
+        # --- Driveアップ & Slack通知 ---
+        drive_url = upload_to_drive(os.path.join("./data", OUTFILE))
+        send_slack_message(f"【自動配信】{args.city} {args.model.upper()} パネル\n{drive_url}")
+    
+        print("[OK] ローカル天気図・Drive・Slack連携 完了")
 
     except Exception as e:
         print("=== 重大エラー発生 ===")
