@@ -17,7 +17,8 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_850hpa_thetae_stream(ax, ds, model="GSM", prop=None):
+def plot_850hpa_thetae_stream(ax, ds, step=0):
+    """850hPa相当温位・流線"""
     lon2d, lat2d = get_lon_lat(ds)
 
     if model == "MSM":
