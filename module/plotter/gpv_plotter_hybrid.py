@@ -113,6 +113,7 @@ def generate_japan_panel_and_notify(
         if drive_folder:
             delete_old_files_from_drive(
                 drive_folder_id=...,
+                creds_json=...,
                 days=30,
             )
             gdrive_url = upload_to_drive(out_path)
