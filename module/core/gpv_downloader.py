@@ -1,4 +1,4 @@
-# gpv_downloader.py
+# module/core/gpv_downloader.py
 # ===============================================================
 # GPVファイルのダウンロード・自動パネル描画ユーティリティ
 # MSM/GSM/LFM/ローカルもモデル名で一括運用（index.htmlパースも可）
