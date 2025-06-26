@@ -87,7 +87,7 @@ def generate_japan_panel_and_notify(
 
         for row, (plot_func, ds, title) in enumerate(panel_def):
             for col in range(ncols):
-                step = page * ncols + col  # +0h, +3h, ... +45h など
+                step = page * ncols + col   # +0h, +3h...などを計算
                 try:
                     plot_func(axes[row, col], ds, step=step)
                     axes[row, col].set_title(f"{title} (+{step*3}h)")
