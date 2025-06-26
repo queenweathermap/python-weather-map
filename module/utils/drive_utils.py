@@ -23,11 +23,15 @@ DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-def get_drive_service():
-    """Google Drive APIクライアントの取得（認証付き）"""
-    key_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
-    credentials = service_account.Credentials.from_service_account_info(key_dict, scopes=SCOPES)
-    return build("drive", "v3", credentials=credentials)
+def get_drive_service(creds_json=None):
+    # creds_jsonが与えられた場合のみそれで認証
+    if creds_json:
+        credentials = service_account.Credentials.from_service_account_info(json.loads(creds_json))
+    else:
+        credentials = ... # デフォルトの方法（環境変数など）
+    service = build('drive', 'v3', credentials=credentials)
+    return service
+
 
 def upload_to_drive(file_path, folder_id=DRIVE_FOLDER_ID):
     """
