@@ -19,10 +19,18 @@ def generate_panel(ds, plot_funcs, nrows, ncols, figsize, title=None, step_axis=
                              constrained_layout=True, subplot_kw=dict(projection=kwargs.get("proj", None)))
     if title:
         fig.suptitle(title, fontsize=18)
+    
+    # step数の上限（step軸があればそれを使う）
+    n_steps = ds.dims["step"] if "step" in ds.dims else 1
+
     for r, plot_func in enumerate(plot_funcs):
         for c in range(ncols):
             step = c if step_axis == "col" else r
             ax = axes[r, c] if nrows > 1 else axes[c]
-            plot_func(ax, ds)
+            # --- ガード追加（stepの範囲を超えたら非表示）---
+            if step >= n_steps:
+                ax.axis("off")
+                continue
+            ds_step = ds.isel(step=step) if "step" in ds.dims else ds
+            plot_func(ax, ds_step)
     return fig, axes
-
