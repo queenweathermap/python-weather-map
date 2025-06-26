@@ -126,28 +126,32 @@ def make_daily_weather_panel_multi_time(ds, times, save_path="weather_panel.jpg"
     """
     fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 2.5, nrows * 2.2), constrained_layout=True)
     axes = axes.flatten() if isinstance(axes, np.ndarray) else [axes]
+    n_panel = nrows * ncols
+    n_data = len(times)
 
-    for idx, t in enumerate(times):
+    for idx in range(n_panel):
         ax = axes[idx]
         ax.set_axis_off()
-        # If plot function available, draw panel; otherwise, gray "NO DATA"
-        if plot_func_list and idx < len(plot_func_list):
-            try:
-                plot_func_list[idx](ax, ds, t)
-            except Exception as e:
-                ax.text(0.5, 0.5, "Plot Error", fontsize=10, ha="center", va="center")
+        if idx < n_data:
+            t = times[idx]
+            # plot_func_listがある場合は関数を呼ぶ
+            if plot_func_list and idx < len(plot_func_list):
+                try:
+                    plot_func_list[idx](ax, ds, t)
+                except Exception as e:
+                    ax.text(0.5, 0.5, "Plot Error", fontsize=10, ha="center", va="center")
+            else:
+                ax.set_facecolor("lightgray")
+                ax.text(0.5, 0.5, "NO DATA", fontsize=16, ha="center", va="center")
+            ax.set_title(str(t))
         else:
-            ax.set_facecolor("lightgray")
-            ax.text(0.5, 0.5, "NO DATA", fontsize=16, ha="center", va="center")
-        ax.set_title(str(t))
+            ax.set_axis_off()
 
-    # Hide unused panels
-    for i in range(len(times), len(axes)):
-        axes[i].set_axis_off()
     fig.suptitle("Weather Panel", fontsize=22)
     fig.savefig(save_path, bbox_inches="tight", dpi=150)
     plt.close(fig)
     print(f"[Weather Panel] {save_path} exported.")
+
 
 def make_lfm_panel(ds, times, save_path):
     # LFM用天気図パネル描画処理
