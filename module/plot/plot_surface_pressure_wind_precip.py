@@ -26,30 +26,28 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_surface_pressure_and_wind_msm(ax, ds, step=0):
+def plot_surface_pressure_and_wind_msm(ax, ds):
     """
     地上海面更正気圧・風・降水量（MSM）描画
     Parameters
     ----------
     ax : matplotlib.axes.Axes
         描画先
-    ds : xarray.Dataset
+    ds : xarray.Dataset（stepでスライス済みを渡す）
         GRIB2等から読み込んだxarrayデータセット
-    step : int, default 0
-        何ステップ目の時系列か（+0h, +3h…）
     Returns
     -------
     None
     """
-    # もし時系列次元があればstepでスライス
-    # ここでは get_var 側で step対応している前提
-
     lon2d, lat2d = get_lon_lat(ds)
-    prmsl = get_var(ds, "PRMSL_meansealevel", step=step)
-    u10 = get_var(ds, "UGRD_10maboveground", step=step)
-    v10 = get_var(ds, "VGRD_10maboveground", step=step)
-    precip = get_var(ds, "APCP_surface", step=step)
+    prmsl = get_var(ds, "PRMSL_meansealevel")
+    u10 = get_var(ds, "UGRD_10maboveground")
+    v10 = get_var(ds, "VGRD_10maboveground")
+    precip = get_var(ds, "APCP_surface")
     skip = 5  # 風ベクトルの間引き間隔
+
+    # ...以降は既存通り（描画処理）
+
 
     # 地図範囲・装飾
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
