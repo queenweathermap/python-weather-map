@@ -105,7 +105,7 @@ def generate_japan_panel_and_notify(
         now = datetime.datetime.now()
         out_name = f"panel_japan_{ymd}{hh}_p{page+1}_{now.strftime('%Y%m%d_%H%M')}.jpg"
         out_path = os.path.join(output_dir, out_name)
-        plt.savefig(out_path, dpi=300, quality=95)
+        plt.savefig(out_path, dpi=300)
         plt.close()
         print("[OK] Saved:", out_path)
 
