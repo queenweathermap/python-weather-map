@@ -1,29 +1,21 @@
 # ===============================================
-# module/plot_surface_pressure_wind_precip.py
+# module/plot/plot_surface_pressure_wind_precip.py
 # 地上海面更正気圧・風・降水量 描画モジュール
-# GSM/MSM両対応（引数 model="GSM"/"MSM" で切り替え）
+# plot_surface_pressure_and_wind_msm(ax, ds, step=0)
 # -----------------------------------------------
-# 日本語コメント多め。天気図プロジェクト向けの汎用・高機能地上天気図プロット関数です
-# 利用例:
-#   from module.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_gsm
-#   fig, ax = plt.subplots(subplot_kw=dict(projection=ccrs.PlateCarree()))
-#   plot_surface_pressure_and_wind_gsm(ax, ds)
-#   plt.show()
+# 2025-06-26 ChatGPT リファクタ・シグネチャ統一
 # ===============================================
 
 import numpy as np
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
+import matplotlib.pyplot as plt
 from module.utils.var_utils import get_var
 
-import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
-# ------------------------------------------------------
-# xarray Dataset から経度・緯度の2次元格子を取得する関数
-# ------------------------------------------------------
 def get_lon_lat(ds):
     """
     ds（xarray.Dataset）から2次元格子の経度・緯度配列を生成
@@ -34,32 +26,37 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-# ------------------------------------------------------
-# 地上天気図（気圧・風・降水量）描画本体
-# ------------------------------------------------------
 def plot_surface_pressure_and_wind_msm(ax, ds, step=0):
-    """地上気圧・風・降水量（MSM）"""
-    pass
     """
-    地上海面更正気圧・風ベクトル・降水量を天気図として描画
-    - ax: matplotlib axis（ccrs.PlateCarree() 必須）
-    - ds: xarray.Dataset
-    - model: "GSM" or "MSM" など
-    - prop: フォントプロパティ（任意）
-    - skip: 風ベクトルの間引き間隔
+    地上海面更正気圧・風・降水量（MSM）描画
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        描画先
+    ds : xarray.Dataset
+        GRIB2等から読み込んだxarrayデータセット
+    step : int, default 0
+        何ステップ目の時系列か（+0h, +3h…）
+    Returns
+    -------
+    None
     """
+    # もし時系列次元があればstepでスライス
+    # ここでは get_var 側で step対応している前提
+
     lon2d, lat2d = get_lon_lat(ds)
-    prmsl = get_var(ds, "PRMSL_meansealevel")
-    u10 = get_var(ds, "UGRD_10maboveground")
-    v10 = get_var(ds, "VGRD_10maboveground")
-    precip = get_var(ds, "APCP_surface")
+    prmsl = get_var(ds, "PRMSL_meansealevel", step=step)
+    u10 = get_var(ds, "UGRD_10maboveground", step=step)
+    v10 = get_var(ds, "VGRD_10maboveground", step=step)
+    precip = get_var(ds, "APCP_surface", step=step)
+    skip = 5  # 風ベクトルの間引き間隔
 
     # 地図範囲・装飾
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
-    # --- 海面更正気圧（等圧線：細線/太線） ---
+    # --- 海面更正気圧（等圧線） ---
     if prmsl is not None:
         prmsl_hpa = prmsl / 100  # [hPa]
         levels_fine = np.arange(900, 1101, 1)
@@ -108,22 +105,6 @@ def plot_surface_pressure_and_wind_msm(ax, ds, step=0):
             transform=ccrs.PlateCarree()
         )
         cb = plt.colorbar(cf, ax=ax, orientation="vertical", shrink=0.6, pad=0.02)
-        cb.set_label("PA [mm]", fontsize=8, fontproperties=prop)
+        cb.set_label("PA [mm]", fontsize=8)
 
-    # --- タイトル ---
-    ax.set_title("surface_pressure_and_wind", fontsize=10, pad=10, fontproperties=prop)
-
-# ------------------------------------------------------
-# GSM/MSMラッパー関数
-# ------------------------------------------------------
-def plot_surface_pressure_and_wind_gsm(ax, ds, prop=None, skip=5):
-    """GSM用ラッパー"""
-    return plot_surface_pressure_and_wind(ax, ds, model="GSM", prop=prop, skip=skip)
-
-def plot_surface_pressure_and_wind_msm(ax, ds, prop=None, skip=5):
-    """MSM用ラッパー"""
-    return plot_surface_pressure_and_wind(ax, ds, model="MSM", prop=prop, skip=skip)
-
-# ===============================================
-# END OF FILE
-# ===============================================
+    ax.set_title("Surface Pressure / Wind / Precipitation", fontsize=10, pad=10)
