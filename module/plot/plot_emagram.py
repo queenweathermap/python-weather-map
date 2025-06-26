@@ -72,9 +72,10 @@ def plot_emagram_skewt(ax, ds, lat, lon, time_idx=0, title="Emagram"):
         return ax
 
 # -------------------------------------------------
-# 複数時刻パネルでエマグラムを並べて表示（横並び最大6枚程度まで）
+# 複数時刻パネルでエマグラムを並べて表示
 # -------------------------------------------------
-def plot_emagram_panel(ds, lat=39.72, lon=140.10, times=None, model_name="GSM"):
+def plot_emagram(ax, ds, step=0):
+    """エマグラム（サウンド）"""
     """
     複数時刻のエマグラムパネルを一括描画
     - ds: xarray.Dataset
