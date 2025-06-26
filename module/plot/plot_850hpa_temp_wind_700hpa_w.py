@@ -29,7 +29,8 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 
-def plot_850hpa_temp_wind_700hpa_w(ax, ds, model="GSM", prop=None, skip=5):
+def plot_850hpa_temp_wind_700hpa_w(ax, ds, step=0):
+    """850hPa気温・風・700hPa鉛直流"""
     """
     Draws 850hPa temperature contours, wind barbs, and 700hPa vertical velocity as color fill.
     - ax: PlateCarree投影matplotlib axes
