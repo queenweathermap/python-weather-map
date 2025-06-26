@@ -33,7 +33,8 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の次元不正")
     return lon2d, lat2d
 
-def plot_700hpa_dindex_500hpa_temp(ax, ds, time_idx=0):
+def plot_700hpa_dindex_500hpa_temp(ax, ds, step=0):
+    """700hPa湿数・500hPa気温"""
     """
     700hPa湿数D-index（露点差/色塗り）と500hPa気温等値線（navy）を描画
     ・ax: PlateCarree投影Matplotlib Axes
