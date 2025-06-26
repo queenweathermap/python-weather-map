@@ -23,6 +23,6 @@ def generate_panel(ds, plot_funcs, nrows, ncols, figsize, title=None, step_axis=
         for c in range(ncols):
             step = c if step_axis == "col" else r
             ax = axes[r, c] if nrows > 1 else axes[c]
-            plot_func(ax, ds, step=step)
+            plot_func(ax, ds)
     return fig, axes
 
