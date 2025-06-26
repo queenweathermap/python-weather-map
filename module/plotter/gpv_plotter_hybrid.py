@@ -84,12 +84,13 @@ def generate_japan_panel_and_notify(
             constrained_layout=True,
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
-
+    
         for row, (plot_func, ds, title) in enumerate(panel_def):
             for col in range(ncols):
                 step = page * ncols + col   # +0h, +3h...などを計算
                 try:
-                    plot_func(axes[row, col], ds, step=step)
+                    ds_step = ds.isel(step=step)  # <- ここでスライス！！
+                    plot_func(axes[row, col], ds_step)  # step引数なしで渡す
                     axes[row, col].set_title(f"{title} (+{step*3}h)")
                 except Exception as e:
                     axes[row, col].set_title(f"{title} (エラー)")
