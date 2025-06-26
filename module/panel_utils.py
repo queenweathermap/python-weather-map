@@ -102,8 +102,8 @@ def make_local_weather_panel(
             dsi = ds.sel(time=time)
         # Map panels for all but first row
         if plot_func_list:
-            for row, func in enumerate(plot_func_list[1:], 1):
-                func(axes[row, col], dsi)
+                for row, func in enumerate(plot_func_list[1:], 1):
+                    func(axes[row, col], dsi)
 
     for row in range(1, nrows):
         for col in range(ncols):
