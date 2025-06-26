@@ -1,8 +1,7 @@
-# .github/workflows/daily_weather.yml
+# .github/workflows/weather_japan.yml
 # ===============================================
-# Daily Weather Map（GRIB2直接処理版・Slack通知・Google Drive連携）
-# cfgrib/xarray対応。wgrib2/NetCDF依存なし
-# 2025-06-21 by ChatGPT
+# 全国GSM/MSMハイブリッド天気図パネル自動生成（Slack・Drive連携）
+# 2025-06-27 リファクタ
 # ===============================================
 
 name: JAPAN Weather Panel
@@ -12,25 +11,26 @@ on:
     - cron: '0 4 * * *'   # JST 13時
   workflow_dispatch:
 
-# daily_weather_japan.yml の一部例
 jobs:
-  panel_msm:
+  run-japan-panel:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: '3.11'
+
       - name: Install requirements
         run: pip install -r requirements.txt
-      - name: Run MSM daily panel
-        run: python gpv_panel_daily_japan_msm.py
+
+      - name: Run Japan Weather Panel Script
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
-          run: |
-            python3 main_weather_batch.py
+        run: |
+          python3 gpv_panel_daily_japan.py
