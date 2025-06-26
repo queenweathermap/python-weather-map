@@ -19,31 +19,32 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_925hpa_temp_wind_dindex(ax, ds, step=0):
+def plot_925hpa_temp_wind_dindex(ax, ds):
     """
     925hPa気温・風・湿数（GSM/MSM両対応）
     Parameters
     ----------
     ax : matplotlib.axes.Axes
-    ds : xarray.Dataset
-    step : int, default 0
+    ds : xarray.Dataset（stepで既にスライス済み！）
     """
     lon2d, lat2d = get_lon_lat(ds)
 
     try:
-        temp = ds["t"].sel(isobaricInhPa=925).isel(step=step).squeeze()
-        u = ds["u"].sel(isobaricInhPa=925).isel(step=step).squeeze()
-        v = ds["v"].sel(isobaricInhPa=925).isel(step=step).squeeze()
-        rh = ds["r"].sel(isobaricInhPa=925).isel(step=step).squeeze()
+        temp = ds["t"].sel(isobaricInhPa=925).squeeze()
+        u = ds["u"].sel(isobaricInhPa=925).squeeze()
+        v = ds["v"].sel(isobaricInhPa=925).squeeze()
+        rh = ds["r"].sel(isobaricInhPa=925).squeeze()
     except Exception:
-        temp = get_var(ds, "TMP_925mb", step=step)
-        u = get_var(ds, "UGRD_925mb", step=step)
-        v = get_var(ds, "VGRD_925mb", step=step)
-        rh = get_var(ds, "RH_925mb", step=step)
+        temp = get_var(ds, "TMP_925mb")
+        u = get_var(ds, "UGRD_925mb")
+        v = get_var(ds, "VGRD_925mb")
+        rh = get_var(ds, "RH_925mb")
         if temp is None or u is None or v is None or rh is None:
             ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
             ax.set_axis_off()
             return
+            
+    # ... 以降はそのままプロット処理
 
     temp_c = temp - 273.15  # K→℃
     dewpoint = temp_c - (100 - rh) / 5
