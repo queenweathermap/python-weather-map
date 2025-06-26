@@ -73,9 +73,8 @@ def get_var_2d(ds, var_name, level=None):
 
 
     # --- 多次元配列のスライス処理 ---
-    # step選択（もし存在する場合）
-    if "step" in arr.dims:
-        arr = arr.isel(step=step_idx)
+    #  if "step" in arr.dims:
+    #     arr = arr.isel(step=step_idx)
     # isobaricInhPa選択
     if "isobaricInhPa" in arr.dims and level is not None:
         level_vals = arr.coords["isobaricInhPa"].values
