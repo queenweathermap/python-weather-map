@@ -39,7 +39,8 @@ def get_lon_lat(ds):
 # -------------------------------------------------
 # 300hPaパネル描画のメイン関数
 # -------------------------------------------------
-def plot_300hpa_height_wind(ax, ds, model="GSM", skip=5):
+def plot_300hpa_height_wind(ax, ds, step=0):
+    """300hPa等高度・風"""
     lon2d, lat2d = get_lon_lat(ds)
     hgt = get_var(ds, "HGT_300mb")
     u    = get_var(ds, "UGRD_300mb")
