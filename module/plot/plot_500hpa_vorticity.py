@@ -20,19 +20,21 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_500hpa_vorticity(ax, ds, step=0):
+# module/plot/plot_500hpa_vorticity.py
+def plot_500hpa_vorticity(ax, ds):
     """500hPa等高度・正渦度（オレンジ）"""
     import metpy.calc as mpcalc
     from metpy.units import units
 
-    hgt   = get_var(ds, "HGT_500mb", step=step)
-    ugrd  = get_var(ds, "UGRD_500mb", step=step)
-    vgrd  = get_var(ds, "VGRD_500mb", step=step)
+    hgt   = get_var(ds, "HGT_500mb")
+    ugrd  = get_var(ds, "UGRD_500mb")
+    vgrd  = get_var(ds, "VGRD_500mb")
 
     if hgt is None or ugrd is None or vgrd is None:
         ax.text(0.5, 0.5, "NO DATA", fontsize=12, color="gray", ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
         return
+
 
     ugrd = ugrd * units('m/s')
     vgrd = vgrd * units('m/s')
