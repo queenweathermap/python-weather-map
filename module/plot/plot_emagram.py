@@ -1,29 +1,24 @@
 # ===============================================
-# module/plot_emagram.py
+# module/plot/plot_emagram.py
 # エマグラム（気温・露点温度・風バーブ）描画モジュール
-# GSM/MSM両対応、複数時刻の一括パネル出力対応
+# plot_emagram(ax, ds, step=0, lat=39.72, lon=140.10)
 # -----------------------------------------------
-# 日本語コメント多数：SkewTロギングエマグラムに気温・露点・風バーブを描画
-# 利用例:
-#   from module.plot_emagram import plot_emagram_gsm_panel
-#   fig = plot_emagram_gsm_panel(ds, lat=39.72, lon=140.10, times=ds.time.values[:6])
-#   fig.savefig("emagram_panel.jpg")
-# 2025-06-13 by ChatGPT
+# 2025-06-26 ChatGPT リファクタ・シグネチャ統一
 # ===============================================
 
 import numpy as np
+import matplotlib.pyplot as plt
 from metpy.plots import SkewT
 from metpy.units import units
 from module.utils.var_utils import get_var
 
-import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
-# -------------------------------------------------
-# xarrayデータセットから1地点（lat/lon/時刻）の鉛直プロファイルを抽出
-# -------------------------------------------------
 def extract_profile_gpv(ds, lat, lon, time_idx=0):
+    """
+    指定緯度・経度・時刻インデックスの鉛直プロファイル（気温・露点・風）抽出
+    """
     lat_arr = get_var(ds, "latitude")
     lon_arr = get_var(ds, "longitude")
     ilat = np.abs(lat_arr - lat).argmin()
@@ -43,71 +38,63 @@ def extract_profile_gpv(ds, lat, lon, time_idx=0):
         u_arr = get_var(ds, key_u)
         v_arr = get_var(ds, key_v)
         if t_arr is not None and rh_arr is not None:
-            t = t_arr[time_idx, ilat, ilon] - 273.15  # 絶対温度→摂氏
+            t = t_arr[time_idx, ilat, ilon] - 273.15  # K→℃
             rh = rh_arr[time_idx, ilat, ilon]
-            td = t - (100 - rh) / 5  # 近似露点温度
+            td = t - (100 - rh) / 5  # 簡易近似
             temp.append(t)
             dew.append(td)
             levels.append(level)
             u.append(u_arr[time_idx, ilat, ilon] if u_arr is not None else np.nan)
             v.append(v_arr[time_idx, ilat, ilon] if v_arr is not None else np.nan)
-        else:
-            # 欠損時：appendしない（そのlevelは飛ばす）
-            continue
     if not levels:
-        # 全て欠損の場合、空配列を返す（落ちない対策）
         return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
-    idx = np.argsort(levels)[::-1]  # 高い気圧→低い気圧順
-    return (np.array(levels)[idx], np.array(temp)[idx], np.array(dew)[idx], np.array(u)[idx], np.array(v)[idx])
+    idx = np.argsort(levels)[::-1]
+    return (
+        np.array(levels)[idx],
+        np.array(temp)[idx],
+        np.array(dew)[idx],
+        np.array(u)[idx],
+        np.array(v)[idx],
+    )
 
-# -------------------------------------------------
-# SkewT（エマグラム）への描画本体
-# -------------------------------------------------
-def plot_emagram_skewt(ax, ds, lat, lon, time_idx=0, title="Emagram"):
-    levels, temp, dew, u, v = extract_profile_gpv(ds, lat, lon, time_idx)
+def plot_emagram(ax, ds, step=0, lat=39.72, lon=140.10):
+    """
+    エマグラム（SkewT）を1コマ描画
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        描画先
+    ds : xarray.Dataset
+        データセット
+    step : int, default 0
+        ds.timeのインデックス
+    lat, lon : float
+        プロファイル抽出位置
+    Returns
+    -------
+    None
+    """
+    time_idx = step
+    levels, temp, dew, u, v = extract_profile_gpv(ds, lat, lon, time_idx=time_idx)
     if len(levels) == 0:
-        # データ欠損時はグレーで「No Data」テキスト
         ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
         ax.set_axis_off()
-        return ax
+        return
 
-# -------------------------------------------------
-# 複数時刻パネルでエマグラムを並べて表示
-# -------------------------------------------------
-def plot_emagram(ax, ds, step=0):
-    """エマグラム（サウンド）"""
-    """
-    複数時刻のエマグラムパネルを一括描画
-    - ds: xarray.Dataset
-    - lat, lon: 緯度・経度
-    - times: 時刻リスト（省略時は先頭6つ）
-    - model_name: "GSM"/"MSM"など（タイトル用）
-    """
-    if times is None:
-        times = ds.time.values[:6]
-    ncols = len(times)
-    fig, axes = plt.subplots(1, ncols, figsize=(4 * ncols, 6), constrained_layout=True)
-    if ncols == 1:
-        axes = [axes]
-    for i, t in enumerate(times):
-        tlist = ds.time.values
-        time_idx = np.where(tlist == np.datetime64(t))[0][0]
-        title = f"{model_name}\n{str(t)[:16]}"
-        plot_emagram_skewt(axes[i], ds, lat, lon, time_idx=time_idx, title=title)
-    fig.suptitle(f"{model_name} Emagram\nLat: {lat:.2f}, Lon: {lon:.2f}", fontsize=13, y=1.05)
-    return fig
+    p = levels * units.hPa
+    t = temp * units.degC
+    td = dew * units.degC
 
-# -------------------------------------------------
-# GSM/MSMラッパー関数
-# -------------------------------------------------
-def plot_emagram_gsm_panel(ds, lat=39.72, lon=140.10, times=None):
-    """GSM用ラッパー"""
-    return plot_emagram_panel(ds, lat=lat, lon=lon, times=times, model_name="GSM")
+    skew = SkewT(ax, rotation=45)
+    skew.plot(p, t, 'r')
+    skew.plot(p, td, 'g')
+    skew.ax.set_ylim(1000, 100)
+    skew.ax.set_xlim(-50, 40)
+    skew.ax.set_xlabel('Temperature (°C)')
+    skew.ax.set_ylabel('Pressure (hPa)')
+    skew.ax.set_title(f'Emagram\nLat: {lat:.2f}, Lon: {lon:.2f}', fontsize=10, pad=10)
 
-def plot_emagram_msm_panel(ds, lat=39.72, lon=140.10, times=None):
-    """MSM用ラッパー"""
-    return plot_emagram_panel(ds, lat=lat, lon=lon, times=times, model_name="MSM")
+    # 風バーブ
+    if u is not None and v is not None:
+        skew.plot_barbs(p, u, v)
 
-# ===============================================
-# END OF FILE
-# ===============================================
