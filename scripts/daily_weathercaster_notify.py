@@ -69,12 +69,15 @@ try:
         base = os.path.splitext(os.path.basename(pdf_path))[0]
         jpg_path = os.path.join(SAVE_DIR, f"{base}.jpg")
         cmd = f"pdftoppm -jpeg -singlefile -r 300 {pdf_path} {jpg_path[:-4]}"
-        subprocess.run(cmd, shell=True, check=True)
-        if os.path.exists(jpg_path):
-            print(f"[OK] JPG変換: {jpg_path}")
-            jpg_paths.append(jpg_path)
-        else:
-            print(f"[NG] JPG変換失敗: {jpg_path}")
+        try:
+            subprocess.run(cmd, shell=True, check=True)
+            if os.path.exists(jpg_path):
+                print(f"[OK] JPG変換: {jpg_path}")
+                jpg_paths.append(jpg_path)
+            else:
+                print(f"[NG] JPG変換失敗: {jpg_path}")
+        except Exception as e:
+            print(f"[NG] JPG変換失敗: {jpg_path} - {e}")
 
     # --- STEP 3: ZIP圧縮 ---
     print("[STEP3] JPGをZIP圧縮")
@@ -94,15 +97,22 @@ try:
     full_log = log_buffer.getvalue()
     msg = (
         f":white_check_mark: {today} Weathercaster天気図 処理完了\n"
-        f"Google Driveリンク（JPG ZIP）: {drive_url}\n"
+        f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
         f"--- LOG ---\n```{full_log[-1800:]}```"
     )
     send_slack_text(channel=SLACK_CHANNEL_ID, message=msg)
 
     # --- STEP 6: Drive古いファイル削除（30日以上） ---
     print("[STEP6] Google Drive内の古いファイル削除")
-    delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30)
-
+    # 関数のシグネチャに注意（必ずどちらか1つ！）
+    try:
+        delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30)
+    except TypeError:
+        # もし違う定義になっていた場合は引数を合わせて呼び出す
+        from dotenv import load_dotenv
+        load_dotenv()
+        creds_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
+        delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, creds_json=creds_json, days=30)
 
 except Exception as e:
     error_log = log_buffer.getvalue()
