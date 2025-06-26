@@ -19,26 +19,28 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_850hpa_thetae_stream(ax, ds, step=0):
+def plot_850hpa_thetae_stream(ax, ds):
     """
     850hPa相当温位・流線
-    ax: PlateCarree axes, ds: xarray.Dataset, step: int
+    ax: PlateCarree axes, ds: xarray.Dataset（stepでスライス済み）
     """
     # MSM優先、なければGSM
     try:
-        temp = ds["t"].sel(isobaricInhPa=850).isel(step=step).squeeze()
-        rh   = ds["r"].sel(isobaricInhPa=850).isel(step=step).squeeze()
-        u    = ds["u"].sel(isobaricInhPa=850).isel(step=step).squeeze()
-        v    = ds["v"].sel(isobaricInhPa=850).isel(step=step).squeeze()
+        temp = ds["t"].sel(isobaricInhPa=850).squeeze()
+        rh   = ds["r"].sel(isobaricInhPa=850).squeeze()
+        u    = ds["u"].sel(isobaricInhPa=850).squeeze()
+        v    = ds["v"].sel(isobaricInhPa=850).squeeze()
     except Exception:
-        temp = get_var(ds, "TMP_850mb", step=step)
-        rh   = get_var(ds, "RH_850mb", step=step)
-        u    = get_var(ds, "UGRD_850mb", step=step)
-        v    = get_var(ds, "VGRD_850mb", step=step)
+        temp = get_var(ds, "TMP_850mb")
+        rh   = get_var(ds, "RH_850mb")
+        u    = get_var(ds, "UGRD_850mb")
+        v    = get_var(ds, "VGRD_850mb")
         if temp is None or rh is None or u is None or v is None:
             ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
             ax.set_axis_off()
             return
+
+
 
     # 簡易相当温位計算（RH→Td近似→thetae_like）
     Td = temp - (100 - rh) / 5
