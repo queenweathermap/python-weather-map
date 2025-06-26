@@ -11,7 +11,7 @@ import datetime
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 
-from module.utils.gpv_download_utils import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
+from module.gpv_download_utils import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.slack_utils import send_slack_message
 
