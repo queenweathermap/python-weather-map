@@ -27,7 +27,7 @@ def make_nodata_weather_panel(
     msg += "\n".join([str(pd.Timestamp(t).strftime("%Y-%m-%d %H:%M")) for t in times])
     ax.text(0.5, 0.5, msg, fontsize=20, ha="center", va="center", wrap=True)
     plt.tight_layout()
-    fig.savefig(save_path, bbox_inches="tight")
+    fig.savefig(save_path, bbox_inches="tight", dpi=150)
     plt.close(fig)
     print(f"[NO DATA panel] {save_path} exported.")
 
@@ -116,9 +116,9 @@ def make_local_weather_panel(
         f"[{city_name} Local] Weather Panel (incl. Emagram)\nInit: {init_time.strftime('%Y%m%d %HUTC')} | Forecasts: {', '.join(hh_labels)}",
         fontsize=12, y=1.02
     )
-    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    fig.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
-    print("File exported:", os.path.exists(save_path))
+    print("File exported:", save_path)
 
 def make_daily_weather_panel_multi_time(ds, times, save_path="weather_panel.jpg", plot_func_list=None, nrows=6, ncols=12):
     """
@@ -145,7 +145,7 @@ def make_daily_weather_panel_multi_time(ds, times, save_path="weather_panel.jpg"
     for i in range(len(times), len(axes)):
         axes[i].set_axis_off()
     fig.suptitle("Weather Panel", fontsize=22)
-    fig.savefig(save_path, bbox_inches="tight")
+    fig.savefig(save_path, bbox_inches="tight", dpi=150)
     plt.close(fig)
     print(f"[Weather Panel] {save_path} exported.")
 
