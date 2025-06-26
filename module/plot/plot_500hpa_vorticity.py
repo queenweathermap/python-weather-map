@@ -40,7 +40,7 @@ def get_lon_lat(ds):
 # -------------------------------------------------
 # 500hPaパネル描画のメイン関数
 # -------------------------------------------------
-def plot_500hpa_vorticity(ax, ds, model="GSM", prop=None):
+def plot_500hpa_vorticity(ax, ds, step=0):
     """
     Plot 500hPa geopotential height (contour) and positive vorticity area (orange fill).
     (日本語解説: 500hPa等高度線＋正の渦度領域をオレンジで塗り分け)
@@ -93,6 +93,8 @@ def plot_500hpa_vorticity(ax, ds, model="GSM", prop=None):
 
     # --- タイトル（フォントプロパティ付与可） ---
     ax.set_title("500hPa Vorticity", fontsize=10, pad=10, fontproperties=prop)
+
+    pass  # 本実装は各関数で
 
 # -------------------------------------------------
 # ラッパー関数（GSM/MSM両対応でimportしやすく）
