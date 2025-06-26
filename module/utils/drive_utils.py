@@ -42,14 +42,17 @@ def upload_to_drive(file_path, folder_id=DRIVE_FOLDER_ID):
     service.permissions().create(fileId=uploaded["id"], body={"type": "anyone", "role": "reader"}).execute()
     file_id = uploaded["id"]
     return f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
+    
 
-def delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30):
+def delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30, creds_json=None):
     """
     指定フォルダ内の古いファイルを削除（作成日がN日より前）
     - folder_id: 対象フォルダID
     - older_than_days: N日以上前のファイルを削除
+    - creds_json: GoogleサービスアカウントのJSON（文字列 or None）
     """
-    service = get_drive_service()
+    # creds_jsonが渡された場合はそれを使って認証
+    service = get_drive_service(creds_json=creds_json)
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
     # RFC3339形式 (例: '2023-06-01T00:00:00+00:00')
     cutoff_str = cutoff.isoformat()
@@ -59,3 +62,4 @@ def delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30):
     for f in files:
         print(f"[DELETE] {f['name']} ({f['createdTime']})")
         service.files().delete(fileId=f["id"]).execute()
+
