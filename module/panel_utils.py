@@ -12,33 +12,6 @@ from module.utils.var_utils import get_var
 from module.utils.xr_utils import align_datasets_common
 
 
-def generate_universal_panel_and_notify(..., city_name=None, ...):
-    ...
-    # ① 地域ごとの範囲
-    REGION_EXTENTS = {
-        "japan": [122, 153, 20, 46],
-        "akita": [139.5, 141.0, 38.8, 40.5],  # 必要に応じて調整
-    }
-    city_tag = city_name or 'japan'
-    extent = REGION_EXTENTS.get(city_tag, REGION_EXTENTS["japan"])
-    ...
-    for page in range(npages):
-        fig, axes = plt.subplots(
-            nrows=nrows, ncols=ncols,
-            figsize=(ncols*3, nrows*3),
-            constrained_layout=True,
-            subplot_kw=dict(projection=ccrs.PlateCarree())
-        )
-        for row, (plot_func, ds, title) in enumerate(panel_def):
-            n_steps = ds.dims["step"] if "step" in ds.dims else 1
-            for col in range(ncols):
-                step = page * ncols + col
-                ax = axes[row, col]
-                # ↓② ここで範囲指定（必ず呼ぶ！）
-                ax.set_extent(extent, crs=ccrs.PlateCarree())
-                ...
-                # 以降、try/exceptでplot_func等は既存のまま
-
 def make_nodata_weather_panel(
     times, 
     save_path="nodata_panel.jpg", 
