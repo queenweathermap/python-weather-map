@@ -30,12 +30,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fonts-ipaexfont
 
-
       - name: Run Akita Local Weather Script
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
-          run: |
-            PYTHONPATH=. python3 scripts/gpv_panel_daily_akita.py
+        run: |
+          PYTHONPATH=. python3 scripts/gpv_panel_daily_akita.py
