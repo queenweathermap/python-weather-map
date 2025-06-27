@@ -41,17 +41,15 @@ def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
 
 def main():
     try:
-        # ==== サイクル自動判定 ====
         ymd, hh, file_infos = find_latest_available_files_akita()
         model = "MSM"
         output_dir = "./output_akita"
         drive_folder = os.environ["DRIVE_FOLDER_ID"]
         slack_channel = os.environ["SLACK_CHANNEL_ID"]
-        # 必要に応じてパネル分割数やcity_nameも可変化
-        ncols, npages, nrows = 4, 1, 1   # 秋田局地用（必要なら調整）
+        ncols, npages, nrows = 4, 1, 8     # 必要なら調整
         city_name = "akita"
 
-        # ---- 必要ファイルDL（未DLのみ保存） ----
+        # GPVファイルDL
         for info in file_infos:
             if not os.path.exists(info["local"]):
                 resp = requests.get(info["url"])
@@ -63,35 +61,19 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
-        # --- 4. 画像ページ分割描画 ---
-        city_tag = city_name or 'japan'
-        extent = REGION_EXTENTS.get(city_tag, REGION_EXTENTS["japan"])
-        panel_imgs = []
-        for page in range(npages):
-            fig, axes = plt.subplots(
-                nrows=nrows, ncols=ncols,
-                figsize=(ncols*3, nrows*3),
-                constrained_layout=True,
-                subplot_kw=dict(projection=ccrs.PlateCarree())
-            )
-            for row, (plot_func, ds, title) in enumerate(panel_def):
-                n_steps = ds.dims["step"] if "step" in ds.dims else 1
-                for col in range(ncols):
-                    step = page * ncols + col
-                    ax = axes[row, col]
-                    # ▼ここでset_extentを毎回実行
-                    ax.set_extent(extent, crs=ccrs.PlateCarree())
-
-
-        # ---- パネル生成＋Drive＋Slack通知 ----
+        # --- パネル生成＋Drive＋Slack通知 ---
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
             model=model,
             output_dir=output_dir,
             drive_folder=drive_folder,
-            city_name="akita",   # ←必ず明示
+            ncols=ncols,
+            npages=npages,
+            nrows=nrows,
+            city_name=city_name,   # これ重要！
         )
+
         msg = (
             f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
