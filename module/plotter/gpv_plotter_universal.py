@@ -1,7 +1,8 @@
-# module/plotter/gpv_plotter_universal.py
 # ===============================================================
 # 全国・秋田・任意局地ハイブリッド天気図パネル自動生成コア
 # 引数で描画関数リスト・範囲・モデルを切り替え可
+# 【データセット安全取得対応・エラー耐性強化版】
+# 2025-06-28
 # ===============================================================
 
 import os
@@ -14,6 +15,60 @@ import xarray as xr
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
+
+# ▼--- データセット安全取得用ヘルパー関数群 ---▼
+
+def open_isobaric_dataset(fname, hPa=None):
+    """
+    指定GRIB2ファイルから isobaricInhPa（気圧面）層を優先的に読み込む。
+    hPaを指定すると、その気圧面のみ抽出。
+    """
+    for ds in cfgrib.open_datasets(fname):
+        if "isobaricInhPa" in ds.variables and "step" in ds.dims:
+            if hPa is not None:
+                if hPa in ds["isobaricInhPa"]:
+                    return ds.sel(isobaricInhPa=hPa)
+                else:
+                    continue
+            return ds
+    raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
+
+def open_height_dataset(fname, height=10):
+    """
+    指定GRIB2ファイルから heightAboveGround=指定値（例:10m, 1.5m等）の層を読み込む。
+    """
+    for ds in cfgrib.open_datasets(fname):
+        if "heightAboveGround" in ds.variables and "step" in ds.dims:
+            if hasattr(ds, "heightAboveGround") and height in ds.heightAboveGround:
+                return ds.sel(heightAboveGround=height)
+            if ("heightAboveGround" in ds.coords and 
+                any(ds.heightAboveGround.values == height)):
+                return ds.sel(heightAboveGround=height)
+    raise RuntimeError(f"[ERROR] heightAboveGround={height}m 層データが見つかりません: {fname}")
+
+def open_surface_dataset(fname):
+    """
+    指定GRIB2ファイルから地上値（stepType="instant"）のデータセットを優先して取得
+    """
+    for ds in cfgrib.open_datasets(fname):
+        try:
+            if ("stepType" in ds.variables and 
+                hasattr(ds, "stepType") and 
+                (getattr(ds, "stepType", None) == "instant" or
+                 (hasattr(ds.stepType, "values") and 
+                  all(ds.stepType.values == "instant")))):
+                return ds
+        except Exception:
+            pass
+    # fallback: xarrayオプションfilter_by_keys
+    try:
+        ds = xr.open_dataset(fname, engine="cfgrib", filter_by_keys={"stepType": "instant"})
+        return ds
+    except Exception:
+        pass
+    raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
+
+# ▼--- パネル一括生成・通知本体 ---▼
 
 def generate_universal_panel_and_notify(
     ymd,
@@ -33,6 +88,11 @@ def generate_universal_panel_and_notify(
     slack_channel=None,
     log_callback=None
 ):
+    """
+    全国・秋田・任意局地パネル生成＋Zip＋Driveアップ＋Slack通知一括実行
+    - panel_def: [(plot_func, ds, title), ...] を与えれば任意構成可
+    - 各ds（xarray.Dataset）は必ずヘルパー関数で安全に取得すること
+    """
     def log(msg):
         print(msg)
         if log_callback:
@@ -41,7 +101,7 @@ def generate_universal_panel_and_notify(
     os.makedirs(output_dir, exist_ok=True)
     dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
 
-    # ダウンロード
+    # --- 1. データダウンロード ---
     patterns = MODEL_CONFIG.get(model, MODEL_CONFIG["MSM"])["patterns"]
     panel_files = download_gpv_panel(
         patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages
@@ -50,14 +110,21 @@ def generate_universal_panel_and_notify(
         log("[ERROR] GPVファイルが見つかりません")
         raise FileNotFoundError("GPVファイルが見つかりません")
 
+    # --- 2. データセット安全取得 ---
     l_pall_fname, _ = panel_files[0][0]
     lsurf_fname, _ = panel_files[0][1]
-    ds_isobaric = [d for d in cfgrib.open_datasets(l_pall_fname) if "isobaricInhPa" in d.variables][0]
-    ds_surf_instant = xr.open_dataset(
-        lsurf_fname, engine="cfgrib", filter_by_keys={"stepType": "instant"}
-    )
+    try:
+        ds_isobaric = open_isobaric_dataset(l_pall_fname)
+    except Exception as e:
+        log(f"[ERROR] isobaricデータ取得失敗: {e}")
+        raise
+    try:
+        ds_surf_instant = open_surface_dataset(lsurf_fname)
+    except Exception as e:
+        log(f"[ERROR] 地上instantデータ取得失敗: {e}")
+        raise
 
-    # デフォルトpanel_def
+    # --- 3. デフォルトpanel_def（全国用/秋田用/任意局地用など分岐OK） ---
     if panel_def is None:
         from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
         from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
@@ -80,6 +147,8 @@ def generate_universal_panel_and_notify(
         ]
         nrows = len(panel_def)
 
+    # --- 4. 画像ページ分割描画 ---
+    city_tag = city_name or 'japan'
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -107,7 +176,6 @@ def generate_universal_panel_and_notify(
                     axes[row, col].axis("off")
 
         page_time_range = f"{ymd} UTC{hh} +{page*ncols*3}h〜+{(page+1)*ncols*3-3}h"
-        city_tag = city_name or 'japan'
         fig.suptitle(f"{city_tag}天気図パネル（{page_time_range}）", fontsize=20)
         out_name = f"panel_{city_tag}_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
@@ -116,6 +184,7 @@ def generate_universal_panel_and_notify(
         log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
+    # --- 5. ZIP圧縮・Driveアップロード ---
     zip_name = f"panel_{city_tag}_{ymd}_UTC{hh}.zip"
     zip_path = os.path.join(output_dir, zip_name)
     log("[STEP3] JPGをZIP圧縮")
