@@ -45,7 +45,7 @@ def main():
 
     file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [os.path.basename(zip_path)])
     msg = (
-        f":cityscape: 盛岡局地パネル {ymd} UTC{hh}\n"
+        f":large_yellow_circle: 盛岡局地パネル {ymd} UTC{hh}\n"
         "--- LOG ---\n"
         f"{file_log}\n"
         f"{drive_url}"
