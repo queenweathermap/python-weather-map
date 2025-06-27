@@ -63,6 +63,26 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
+        # --- 4. 画像ページ分割描画 ---
+        city_tag = city_name or 'japan'
+        extent = REGION_EXTENTS.get(city_tag, REGION_EXTENTS["japan"])
+        panel_imgs = []
+        for page in range(npages):
+            fig, axes = plt.subplots(
+                nrows=nrows, ncols=ncols,
+                figsize=(ncols*3, nrows*3),
+                constrained_layout=True,
+                subplot_kw=dict(projection=ccrs.PlateCarree())
+            )
+            for row, (plot_func, ds, title) in enumerate(panel_def):
+                n_steps = ds.dims["step"] if "step" in ds.dims else 1
+                for col in range(ncols):
+                    step = page * ncols + col
+                    ax = axes[row, col]
+                    # ▼ここでset_extentを毎回実行
+                    ax.set_extent(extent, crs=ccrs.PlateCarree())
+
+
         # ---- パネル生成＋Drive＋Slack通知 ----
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
             ymd=ymd,
