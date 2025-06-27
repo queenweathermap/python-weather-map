@@ -1,80 +1,75 @@
-# scripts/gpv_panel_daily_akita.py
-# ========================================================
-# 秋田局地 MSMパネル（7段×4列×複数ページ）自動生成＋Zip＋Drive＋Slack通知テンプレ
-# 全国版と完全揃え（2025-06-27）
-# ========================================================
-
 import os
-import sys
-from io import StringIO
-import traceback
-import glob
 import xarray as xr
-import pandas as pd
-
 from module.utils.gpv_html_parser import find_existing_msm_files
-from module.core.gpv_converter import grib2_to_netcdf
-from module.core.gpv_data_loader import load_dataset
 from module.utils.zip_utils import zip_files
 from module.utils.drive_utils import upload_to_drive
 from module.utils.slack_utils import send_slack_message
-from module.panel_utils import (
-    make_nodata_weather_panel,
-    make_local_weather_panel,
-    align_datasets_common,
-)
+from module.panel_utils import make_local_weather_panel, make_nodata_weather_panel
+from module.plot.plot_emagram import plot_emagram
+from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
+from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
+from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
+from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
+from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
 
-# --- パラメータ（全国と揃える） ---
 BASE_DIR = "./data"
 OUT_PREFIX = "akita_local_msm_map"
+BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
+YMD = pd.Timestamp.now().strftime("%Y%m%d")
 NCOLS = 4
-NROWS = 7     # 全国と揃える（例：7段）
-NPAGES = 4    # 必要に応じて増やせます（4ページに統一）
-
-PIN_LAT = 39.7186
-PIN_LON = 140.1024
+NROWS = 7  # 全国と揃える場合
+NPAGES = 1
 CITY_NAME = "Akita City"
+PIN_LAT, PIN_LON = 39.72, 140.10  # 秋田市中心
 
-print("=== Start Akita Weather Panel Script ===")
+# 1. データファイルを探して xarrayで開く
+files = find_existing_msm_files(BASE_URL, YMD)
+if not files:
+    # データなければNoData画像だけ出力
+    make_nodata_weather_panel(
+        save_path=f"{OUT_PREFIX}_nodata.jpg",
+        city_name=CITY_NAME,
+        times=[...]
+    )
+    raise RuntimeError("No MSM data found")
+grib_path = files[0]
+ds = xr.open_dataset(grib_path, engine="cfgrib")
 
-def get_gpv_nodata_times(ncols=4):
+# 2. timesリストの生成（例：3hごと4本）
+def get_times(n):
+    import pandas as pd
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     hour = now.hour
     init_hour = max([h for h in range(0, 24, 3) if h <= hour])
     base_time = now.replace(hour=init_hour)
-    return [base_time + pd.Timedelta(hours=3*i) for i in range(ncols)]
+    return [base_time + pd.Timedelta(hours=3*i) for i in range(n)]
+times = get_times(NCOLS)
 
-def main():
-    # --- LOGバッファ ---
-    log_buffer = StringIO()
-    sys.stdout = sys.stderr = log_buffer
+# 3. プロット関数リスト（全国7段に合わせ、足りない分はNoneで埋めてもOK）
+plot_func_list = [
+    plot_emagram,
+    plot_850hpa_temp_wind_700hpa_w,
+    plot_850hpa_thetae_stream,
+    plot_925hpa_temp_wind_dindex,
+    plot_975hpa_temp_wind_dindex,
+    plot_surface_pressure_and_wind_msm,
+    None,  # 7段目のために空き（将来追加も可能）
+]
 
-    try:
-        os.makedirs(BASE_DIR, exist_ok=True)
-        panel_imgs = []
+# 4. パネル画像生成（1ページのみなら1ループ）
+panel_imgs = []
+for page in range(NPAGES):
+    out_img = f"{OUT_PREFIX}_p{page+1}.jpg"
+    make_local_weather_panel(
+        ds, times, out_img,
+        pin_lat=PIN_LAT, pin_lon=PIN_LON, city_name=CITY_NAME,
+        lat_range=(38, 41), lon_range=(139, 142),
+        plot_func_list=plot_func_list,
+        nrows=NROWS, ncols=NCOLS,
+    )
+    panel_imgs.append(os.path.join(BASE_DIR, out_img))
 
-        # --- データ取得（全国版のdownload_gpv_panelに近い実装でもOK） ---
-        # ...（従来通り: MSMバイナリ検索→NetCDF変換→open_dataset→align_datasets_common）...
-        # ここは全国版の `download_gpv_panel()` 互換を使っても良いです
-
-        # --- パネル生成 ---
-        for page in range(NPAGES):
-            out_img = f"{OUT_PREFIX}_p{page+1}.jpg"
-            # plot_func_list：必要な関数を7つ指定（全国版同様）
-            plot_func_list = [
-                # 例: plot_emagram_msm_panel, plot_850hpa_temp_wind_700hpa_w_msm, ...
-            ]
-            # ds, times は各自取得
-            make_local_weather_panel(
-                ds, times, out_img,
-                pin_lat=PIN_LAT, pin_lon=PIN_LON, city_name=CITY_NAME,
-                lat_range=(38, 41), lon_range=(139, 142),
-                plot_func_list=plot_func_list,
-                nrows=NROWS, ncols=NCOLS,
-            )
-            panel_imgs.append(os.path.join(BASE_DIR, out_img))
-            print(f"[OK] 保存: {os.path.join(BASE_DIR, out_img)}")
-
+# 5. ZIP圧縮・Driveアップロード・Slack通知は全国版と同じでOK
         # --- ZIP作成 ---
         zip_name = f"{OUT_PREFIX}.zip"
         zip_path = os.path.join(BASE_DIR, zip_name)
