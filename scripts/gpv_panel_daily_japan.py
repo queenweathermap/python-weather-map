@@ -24,8 +24,8 @@ def get_latest_gpv_init(now=None):
     return ymd, hh
 
 def main():
-    # ==== 設定 ====
-    ymd, hh = get_latest_gpv_init()  # ← 最新イニシャル自動取得
+    ymd = "20250626"
+    hh = "18"
     model = "HYBRID"
     output_dir = "./data"
     drive_folder = os.environ["DRIVE_FOLDER_ID"]
@@ -33,36 +33,49 @@ def main():
     ncols = 4
     npages = 4
 
-    # ==== ① 全国パネル生成＋Driveアップ＋Slack通知＋ログ ====
-    log_lines = []
-    def log(msg):
-        print(msg)
-        log_lines.append(msg)
+    # --- ログ捕捉 ---
+    log_buffer = StringIO()
+    sys.stdout = sys.stderr = log_buffer
 
-    # パネル生成＆連携（ファイル名は panel_japan_{ymd}_UTC{hh}_pX.jpg 統一）
-    panel_imgs = generate_japan_panel_images( # <- 画像リストだけ返すようにする
-        ymd=ymd,
-        hh=hh,
-        model=model,
-        output_dir=output_dir,
-        ncols=ncols,
-        npages=npages,
+    print(f"[START] {ymd} Weathercaster天気図自動処理")
+    print("[STEP1] GPVデータ一括ダウンロード")
+
+    # 画像生成
+    panel_imgs = generate_japan_panel_images(
+        ymd=ymd, hh=hh, model=model,
+        output_dir=output_dir, ncols=ncols, npages=npages
     )
+    for img in panel_imgs:
+        print(f"[OK] 保存: {img}")
 
     # ZIP作成
-    zip_path = os.path.join(output_dir, f"panel_japan_{ymd}_UTC{hh}.zip")
+    print("[STEP3] JPGをZIP圧縮")
+    zip_name = f"panel_japan_{ymd}_UTC{hh}.zip"
+    zip_path = os.path.join(output_dir, zip_name)
     zip_files(panel_imgs, zip_path)
-    # Drive
+    print(f"[OK] ZIP作成: {zip_path}")
+
+    # Google Driveアップロード
+    print("[STEP4] Google Driveへアップロード")
     drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
-    # LOG
-    file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [os.path.basename(zip_path)])
+    print(f"[OK] Drive URL: {drive_url}")
+
+    # ファイルリスト
+    file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
+    detail_log = log_buffer.getvalue()
+
+    # Slack通知文
     msg = (
         f":earth_asia: 全国天気図パネル {ymd} UTC{hh}\n"
-        f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
         "--- LOG ---\n"
-        f"{file_log}"
+        f"{file_log}\n"
     )
     send_slack_text(channel=slack_channel, message=msg)
+
+    # 標準出力を元に戻す
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    log_buffer.close()
 
 if __name__ == "__main__":
     main()
