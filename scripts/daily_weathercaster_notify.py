@@ -13,6 +13,7 @@ from io import StringIO
 import sys
 
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
+from module.utils.zip_utils import zip_files
 from module.utils.slack_utils import send_slack_text
 
 # --- 保存先ディレクトリ ---
@@ -82,9 +83,7 @@ try:
     # --- STEP 3: ZIP圧縮 ---
     print("[STEP3] JPGをZIP圧縮")
     zip_path = os.path.join(SAVE_DIR, f"{today}_weathercharts.zip")
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        for jpg in jpg_paths:
-            zipf.write(jpg, arcname=os.path.basename(jpg))
+    zip_files(jpg_paths, zip_path)
     print(f"[OK] ZIP作成: {zip_path}")
 
     # --- STEP 4: Google Driveにアップ ---
