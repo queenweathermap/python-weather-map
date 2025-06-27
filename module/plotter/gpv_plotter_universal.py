@@ -1,6 +1,8 @@
+# module/plotter/gpv_plotter_universal.py
 # ===============================================================
-# 全国・秋田・任意局地ハイブリッド天気図パネル自動生成コア
-# city_nameによる地図範囲切り替え対応（2025-06-28修正版）
+# 全国・秋田・任意局地ハイブリッド天気図パネル生成・通知コア
+# city_name・extentの柔軟指定対応
+# 2025-06-28 by ChatGPT
 # ===============================================================
 
 import os
@@ -14,66 +16,26 @@ from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIR
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
 
-# ▼--- 地域ごとの描画範囲を定義 ---▼
+# --- 地域ごとのデフォルトズーム範囲定義 ---
 REGION_EXTENTS = {
     "japan": [122, 153, 20, 46],
-    "akita": [139.5, 141.0, 38.8, 40.5],  # 必要に応じて秋田周辺を微調整
-    # "tokyo": [...], # 例: 他地域も拡張可
+    "akita": [139.5, 141.0, 38.8, 40.5],
+    "tokyo": [138.5, 140.0, 34.7, 36.2],
+    # 必要に追加
 }
 
-# ▼--- データセット安全取得用ヘルパー関数群（省略可） ---▼
-def open_isobaric_dataset(fname, hPa=None):
-    for ds in cfgrib.open_datasets(fname):
-        if "isobaricInhPa" in ds.variables and "step" in ds.dims:
-            if hPa is not None:
-                if hPa in ds["isobaricInhPa"]:
-                    return ds.sel(isobaricInhPa=hPa)
-                else:
-                    continue
-            return ds
-    raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
-
-def open_surface_dataset(fname):
-    for ds in cfgrib.open_datasets(fname):
-        try:
-            if ("stepType" in ds.variables and 
-                hasattr(ds, "stepType") and 
-                (getattr(ds, "stepType", None) == "instant" or
-                 (hasattr(ds.stepType, "values") and 
-                  all(ds.stepType.values == "instant")))):
-                return ds
-        except Exception:
-            pass
-    try:
-        ds = xr.open_dataset(fname, engine="cfgrib", filter_by_keys={"stepType": "instant"})
-        return ds
-    except Exception:
-        pass
-    raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
-
-# ▼--- パネル一括生成・通知本体 ---▼
-
 def generate_universal_panel_and_notify(
-    ymd,
-    hh,
-    model,
-    output_dir,
+    ymd, hh, model, output_dir,
     drive_folder=None,
-    ncols=4,
-    npages=1,
-    nrows=7,
-    panel_def=None,    # [(plot_func, ds, title), ...]
-    lat_range=None,    # 任意局地
-    lon_range=None,
-    pin_lat=None,
-    pin_lon=None,
-    city_name=None,
+    ncols=4, npages=1, nrows=None,
+    panel_def=None,
+    city_name="japan",
+    extent=None,    # ★任意範囲を直接指定したい場合
     slack_channel=None,
-    log_callback=None
+    log_callback=None,
 ):
     """
-    全国・秋田・任意局地パネル生成＋Zip＋Driveアップ＋Slack通知一括実行
-    city_nameに応じて地図範囲を自動切り替え
+    描画範囲は city_name で自動切替。直接 extent で上書きも可能。
     """
     def log(msg):
         print(msg)
@@ -83,30 +45,20 @@ def generate_universal_panel_and_notify(
     os.makedirs(output_dir, exist_ok=True)
     dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
 
-    # --- 1. データダウンロード ---
+    # --- データダウンロード（省略: 必要に応じてカスタムダウンロード処理） ---
     patterns = MODEL_CONFIG.get(model, MODEL_CONFIG["MSM"])["patterns"]
-    panel_files = download_gpv_panel(
-        patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages
-    )
+    panel_files = download_gpv_panel(patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages)
     if not panel_files or not panel_files[0] or not all(panel_files[0]):
         log("[ERROR] GPVファイルが見つかりません")
         raise FileNotFoundError("GPVファイルが見つかりません")
 
-    # --- 2. データセット安全取得 ---
+    # --- データセット取得 ---
     l_pall_fname, _ = panel_files[0][0]
     lsurf_fname, _ = panel_files[0][1]
-    try:
-        ds_isobaric = open_isobaric_dataset(l_pall_fname)
-    except Exception as e:
-        log(f"[ERROR] isobaricデータ取得失敗: {e}")
-        raise
-    try:
-        ds_surf_instant = open_surface_dataset(lsurf_fname)
-    except Exception as e:
-        log(f"[ERROR] 地上instantデータ取得失敗: {e}")
-        raise
+    ds_isobaric = open_isobaric_dataset(l_pall_fname)
+    ds_surf_instant = open_surface_dataset(lsurf_fname)
 
-    # --- 3. デフォルトpanel_def（全国用/秋田用/任意局地用など分岐OK） ---
+    # --- パネル定義 ---
     if panel_def is None:
         from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
         from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
@@ -129,11 +81,10 @@ def generate_universal_panel_and_notify(
         ]
         nrows = len(panel_def)
 
-    # ▼--- 追加：city_nameによる範囲選択 ---▼
-    city_tag = city_name or 'japan'
-    extent = REGION_EXTENTS.get(city_tag, REGION_EXTENTS["japan"])
+    # --- 範囲選択（city_name優先・直接渡しなら上書き） ---
+    extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
-    # --- 4. 画像ページ分割描画 ---
+    # --- 描画 ---
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -147,7 +98,6 @@ def generate_universal_panel_and_notify(
             for col in range(ncols):
                 step = page * ncols + col
                 ax = axes[row, col]
-                # ▼--- ここで範囲をセット ---▼
                 ax.set_extent(extent, crs=ccrs.PlateCarree())
                 if step >= n_steps:
                     ax.axis("off")
@@ -162,26 +112,20 @@ def generate_universal_panel_and_notify(
                     ax.set_title(f"{title} (エラー)")
                     log(f"[ERROR] {title}: {e}")
                     ax.axis("off")
-
-        page_time_range = f"{ymd} UTC{hh} +{page*ncols*3}h〜+{(page+1)*ncols*3-3}h"
-        fig.suptitle(f"{city_tag}天気図パネル（{page_time_range}）", fontsize=20)
-        out_name = f"panel_{city_tag}_{ymd}_UTC{hh}_p{page+1}.jpg"
+        fig.suptitle(f"{city_name}天気図パネル（{ymd} UTC{hh}）", fontsize=20)
+        out_name = f"panel_{city_name}_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
         plt.savefig(out_path, dpi=300)
         plt.close()
         log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
-    # --- 5. ZIP圧縮・Driveアップロード ---
-    zip_name = f"panel_{city_tag}_{ymd}_UTC{hh}.zip"
+    # --- ZIP & Drive ---
+    zip_name = f"panel_{city_name}_{ymd}_UTC{hh}.zip"
     zip_path = os.path.join(output_dir, zip_name)
-    log("[STEP3] JPGをZIP圧縮")
     zip_files(panel_imgs, zip_path)
-    log(f"[OK] ZIP作成: {zip_path}")
-
     drive_url = "(未アップロード)"
     if drive_folder:
-        log("[STEP4] Google Driveへアップロード")
         delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
         drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
         log(f"[OK] Drive URL: {drive_url}")
