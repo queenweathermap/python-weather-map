@@ -1,8 +1,6 @@
 # ===============================================================
 # 全国・秋田・任意局地ハイブリッド天気図パネル自動生成コア
-# 引数で描画関数リスト・範囲・モデルを切り替え可
-# 【データセット安全取得対応・エラー耐性強化版】
-# 2025-06-28
+# city_nameによる地図範囲切り替え対応（2025-06-28修正版）
 # ===============================================================
 
 import os
@@ -16,13 +14,15 @@ from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIR
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
 
-# ▼--- データセット安全取得用ヘルパー関数群 ---▼
+# ▼--- 地域ごとの描画範囲を定義 ---▼
+REGION_EXTENTS = {
+    "japan": [122, 153, 20, 46],
+    "akita": [139.5, 141.0, 38.8, 40.5],  # 必要に応じて秋田周辺を微調整
+    # "tokyo": [...], # 例: 他地域も拡張可
+}
 
+# ▼--- データセット安全取得用ヘルパー関数群（省略可） ---▼
 def open_isobaric_dataset(fname, hPa=None):
-    """
-    指定GRIB2ファイルから isobaricInhPa（気圧面）層を優先的に読み込む。
-    hPaを指定すると、その気圧面のみ抽出。
-    """
     for ds in cfgrib.open_datasets(fname):
         if "isobaricInhPa" in ds.variables and "step" in ds.dims:
             if hPa is not None:
@@ -33,23 +33,7 @@ def open_isobaric_dataset(fname, hPa=None):
             return ds
     raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
 
-def open_height_dataset(fname, height=10):
-    """
-    指定GRIB2ファイルから heightAboveGround=指定値（例:10m, 1.5m等）の層を読み込む。
-    """
-    for ds in cfgrib.open_datasets(fname):
-        if "heightAboveGround" in ds.variables and "step" in ds.dims:
-            if hasattr(ds, "heightAboveGround") and height in ds.heightAboveGround:
-                return ds.sel(heightAboveGround=height)
-            if ("heightAboveGround" in ds.coords and 
-                any(ds.heightAboveGround.values == height)):
-                return ds.sel(heightAboveGround=height)
-    raise RuntimeError(f"[ERROR] heightAboveGround={height}m 層データが見つかりません: {fname}")
-
 def open_surface_dataset(fname):
-    """
-    指定GRIB2ファイルから地上値（stepType="instant"）のデータセットを優先して取得
-    """
     for ds in cfgrib.open_datasets(fname):
         try:
             if ("stepType" in ds.variables and 
@@ -60,7 +44,6 @@ def open_surface_dataset(fname):
                 return ds
         except Exception:
             pass
-    # fallback: xarrayオプションfilter_by_keys
     try:
         ds = xr.open_dataset(fname, engine="cfgrib", filter_by_keys={"stepType": "instant"})
         return ds
@@ -90,8 +73,7 @@ def generate_universal_panel_and_notify(
 ):
     """
     全国・秋田・任意局地パネル生成＋Zip＋Driveアップ＋Slack通知一括実行
-    - panel_def: [(plot_func, ds, title), ...] を与えれば任意構成可
-    - 各ds（xarray.Dataset）は必ずヘルパー関数で安全に取得すること
+    city_nameに応じて地図範囲を自動切り替え
     """
     def log(msg):
         print(msg)
@@ -147,8 +129,11 @@ def generate_universal_panel_and_notify(
         ]
         nrows = len(panel_def)
 
-    # --- 4. 画像ページ分割描画 ---
+    # ▼--- 追加：city_nameによる範囲選択 ---▼
     city_tag = city_name or 'japan'
+    extent = REGION_EXTENTS.get(city_tag, REGION_EXTENTS["japan"])
+
+    # --- 4. 画像ページ分割描画 ---
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -161,19 +146,22 @@ def generate_universal_panel_and_notify(
             n_steps = ds.dims["step"] if "step" in ds.dims else 1
             for col in range(ncols):
                 step = page * ncols + col
+                ax = axes[row, col]
+                # ▼--- ここで範囲をセット ---▼
+                ax.set_extent(extent, crs=ccrs.PlateCarree())
                 if step >= n_steps:
-                    axes[row, col].axis("off")
-                    axes[row, col].set_title(f"{title} (no data)")
+                    ax.axis("off")
+                    ax.set_title(f"{title} (no data)")
                     continue
                 try:
                     ds_step = ds.isel(step=step)
                     if plot_func:
-                        plot_func(axes[row, col], ds_step)
-                    axes[row, col].set_title(f"{title} (+{step*3}h)")
+                        plot_func(ax, ds_step)
+                    ax.set_title(f"{title} (+{step*3}h)")
                 except Exception as e:
-                    axes[row, col].set_title(f"{title} (エラー)")
+                    ax.set_title(f"{title} (エラー)")
                     log(f"[ERROR] {title}: {e}")
-                    axes[row, col].axis("off")
+                    ax.axis("off")
 
         page_time_range = f"{ymd} UTC{hh} +{page*ncols*3}h〜+{(page+1)*ncols*3-3}h"
         fig.suptitle(f"{city_tag}天気図パネル（{page_time_range}）", fontsize=20)
