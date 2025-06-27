@@ -1,14 +1,16 @@
 # scripts/daily_weathercaster_notify.py
 # ===============================================================
-# 気象庁Weathercaster PDF天気図を一括DL→300dpi JPG変換→ZIP化
-# → Google Driveへアップ→Slackに実行ログ+DriveURL通知→古いファイル削除
+# 気象庁Weathercaster PDF天気図を一括DL→JPG変換→ZIP化
+# → Google Driveへアップ→Slack通知→古いファイル自動削除
+# ---------------------------------------------------------------
+# ZIP圧縮: module.utils.zip_utils.zip_files を利用
+# Drive/Slack: 共通ユーティリティ呼び出し
 # ===============================================================
 
 import os
 import requests
 from datetime import datetime
 import subprocess
-import zipfile
 from io import StringIO
 import sys
 
@@ -22,13 +24,8 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 # --- ダウンロード対象PDF ---
 PDF_FILES = [
-    "COMP12.pdf",
-    "COMP36.pdf",
-    "COMP72.pdf",
-    "FXJP854.pdf",
-    "FXXN519.pdf",
-    "FZCX50.pdf",
-    "FEFE19.pdf",
+    "COMP12.pdf", "COMP36.pdf", "COMP72.pdf",
+    "FXJP854.pdf", "FXXN519.pdf", "FZCX50.pdf", "FEFE19.pdf"
 ]
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
 
@@ -80,7 +77,7 @@ try:
         except Exception as e:
             print(f"[NG] JPG変換失敗: {jpg_path} - {e}")
 
-    # --- STEP 3: ZIP圧縮 ---
+    # --- STEP 3: ZIP圧縮（共通関数利用） ---
     print("[STEP3] JPGをZIP圧縮")
     zip_path = os.path.join(SAVE_DIR, f"{today}_weathercharts.zip")
     zip_files(jpg_paths, zip_path)
@@ -103,11 +100,9 @@ try:
 
     # --- STEP 6: Drive古いファイル削除（30日以上） ---
     print("[STEP6] Google Drive内の古いファイル削除")
-    # 関数のシグネチャに注意（必ずどちらか1つ！）
     try:
         delete_old_files_from_drive(folder_id=DRIVE_FOLDER_ID, older_than_days=30)
     except TypeError:
-        # もし違う定義になっていた場合は引数を合わせて呼び出す
         from dotenv import load_dotenv
         load_dotenv()
         creds_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
