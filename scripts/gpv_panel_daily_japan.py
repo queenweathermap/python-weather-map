@@ -40,29 +40,28 @@ def main():
         log_lines.append(msg)
 
     # パネル生成＆連携（ファイル名は panel_japan_{ymd}_UTC{hh}_pX.jpg 統一）
-    panel_imgs, zip_path, drive_url = generate_japan_panel_and_notify(
+    panel_imgs = generate_japan_panel_images( # <- 画像リストだけ返すようにする
         ymd=ymd,
         hh=hh,
         model=model,
         output_dir=output_dir,
-        drive_folder=drive_folder,
         ncols=ncols,
         npages=npages,
-        log_callback=log
     )
 
-    # ==== ② Slack通知文言作成 ====
-    zip_name = os.path.basename(zip_path) if zip_path else ""
-    file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
+    # ZIP作成
+    zip_path = os.path.join(output_dir, f"panel_japan_{ymd}_UTC{hh}.zip")
+    zip_files(panel_imgs, zip_path)
+    # Drive
+    drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
+    # LOG
+    file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [os.path.basename(zip_path)])
     msg = (
-        f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
+        f":earth_asia: 全国天気図パネル {ymd} UTC{hh}\n"
         f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
         "--- LOG ---\n"
-        f"{file_log}\n"
-        "--- 詳細LOG ---\n"
-        f"{detail_log}"   # detail_log の末尾に Drive URL を書かない
+        f"{file_log}"
     )
-
     send_slack_text(channel=slack_channel, message=msg)
 
 if __name__ == "__main__":
