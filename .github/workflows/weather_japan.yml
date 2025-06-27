@@ -26,6 +26,11 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
+      - name: Install Japanese font (IPAexGothic)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-ipaexfont
+
       - name: Run Japan Weather Panel Script
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
