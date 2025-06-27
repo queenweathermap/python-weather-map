@@ -75,11 +75,11 @@ def main():
 
         # 必要な天気図パネル生成処理へ（既存のまま）
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-            gpv_files=downloaded,
-            init_time=f"{y}{m}{d}{hh}0000",
-            region="akita",
+            ymd=ymd,
+            hh=hh,
+            model=model,
+            output_dir=output_dir,
         )
-
         print("[OK] 秋田局地パネル生成・通知完了")
         print(f"Drive URL: {drive_url}")
 
