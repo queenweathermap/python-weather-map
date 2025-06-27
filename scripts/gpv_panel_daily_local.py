@@ -27,7 +27,11 @@ def main():
 
     # --- 一括パネル生成＋Drive＋URL取得 ---
     panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-        ymd=ymd, hh=hh, model=model, output_dir=output_dir,
+        ymd=ymd,
+        hh=hh,
+        model=model,
+        output_dir=output_dir,
+    )
         drive_folder=drive_folder,
         ncols=ncols, npages=npages, nrows=nrows,
         city_name=city_name,
