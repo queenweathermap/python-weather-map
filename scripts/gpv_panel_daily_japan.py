@@ -40,6 +40,19 @@ def main():
         npages=npages,
     )
 
+    # 出力ディレクトリ内で当該ファイル名を取得
+    pattern = f"panel_japan_{ymd}_UTC{hh}_p*.jpg"
+    panel_imgs = sorted(glob.glob(os.path.join(output_dir, pattern)))
+    zip_name = f"panel_japan_{ymd}_UTC{hh}.zip"
+
+    file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
+    msg = (
+        f":チェックマーク_緑: 全国天気図パネル {ymd} UTC{hh}\n"
+        f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
+        "--- LOG ---\n"
+        f"{file_log}"
+    )
+    send_slack_text(channel=slack_channel, message=msg)
 
 if __name__ == "__main__":
     main()
