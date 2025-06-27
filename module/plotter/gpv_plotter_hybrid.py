@@ -96,7 +96,7 @@ def generate_japan_panel_and_notify(
 
         page_time_range = f"{ymd} {hh}00 +{page*ncols*3}h〜+{(page+1)*ncols*3-3}h"
         fig.suptitle(f"全国天気図パネル（{page_time_range}）", fontsize=20)
-        out_name = f"panel_japan_{ymd}{hh}_p{page+1}.jpg"
+        out_name = f"panel_japan_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
         plt.savefig(out_path, dpi=300)
         plt.close()
