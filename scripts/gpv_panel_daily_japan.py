@@ -7,10 +7,12 @@
 import os
 import glob
 import sys
-from io import StringIO 
+from io import StringIO
 import datetime
 
-from module.plotter.gpv_plotter_hybrid import generate_japan_panel_and_notify
+from module.plotter.gpv_plotter_hybrid import generate_japan_panel_images
+from module.utils.zip_utils import zip_files
+from module.utils.drive_utils import upload_to_drive
 from module.utils.slack_utils import send_slack_text
 
 def get_latest_gpv_init(now=None):
@@ -26,8 +28,8 @@ def get_latest_gpv_init(now=None):
     return ymd, hh
 
 def main():
-    ymd = "20250626"
-    hh = "18"
+    # === 最新イニシャルを自動取得 ===
+    ymd, hh = get_latest_gpv_init()
     model = "HYBRID"
     output_dir = "./data"
     drive_folder = os.environ["DRIVE_FOLDER_ID"]
@@ -35,51 +37,65 @@ def main():
     ncols = 4
     npages = 4
 
-    # --- ログ捕捉 ---
     log_buffer = StringIO()
+    orig_stdout, orig_stderr = sys.stdout, sys.stderr
     sys.stdout = sys.stderr = log_buffer
 
-    print(f"[START] {ymd} Weathercaster天気図自動処理")
-    print("[STEP1] GPVデータ一括ダウンロード")
+    try:
+        print(f"[START] {ymd} Weathercaster天気図自動処理")
+        print("[STEP1] GPVデータ一括ダウンロード")
 
-    # 画像生成
-    panel_imgs = generate_japan_panel_images(
-        ymd=ymd, hh=hh, model=model,
-        output_dir=output_dir, ncols=ncols, npages=npages
-    )
-    for img in panel_imgs:
-        print(f"[OK] 保存: {img}")
+        # 画像生成
+        panel_imgs = generate_japan_panel_images(
+            ymd=ymd, hh=hh, model=model,
+            output_dir=output_dir, ncols=ncols, npages=npages
+        )
+        for img in panel_imgs:
+            print(f"[OK] 保存: {img}")
 
-    # ZIP作成
-    print("[STEP3] JPGをZIP圧縮")
-    zip_name = f"panel_japan_{ymd}_UTC{hh}.zip"
-    zip_path = os.path.join(output_dir, zip_name)
-    zip_files(panel_imgs, zip_path)
-    print(f"[OK] ZIP作成: {zip_path}")
+        # ZIP作成
+        print("[STEP3] JPGをZIP圧縮")
+        zip_name = f"panel_japan_{ymd}_UTC{hh}.zip"
+        zip_path = os.path.join(output_dir, zip_name)
+        zip_files(panel_imgs, zip_path)
+        print(f"[OK] ZIP作成: {zip_path}")
 
-    # Google Driveアップロード
-    print("[STEP4] Google Driveへアップロード")
-    drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
-    print(f"[OK] Drive URL: {drive_url}")
+        # Google Driveアップロード
+        print("[STEP4] Google Driveへアップロード")
+        drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
+        print(f"[OK] Drive URL: {drive_url}")
 
-    # ファイルリスト
-    file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
-    detail_log = log_buffer.getvalue()
+        # ファイルリスト
+        file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
 
-    # Slack通知文
-    msg = (
-        f":earth_asia: 全国天気図パネル {ymd} UTC{hh}\n"
-        "--- LOG ---\n"
-        f"{file_log}\n"
-        "--- 詳細LOG ---\n"
-        f"{log_buffer.getvalue()[-1800:]}"  # 直近1800文字だけ付加など
-    )
-    send_slack_text(channel=slack_channel, message=msg)
+        # Slack通知文
+        msg = (
+            f":earth_asia: 全国天気図パネル {ymd} UTC{hh}\n"
+            "--- LOG ---\n"
+            f"{file_log}\n"
+            "--- 詳細LOG ---\n"
+            f"{log_buffer.getvalue()[-1800:]}"  # 直近1800文字だけ付加など
+        )
+        send_slack_text(channel=slack_channel, message=msg)
 
-    # 標準出力を元に戻す
-    sys.stdout = sys.__stdout__
-    sys.stderr = sys.__stderr__
-    log_buffer.close()
+    except Exception as e:
+        # エラー時にもログ通知
+        err_log = log_buffer.getvalue()
+        msg = (
+            f":warning: 全国天気図パネル {ymd} UTC{hh}\n"
+            "--- ERROR ---\n"
+            f"{str(e)}\n"
+            "--- 詳細LOG ---\n"
+            f"{err_log[-1800:]}"
+        )
+        send_slack_text(channel=slack_channel, message=msg)
+        raise
+
+    finally:
+        # 標準出力を戻す
+        sys.stdout = orig_stdout
+        sys.stderr = orig_stderr
+        log_buffer.close()
 
 if __name__ == "__main__":
     main()
