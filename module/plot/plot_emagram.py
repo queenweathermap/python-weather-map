@@ -12,8 +12,8 @@ from metpy.plots import SkewT
 from metpy.units import units
 from module.utils.var_utils import get_var
 
-plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+from module.plot.plot_utils import set_japanese_font, plot_no_data_japan_map
+set_japanese_font()  # 日本語フォントを全描画で有効化
 
 def extract_profile_gpv(ds, lat, lon, time_idx=0):
     """
