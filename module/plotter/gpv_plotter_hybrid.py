@@ -25,19 +25,18 @@ from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_
 import cfgrib
 import xarray as xr
 
-def generate_japan_panel_and_notify(
+def generate_japan_panel_images(
     ymd,
     hh,
     model="HYBRID",
     output_dir="./data",
-    drive_folder=None,
     ncols=4,
     npages=4,
-    log_callback=None,
+    log_callback=None
 ):
     """
-    全国パネル生成＋Zip＋Driveアップ＋Slack通知一括実行
-    Returns: panel_imgs(list), zip_path(str), drive_url(str)
+    全国パネル画像群（複数ページ）を生成し、ファイルパスlistで返す
+    DriveアップやSlack通知はしない
     """
     def log(msg):
         print(msg)
@@ -47,10 +46,9 @@ def generate_japan_panel_and_notify(
     dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- 1. データダウンロード ---
     log(f"[START] {ymd} Weathercaster天気図自動処理")
     log("[STEP1] GPVデータ一括ダウンロード")
-    patterns = MODEL_CONFIG["MSM"]["patterns"]  # HYBRID時は今後要拡張
+    patterns = MODEL_CONFIG["MSM"]["patterns"]  # HYBRID時は拡張予定
     panel_files = download_gpv_panel(patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages)
     if not panel_files or not panel_files[0] or not all(panel_files[0]):
         log("[ERROR] GPVファイルが見つかりません")
@@ -77,7 +75,6 @@ def generate_japan_panel_and_notify(
         (plot_surface_pressure_and_wind_msm, ds_surf_instant, "地上気圧・風・降水"),
     ]
 
-    # --- 2. 画像ページ分割描画 ---
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -111,20 +108,46 @@ def generate_japan_panel_and_notify(
         plt.close()
         log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
+    return panel_imgs
 
-    # --- 3. ZIP圧縮 ---
+def generate_japan_panel_and_notify(
+    ymd,
+    hh,
+    model="HYBRID",
+    output_dir="./data",
+    drive_folder=None,
+    ncols=4,
+    npages=4,
+    log_callback=None,
+):
+    """
+    全国パネル生成＋Zip＋Driveアップ＋Slack通知一括実行
+    Returns: panel_imgs(list), zip_path(str), drive_url(str)
+    """
+    # 画像のみ生成
+    panel_imgs = generate_japan_panel_images(
+        ymd=ymd, hh=hh, model=model,
+        output_dir=output_dir, ncols=ncols, npages=npages,
+        log_callback=log_callback
+    )
+
+    # --- ZIP圧縮 ---
     zip_name = f"panel_japan_{ymd}_UTC{hh}.zip"
     zip_path = os.path.join(output_dir, zip_name)
-    log("[STEP3] JPGをZIP圧縮")
+    if log_callback:
+        log_callback("[STEP3] JPGをZIP圧縮")
     zip_files(panel_imgs, zip_path)
-    log(f"[OK] ZIP作成: {zip_path}")
+    if log_callback:
+        log_callback(f"[OK] ZIP作成: {zip_path}")
 
-    # --- 4. Google Driveにアップロード ---
+    # --- Google Driveにアップロード ---
     drive_url = "(未アップロード)"
     if drive_folder:
-        log("[STEP4] Google Driveへアップロード")
+        if log_callback:
+            log_callback("[STEP4] Google Driveへアップロード")
         delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
         drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
-        log(f"[OK] Drive URL: {drive_url}")
+        if log_callback:
+            log_callback(f"[OK] Drive URL: {drive_url}")
 
     return panel_imgs, zip_path, drive_url
