@@ -35,6 +35,8 @@ PIN_LAT = 39.7186
 PIN_LON = 140.1024
 CITY_NAME = "Akita City"
 
+print("=== Start Akita Weather Panel Script ===")
+
 def get_gpv_nodata_times(ncols=4):
     now = pd.Timestamp.now().replace(minute=0, second=0, microsecond=0)
     hour = now.hour
