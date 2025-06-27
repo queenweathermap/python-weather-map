@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import xarray as xr
 
-# 日本語フォント（IPAGothic）を指定
-plt.rcParams['font.family'] = 'IPAGothic'
+from module.plot.plot_utils import set_japanese_font
+set_japanese_font()  # 日本語フォント設定
 
 # MSM GPV Lsurf（地上）GRIB2ファイルURL自動取得
 GPV_MIRROR_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
