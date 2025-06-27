@@ -71,6 +71,8 @@ def main():
         f":earth_asia: 全国天気図パネル {ymd} UTC{hh}\n"
         "--- LOG ---\n"
         f"{file_log}\n"
+        "--- 詳細LOG ---\n"
+        f"{log_buffer.getvalue()[-1800:]}"  # 直近1800文字だけ付加など
     )
     send_slack_text(channel=slack_channel, message=msg)
 
