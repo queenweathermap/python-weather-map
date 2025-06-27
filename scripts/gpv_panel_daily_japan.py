@@ -70,7 +70,7 @@ def main():
 
         # Slack通知文
         msg = (
-            f":earth_asia: 全国天気図パネル {ymd} UTC{hh}\n"
+            f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             "--- LOG ---\n"
             f"{file_log}\n"
             "--- 詳細LOG ---\n"
