@@ -68,7 +68,7 @@ def main():
             ymd=ymd, hh=hh, model=model, output_dir=output_dir,
             drive_folder=drive_folder,
             ncols=ncols, npages=npages, nrows=nrows,
-            city_name=city_name
+            city_name="akita",
         )
         msg = (
             f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
