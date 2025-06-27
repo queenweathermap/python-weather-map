@@ -8,6 +8,36 @@ import os
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
 from module.utils.slack_utils import send_slack_text
 
+def find_latest_available_files_japan(base_url=BASE_URL, max_days=2):
+    """利用可能な最新GPVファイルを全国用に探索"""
+    now = datetime.datetime.utcnow()
+    # GSMなら 00, 06, 12, 18、MSMなら 21,18,15... などモデルごとにサイクル指定
+    CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM例（GSMは6時間毎）
+    for day_delta in range(max_days):
+        day = now - datetime.timedelta(days=day_delta)
+        for h in CYCLE_HOURS:
+            t = day.replace(hour=h, minute=0, second=0, microsecond=0)
+            y, m, d, hh = t.strftime("%Y %m %d %H").split()
+            data_url = f"{base_url}/{y}/{m}/{d}/"
+            target_init = f"{y}{m}{d}{hh}0000"
+            # 全国用で必要なファイルリストをここに
+            file_patterns = [
+                f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",
+                f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin"
+            ]
+            file_paths = []
+            found = False
+            for fname in file_patterns:
+                url = f"{data_url}{fname}"
+                r = requests.head(url, timeout=5)
+                if r.status_code == 200:
+                    found = True
+                    file_paths.append({"url": url, "local": os.path.join("./data", fname)})
+            if found:
+                return y, m, d, hh, file_paths
+    raise FileNotFoundError("利用可能なGPVファイルが見つかりません")
+
+
 def main():
     # ==== 設定値 ====
     ymd = "20250628"              # 例: 実運用時は最新イニシャル自動化OK
