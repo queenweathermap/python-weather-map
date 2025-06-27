@@ -62,18 +62,18 @@ def main():
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
         # --- パネル生成＋Drive＋Slack通知 ---
+        # 秋田局地専用ズーム範囲
+        AKITA_EXTENT = [139.5, 141.0, 38.8, 40.5]
+        
+        # コア関数に city_name="akita" で渡す（module側で REGION_EXTENTS["akita"] を参照）
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
-            model=model,
+            model="MSM",
             output_dir=output_dir,
             drive_folder=drive_folder,
-            ncols=ncols,
-            npages=npages,
-            nrows=nrows,
-            city_name=city_name,   # これ重要！
+            city_name="akita",  # ★これだけでOK（REGION_EXTENTS["akita"]に依存）
         )
-
         msg = (
             f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
