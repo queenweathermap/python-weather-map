@@ -21,6 +21,7 @@ from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
 from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
 from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
 from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 
 import cfgrib
 import xarray as xr
