@@ -7,8 +7,10 @@ import os
 import datetime
 import requests
 import traceback
-from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
 from module.utils.slack_utils import send_slack_text
+from module.core.gpv_data_loader import load_msm_local_data
+from module.plotter.gpv_plotter_universal import make_akita_panel, generate_universal_panel_and_notify
+
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
@@ -45,7 +47,7 @@ def main():
         output_dir = "./output_akita"
         drive_folder = os.environ["DRIVE_FOLDER_ID"]
         slack_channel = os.environ["SLACK_CHANNEL_ID"]
-        city_name = "akita"   # ←ポイント
+        city_name = "akita"
 
         # GPVファイルDL
         for info in file_infos:
@@ -59,17 +61,41 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
-        # ---- コア関数で描画・Drive・Slack通知 ----
-        panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-            ymd=ymd, hh=hh, model=model, output_dir=output_dir,
-            drive_folder=drive_folder, city_name=city_name
-        )
+        # ---- 4時刻分ループで秋田局地パネル生成 ----
+        # 例：+0h, +3h, +6h, +9h（必要に応じてstep_rangeは調整）
+        step_range = [0, 3, 6, 9]
+        panel_imgs = []
+
+        for idx, step in enumerate(step_range):
+            panel_img, *_ = generate_universal_panel_and_notify(
+                ymd=ymd,
+                hh=hh,
+                model=model,
+                output_dir=output_dir,
+                drive_folder=drive_folder,
+                city_name=city_name,
+                step=step,   # 追加: 各予報時刻を明示的に指定
+                panel_suffix=f"p{idx+1}"
+            )
+            if isinstance(panel_img, list):
+                # もしリストで返ってきた場合はリスト展開
+                panel_imgs.extend(panel_img)
+            else:
+                panel_imgs.append(panel_img)
+
+        # --- ZIP化・Google Driveアップロード ---
+        from module.utils.zip_utils import zip_files
+        zip_path = zip_files(panel_imgs, output_dir)
+        from module.utils.drive_utils import upload_to_drive
+        drive_url = upload_to_drive(zip_path, drive_folder)
+
         msg = (
             f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
             f"{os.path.basename(zip_path)}\n"
             f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
         )
+        from module.utils.slack_utils import send_slack_text
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 秋田局地パネル自動化 完了")
     except Exception as e:
