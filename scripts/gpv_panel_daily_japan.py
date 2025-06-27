@@ -22,34 +22,30 @@ def main():
     ncols = 4
     npages = 4
 
-    # ==== ① 画像リスト生成（画像名を統一: panel_japan_YYYYMMDD_UTCHH_pX.jpg） ====
-    panel_imgs = []
-    def custom_save_callback(fig, page_idx):
-        fname = f"panel_japan_{ymd}_UTC{hh}_p{page_idx+1}.jpg"
-        fpath = os.path.join(output_dir, fname)
-        fig.savefig(fpath, dpi=300)
-        panel_imgs.append(fpath)
-        print(f"[OK] Saved: {fpath}")
-
+    # ==== ① パネル画像生成 ====
     generate_japan_panel_and_notify(
         ymd=ymd,
         hh=hh,
         model=model,
         output_dir=output_dir,
-        drive_folder=None,        # Drive/Slack通知はここでは行わない
+        drive_folder=None,  # Drive/Slack通知はここでは行わない
         ncols=ncols,
         npages=npages,
     )
 
-    # 出力ディレクトリ内で当該ファイル名を取得
-    drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
-    if not drive_url:
-    drive_url = "(未アップロード)"
-    
+    # ==== ② 画像リスト取得・ZIP化 ====
     pattern = f"panel_japan_{ymd}_UTC{hh}_p*.jpg"
     panel_imgs = sorted(glob.glob(os.path.join(output_dir, pattern)))
     zip_name = f"panel_japan_{ymd}_UTC{hh}.zip"
+    zip_path = os.path.join(output_dir, zip_name)
+    zip_files(panel_imgs, zip_path)
 
+    # ==== ③ Google Driveにアップロード ====
+    drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
+    if not drive_url:
+        drive_url = "(未アップロード)"
+
+    # ==== ④ Slack通知 ====
     file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
     msg = (
         f":チェックマーク_緑: 全国天気図パネル {ymd} UTC{hh}\n"
