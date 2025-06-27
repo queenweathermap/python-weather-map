@@ -55,13 +55,14 @@ def main():
     zip_name = os.path.basename(zip_path) if zip_path else ""
     file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
     msg = (
-        f":チェックマーク_緑: 全国天気図パネル {ymd} UTC{hh}\n"
+        f":art: 全国天気図パネル {ymd} UTC{hh}\n"
         f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
         "--- LOG ---\n"
         f"{file_log}\n"
         "--- 詳細LOG ---\n"
-        + "\n".join(log_lines)
+        f"{detail_log}"   # detail_log の末尾に Drive URL を書かない
     )
+
     send_slack_text(channel=slack_channel, message=msg)
 
 if __name__ == "__main__":
