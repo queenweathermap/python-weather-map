@@ -116,8 +116,7 @@ def generate_japan_panel_and_notify(
     # --- 5. Slack通知 ---
     msg = (
         f"全国天気図パネル {ymd} UTC{hh}\n"
-        f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
-        f"ファイル名 panel_japan_{ymd}_UTC{hh}_p*.jpg / panel_japan_{ymd}_UTC{hh}.zip"
+        f"Google Driveリンク:\n{drive_url}\n"
     )
     send_slack_message(msg)
 
