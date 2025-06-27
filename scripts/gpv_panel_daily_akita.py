@@ -100,6 +100,9 @@ def main():
     except Exception as e:
         print("NO DATA: Exception", e)
         traceback.print_exc()
+        print("=== EXCEPTION CAUGHT ===")
+        print(traceback.format_exc())
+        raise
         make_nodata_weather_panel(
             save_path=f"{OUT_PREFIX}_nodata.jpg",
             city_name=CITY_NAME,
