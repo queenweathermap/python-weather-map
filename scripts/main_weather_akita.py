@@ -89,7 +89,7 @@ def main():
         file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
         detail_log = log_buffer.getvalue()
         msg = (
-            f":earth_asia: 秋田局地MSM天気図パネル {pd.Timestamp.now():%Y%m%d %H:%M}\n"
+                f":large_red_circle: 秋田局地MSM天気図パネル {pd.Timestamp.now():%Y%m%d %H:%M}\n"
             "--- LOG ---\n"
             f"{file_log}\n"
             "--- 詳細LOG ---\n"
