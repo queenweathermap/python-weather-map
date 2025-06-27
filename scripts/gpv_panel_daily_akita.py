@@ -71,7 +71,7 @@ def main():
             city_name=city_name
         )
         msg = (
-            f":large_red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
+            f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
             f"{os.path.basename(zip_path)}\n"
             f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
