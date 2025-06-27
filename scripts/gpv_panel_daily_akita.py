@@ -85,7 +85,18 @@ def main():
             hh=hh,
             model=model,
             output_dir=output_dir,
+            # 必要に応じて他の引数
         )
+
+        # --- Slack通知を明示的に呼ぶ ---
+        slack_channel = os.environ["SLACK_CHANNEL_ID"]
+        msg = (
+            f":large_red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
+            f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
+            f"{os.path.basename(zip_path)}\n"
+            f"{drive_url}"
+        )
+        send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 秋田局地パネル生成・通知完了")
         print(f"Drive URL: {drive_url}")
 
