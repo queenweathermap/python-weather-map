@@ -2,6 +2,8 @@
 # module/panel_utils.py
 # パネル可視化・NO DATA生成など可視化ユーティリティ
 # ===============================================
+import cfgrib
+import xarray as xr
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -162,11 +164,50 @@ def make_lfm_panel(ds, times, save_path):
     # save_path: 画像保存パス
     pass
 
-# --- 公開関数リストを明示 ---
+
+def open_isobaric_dataset(fname, hPa=None):
+    """
+    指定GRIB2ファイルから isobaricInhPa（気圧面）層を優先的に読み込む。
+    hPaを指定すると、その気圧面のみ抽出。
+    """
+    for ds in cfgrib.open_datasets(fname):
+        if "isobaricInhPa" in ds.variables and "step" in ds.dims:
+            if hPa is not None:
+                if hPa in ds["isobaricInhPa"]:
+                    return ds.sel(isobaricInhPa=hPa)
+                else:
+                    continue
+            return ds
+    raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
+
+def open_surface_dataset(fname):
+    """
+    指定GRIB2ファイルから地上値（stepType="instant"）のデータセットを優先して取得
+    """
+    for ds in cfgrib.open_datasets(fname):
+        try:
+            if ("stepType" in ds.variables and 
+                hasattr(ds, "stepType") and 
+                (getattr(ds, "stepType", None) == "instant" or
+                 (hasattr(ds.stepType, "values") and 
+                  all(ds.stepType.values == "instant")))):
+                return ds
+        except Exception:
+            pass
+    try:
+        ds = xr.open_dataset(fname, engine="cfgrib", filter_by_keys={"stepType": "instant"})
+        return ds
+    except Exception:
+        pass
+    raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
+
+# --- 公開関数リストに追加 ---
 __all__ = [
     "make_nodata_weather_panel",
     "make_local_weather_panel",
     "make_daily_weather_panel_multi_time",
     "get_lon_lat",
     "align_datasets_common",
+    "open_isobaric_dataset",     # 追加
+    "open_surface_dataset",      # 追加
 ]
