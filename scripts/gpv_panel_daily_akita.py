@@ -8,7 +8,7 @@ import datetime
 import requests
 import traceback
 from module.utils.slack_utils import send_slack_text
-from module.core.gpv_data_loader import load_msm_local_data
+#from module.core.gpv_data_loader import load_msm_local_data
 from module.plotter.gpv_plotter_universal import make_akita_panel, generate_universal_panel_and_notify
 
 
