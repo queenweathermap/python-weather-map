@@ -1,4 +1,4 @@
-# scripts/main_weather_akita.py
+# scripts/gpv_panel_daily_akita.py
 # ========================================================
 # 秋田局地 MSMパネル（7段×4列×複数ページ）自動生成＋Zip＋Drive＋Slack通知テンプレ
 # 全国版と完全揃え（2025-06-27）
