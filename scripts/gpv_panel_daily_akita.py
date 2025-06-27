@@ -1,54 +1,44 @@
 # scripts/gpv_panel_daily_akita.py
+# ===============================================================
+# 秋田局地 MSM天気図パネル（7段4列）自動生成・Drive+Slack通知バッチ
+# 2025-06-28
+# ===============================================================
+
 import os
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
-from module.plot.plot_emagram import plot_emagram
-from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
-from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
-from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
-from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
-from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
 from module.utils.slack_utils import send_slack_text
 
 def main():
-    import datetime
-    now = datetime.datetime.utcnow()
-    ymd = now.strftime("%Y%m%d")
-    hh = f"{(now.hour//3)*3:02d}"
-
+    # ==== 設定値 ====
+    ymd = "20250628"
+    hh = "00"
+    model = "MSM"
     output_dir = "./data"
     drive_folder = os.environ["DRIVE_FOLDER_ID"]
     slack_channel = os.environ["SLACK_CHANNEL_ID"]
+    ncols, npages, nrows = 4, 1, 7
     city_name = "akita"
 
-    # パネル構成（行数は必要分だけOK）
-    panel_def = [
-        (plot_emagram, None, "エマグラム"),
-        (plot_850hpa_temp_wind_700hpa_w, None, "850hPa温度・風＋700hPa鉛直流"),
-        (plot_850hpa_thetae_stream, None, "850hPa相当温位・流線"),
-        (plot_925hpa_temp_wind_dindex, None, "925hPa温度・風・湿数"),
-        (plot_975hpa_temp_wind_dindex, None, "975hPa温度・風・湿数"),
-        (plot_surface_pressure_and_wind_msm, None, "地上気圧・風・降水"),
-        (None, None, "未使用"),
-    ]
+    # 秋田市の中心緯度経度
+    pin_lat, pin_lon = 39.7186, 140.1024
+    lat_range = (38.0, 41.0)
+    lon_range = (139.0, 142.0)
 
+    # --- 一括パネル生成＋Drive＋URL取得 ---
     panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-        ymd=ymd, hh=hh,
-        model="MSM",
-        output_dir=output_dir,
+        ymd=ymd, hh=hh, model=model, output_dir=output_dir,
         drive_folder=drive_folder,
-        ncols=4, npages=1, nrows=7,
-        panel_def=panel_def,
-        lat_range=(38, 41), lon_range=(139, 142),
-        pin_lat=39.72, pin_lon=140.10,
+        ncols=ncols, npages=npages, nrows=nrows,
         city_name=city_name,
-        slack_channel=slack_channel,
+        pin_lat=pin_lat, pin_lon=pin_lon, lat_range=lat_range, lon_range=lon_range
+        # 必要に応じてpanel_defを与えてカスタマイズも可
     )
 
-    file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [os.path.basename(zip_path)])
+    # --- Slack通知 ---
     msg = (
-        f":large_red_circle: 秋田局地パネル {ymd} UTC{hh}\n"
-        "--- LOG ---\n"
-        f"{file_log}\n"
+        f":large_red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
+        f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
+        f"{os.path.basename(zip_path)}\n"
         f"{drive_url}"
     )
     send_slack_text(channel=slack_channel, message=msg)
