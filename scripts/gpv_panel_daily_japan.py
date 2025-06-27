@@ -4,13 +4,8 @@
 # 2025-06-27 ChatGPT 新core設計準拠・テンプレ化
 # ===============================================================
 
-import os
-from module.plotter.gpv_plotter_hybrid import generate_japan_panel_images
-from module.utils.zip_utils import zip_files
-from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
-from module.utils.slack_utils import send_slack_text
 from module.plotter.gpv_plotter_hybrid import generate_japan_panel_and_notify
-
+import os
 
 def main():
     ymd = "20240622"
@@ -18,22 +13,18 @@ def main():
     model = "HYBRID"
     output_dir = "./data"
     drive_folder = os.environ["DRIVE_FOLDER_ID"]
-    ncols = 4   # 横4列ずつ
-    npages = 4  # 4ページ
-    slack_channel = os.environ["SLACK_CHANNEL_ID"]
+    ncols = 4
+    npages = 4
 
-    # --- ① 天気図パネル画像の4ページ生成 ---
-    print("[STEP1] 天気図画像（複数ページ）生成")
-    # ここでは画像ファイル名リストを返すよう設計
-    panel_imgs = generate_japan_panel_images(
+    generate_japan_panel_and_notify(
         ymd=ymd,
         hh=hh,
         model=model,
         output_dir=output_dir,
+        drive_folder=drive_folder,
         ncols=ncols,
-        npages=npages
+        npages=npages,
     )
-    # 例: ["./data/panel_japan_20240622_p1.jpg", ..., "./data/panel_japan_20240622_p4.jpg"]
 
     # --- ② ZIPにまとめる ---
     print("[STEP2] ZIP圧縮")
