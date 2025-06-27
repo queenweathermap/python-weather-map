@@ -10,6 +10,7 @@ import sys
 from io import StringIO
 import datetime
 
+from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
 from module.plotter.gpv_plotter_hybrid import generate_japan_panel_images
 from module.utils.zip_utils import zip_files
 from module.utils.drive_utils import upload_to_drive
@@ -28,19 +29,20 @@ def get_latest_gpv_init(now=None):
     return ymd, hh
 
 def main():
-    # === 最新イニシャルを自動取得 ===
-    ymd, hh = get_latest_gpv_init()
-    model = "HYBRID"
+    ymd, hh = ... # 自動取得 or 指定
     output_dir = "./data"
     drive_folder = os.environ["DRIVE_FOLDER_ID"]
     slack_channel = os.environ["SLACK_CHANNEL_ID"]
-    ncols = 4
-    npages = 4
 
-    log_buffer = StringIO()
-    orig_stdout, orig_stderr = sys.stdout, sys.stderr
-    sys.stdout = sys.stderr = log_buffer
-
+    panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
+        ymd=ymd, hh=hh,
+        model="HYBRID",
+        output_dir=output_dir,
+        drive_folder=drive_folder,
+        ncols=4, npages=4, nrows=7,
+        city_name=None,
+        slack_channel=slack_channel,
+    )
     try:
         print(f"[START] {ymd} Weathercaster天気図自動処理")
         print("[STEP1] GPVデータ一括ダウンロード")
