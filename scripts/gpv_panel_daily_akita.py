@@ -15,6 +15,7 @@ import traceback
 import os
 import datetime
 import requests
+from module.utils.slack_utils import send_slack_text
 
 # ---- モジュール読み込み（※既存プロジェクトのまま） ----
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
