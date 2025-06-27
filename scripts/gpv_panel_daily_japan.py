@@ -55,7 +55,7 @@ def main():
     zip_name = os.path.basename(zip_path) if zip_path else ""
     file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [zip_name])
     msg = (
-        f":art: 全国天気図パネル {ymd} UTC{hh}\n"
+        f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
         f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
         "--- LOG ---\n"
         f"{file_log}\n"
