@@ -69,8 +69,8 @@ def main():
     msg = (
         f"white_check_mark: 全国天気図パネル {ymd} UTC{hh}\n"
         f"Google Driveリンク（JPG ZIP）:\n{drive_url if 'drive_url' in locals() else '(未アップロード)'}\n"
-        "--- LOG ---\n"
-        f"```{log_txt[-1800:]}```"  # Slack投稿は最大2000文字制限
+        # "--- LOG ---\n"
+        # f"```{log_txt[-1800:]}```"  # Slack投稿は最大2000文字制限
     )
     send_slack_text(channel=slack_channel, message=msg)
 
