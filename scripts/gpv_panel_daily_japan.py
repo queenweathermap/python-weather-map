@@ -42,6 +42,10 @@ def main():
     )
 
     # 出力ディレクトリ内で当該ファイル名を取得
+    drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
+    if not drive_url:
+    drive_url = "(未アップロード)"
+    
     pattern = f"panel_japan_{ymd}_UTC{hh}_p*.jpg"
     panel_imgs = sorted(glob.glob(os.path.join(output_dir, pattern)))
     zip_name = f"panel_japan_{ymd}_UTC{hh}.zip"
