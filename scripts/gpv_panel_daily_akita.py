@@ -65,10 +65,12 @@ def main():
 
         # ---- パネル生成＋Drive＋Slack通知 ----
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-            ymd=ymd, hh=hh, model=model, output_dir=output_dir,
+            ymd=ymd,
+            hh=hh,
+            model=model,
+            output_dir=output_dir,
             drive_folder=drive_folder,
-            ncols=ncols, npages=npages, nrows=nrows,
-            city_name="akita",
+            city_name="akita",   # ←必ず明示
         )
         msg = (
             f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
