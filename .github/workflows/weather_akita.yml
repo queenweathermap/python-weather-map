@@ -37,4 +37,4 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
-          PYTHONPATH=. python3 scripts/gpv_panel_daily_akita.py
+          python3 -u scripts/gpv_panel_daily_akita.py
