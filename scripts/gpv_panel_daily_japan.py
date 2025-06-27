@@ -9,6 +9,8 @@ from module.plotter.gpv_plotter_hybrid import generate_japan_panel_images
 from module.utils.zip_utils import zip_files
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.slack_utils import send_slack_text
+from module.plotter.gpv_plotter_hybrid import generate_japan_panel_and_notify
+
 
 def main():
     ymd = "20240622"
