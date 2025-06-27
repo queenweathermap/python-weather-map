@@ -73,7 +73,13 @@ def main():
         if not downloaded:
             raise FileNotFoundError("GPVファイルが見つかりません")
 
-        # 必要な天気図パネル生成処理へ（既存のまま）
+        # --- ↓↓ ここから追加・修正 ↓↓ ---
+        ymd = f"{y}{m}{d}"
+        model = "MSM"  # MSM局地（秋田用）
+        output_dir = "./output_akita"  # 任意の出力先（必要に応じて修正）
+        # --- ↑↑ ここまで追加・修正 ↑↑ ---
+
+        # 生成・通知
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
@@ -87,6 +93,7 @@ def main():
         print(f"[ERROR] {e}")
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
