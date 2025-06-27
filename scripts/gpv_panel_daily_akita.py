@@ -11,10 +11,9 @@ from module.plotter.gpv_plotter_universal import generate_universal_panel_and_no
 from module.utils.slack_utils import send_slack_text
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
-CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSMの一般的なサイクル
+CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
 
 def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
-    """利用可能な最新GPVファイル（秋田局地用）を探索"""
     now = datetime.datetime.utcnow()
     for day_delta in range(max_days):
         day = now - datetime.timedelta(days=day_delta)
@@ -46,8 +45,7 @@ def main():
         output_dir = "./output_akita"
         drive_folder = os.environ["DRIVE_FOLDER_ID"]
         slack_channel = os.environ["SLACK_CHANNEL_ID"]
-        ncols, npages, nrows = 4, 1, 8     # 必要なら調整
-        city_name = "akita"
+        city_name = "akita"   # ←ポイント
 
         # GPVファイルDL
         for info in file_infos:
@@ -61,18 +59,10 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
-        # --- パネル生成＋Drive＋Slack通知 ---
-        # 秋田局地専用ズーム範囲
-        AKITA_EXTENT = [139.5, 141.0, 38.8, 40.5]
-        
-        # コア関数に city_name="akita" で渡す（module側で REGION_EXTENTS["akita"] を参照）
+        # ---- コア関数で描画・Drive・Slack通知 ----
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-            ymd=ymd,
-            hh=hh,
-            model="MSM",
-            output_dir=output_dir,
-            drive_folder=drive_folder,
-            city_name="akita",  # ★これだけでOK（REGION_EXTENTS["akita"]に依存）
+            ymd=ymd, hh=hh, model=model, output_dir=output_dir,
+            drive_folder=drive_folder, city_name=city_name
         )
         msg = (
             f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
@@ -82,7 +72,6 @@ def main():
         )
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 秋田局地パネル自動化 完了")
-
     except Exception as e:
         print(f"[ERROR] {e}")
         traceback.print_exc()
