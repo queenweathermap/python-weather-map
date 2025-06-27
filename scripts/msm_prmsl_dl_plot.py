@@ -8,6 +8,7 @@
 import os
 import urllib.request
 import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'IPAexGothic'
 import cartopy.crs as ccrs
 import xarray as xr
 
