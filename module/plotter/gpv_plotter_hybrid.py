@@ -1,7 +1,7 @@
 # module/plotter/gpv_plotter_hybrid.py
 # ===============================================================
 # 日本全国・ハイブリッド（GSM+MSM）天気図パネル自動生成メイン関数
-# 画像のみ生成（Drive/Slackは呼び出し元で管理）
+# 複数ページ分パネル描画・jpg保存・Zip・Driveアップ・Slack通知・ログ対応
 # ===============================================================
 
 import os
@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
+from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
+from module.utils.zip_utils import zip_files
 
 from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
 from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
@@ -23,27 +25,42 @@ from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_
 import cfgrib
 import xarray as xr
 
-def generate_japan_panel_images(
+def generate_japan_panel_and_notify(
     ymd,
     hh,
     model="HYBRID",
     output_dir="./data",
+    drive_folder=None,
     ncols=4,
     npages=4,
+    log_callback=None,
 ):
     """
-    全国パネル画像をページ分割して出力し、ファイルパスリストを返す
+    全国パネル生成＋Zip＋Driveアップ＋Slack通知一括実行
+    Returns: panel_imgs(list), zip_path(str), drive_url(str)
     """
+    def log(msg):
+        print(msg)
+        if log_callback:
+            log_callback(msg)
+
     dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
     os.makedirs(output_dir, exist_ok=True)
 
-    patterns = MODEL_CONFIG["MSM"]["patterns"]  # HYBRID時は工夫
-    panel_files = download_gpv_panel(patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols * npages)
+    # --- 1. データダウンロード ---
+    log(f"[START] {ymd} Weathercaster天気図自動処理")
+    log("[STEP1] GPVデータ一括ダウンロード")
+    patterns = MODEL_CONFIG["MSM"]["patterns"]  # HYBRID時は今後要拡張
+    panel_files = download_gpv_panel(patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages)
     if not panel_files or not panel_files[0] or not all(panel_files[0]):
+        log("[ERROR] GPVファイルが見つかりません")
         raise FileNotFoundError("GPVファイルが見つかりません")
 
     l_pall_fname, _ = panel_files[0][0]
     lsurf_fname, _ = panel_files[0][1]
+    log(f"[OK] l_pall: {l_pall_fname}")
+    log(f"[OK] lsurf: {lsurf_fname}")
+
     ds_isobaric = [d for d in cfgrib.open_datasets(l_pall_fname) if "isobaricInhPa" in d.variables][0]
     ds_surf_instant = xr.open_dataset(
         lsurf_fname, engine="cfgrib", filter_by_keys={"stepType": "instant"}
@@ -60,6 +77,7 @@ def generate_japan_panel_images(
         (plot_surface_pressure_and_wind_msm, ds_surf_instant, "地上気圧・風・降水"),
     ]
 
+    # --- 2. 画像ページ分割描画 ---
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -82,7 +100,7 @@ def generate_japan_panel_images(
                     axes[row, col].set_title(f"{title} (+{step*3}h)")
                 except Exception as e:
                     axes[row, col].set_title(f"{title} (エラー)")
-                    print(f"[ERROR] {title}: {e}")
+                    log(f"[ERROR] {title}: {e}")
                     axes[row, col].axis("off")
 
         page_time_range = f"{ymd} UTC{hh} +{page*ncols*3}h〜+{(page+1)*ncols*3-3}h"
@@ -91,7 +109,22 @@ def generate_japan_panel_images(
         out_path = os.path.join(output_dir, out_name)
         plt.savefig(out_path, dpi=300)
         plt.close()
-        print(f"[OK] Saved: {out_path}")
+        log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
-    return panel_imgs
+    # --- 3. ZIP圧縮 ---
+    zip_name = f"panel_japan_{ymd}_UTC{hh}.zip"
+    zip_path = os.path.join(output_dir, zip_name)
+    log("[STEP3] JPGをZIP圧縮")
+    zip_files(panel_imgs, zip_path)
+    log(f"[OK] ZIP作成: {zip_path}")
+
+    # --- 4. Google Driveにアップロード ---
+    drive_url = "(未アップロード)"
+    if drive_folder:
+        log("[STEP4] Google Driveへアップロード")
+        delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
+        drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
+        log(f"[OK] Drive URL: {drive_url}")
+
+    return panel_imgs, zip_path, drive_url
