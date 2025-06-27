@@ -39,8 +39,10 @@ def main():
     # --- ④ Slackに通知（Drive URLのみ or 添付も可） ---
     print("[STEP4] Slack通知")
     msg = (
-        f":white_check_mark: {ymd} {hh} 全国天気図パネル（{npages}ページZIP）\n"
-        f"Google Driveリンク: {drive_url}"
+        f":white_check_mark: 全国天気図パネル {ymd} UTC{hh}\n"
+        f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
+        f"--- LOG ---\n"
+        # 実行ログや抜粋をここに
     )
     send_slack_text(channel=slack_channel, message=msg)
 
