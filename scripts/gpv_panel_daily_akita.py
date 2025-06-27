@@ -92,11 +92,15 @@ def main():
         # --- Slack通知を明示的に呼ぶ ---
         slack_channel = os.environ["SLACK_CHANNEL_ID"]
         msg = (
-            f":large_red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
+            f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
-            f"{os.path.basename(zip_path)}\n"
-            f"{drive_url}"
+            f"{os.path.basename(zip_path)}"
         )
+        if drive_url and drive_url not in ("未アップロード", ""):
+            msg += f"\n{drive_url}"
+        else:
+            msg += "\n(Driveアップロード未設定)"
+        
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 秋田局地パネル生成・通知完了")
         print(f"Drive URL: {drive_url}")
