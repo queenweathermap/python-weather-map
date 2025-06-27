@@ -115,9 +115,12 @@ def generate_japan_panel_and_notify(
 
     # --- 5. Slack通知 ---
     msg = (
-        f"【自動配信】全国天気図パネル（{npages}ページZIP） {ymd} {hh}:00\n"
-        f"{drive_url}"
+        f":チェックマーク_緑: 全国天気図パネル {ymd} UTC{hh} \n"
+        f"Google Driveリンク（JPG ZIP）:\n"
+        f"{drive_url}\n"
+        "--- LOG ---\n"
+        f"ファイル名 {ymd}_UTC{hh}.jpg"
     )
-    send_slack_message(msg if not slack_channel else (slack_channel, msg))
+    send_slack_message(msg)
 
     print("[DONE] 全国天気図パネルの自動生成・通知が完了しました")
