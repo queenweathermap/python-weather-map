@@ -10,25 +10,37 @@ from module.utils.zip_utils import zip_files
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.slack_utils import send_slack_text
 
-
 def main():
-    ymd = "20240622"
-    hh = "12"
+    # ==== 設定 ====
+    ymd = "20250624"           # 出力日付（自動化時は自動取得も可）
+    hh = "00"                  # UTC時刻
     model = "HYBRID"
     output_dir = "./data"
     drive_folder = os.environ["DRIVE_FOLDER_ID"]
+    slack_channel = os.environ["SLACK_CHANNEL_ID"]
     ncols = 4
     npages = 4
+
+    # ==== ① 画像リスト生成（画像名を統一: panel_japan_YYYYMMDD_UTCHH_pX.jpg） ====
+    panel_imgs = []
+    def custom_save_callback(fig, page_idx):
+        fname = f"panel_japan_{ymd}_UTC{hh}_p{page_idx+1}.jpg"
+        fpath = os.path.join(output_dir, fname)
+        fig.savefig(fpath, dpi=300)
+        panel_imgs.append(fpath)
+        print(f"[OK] Saved: {fpath}")
 
     generate_japan_panel_and_notify(
         ymd=ymd,
         hh=hh,
         model=model,
         output_dir=output_dir,
-        drive_folder=drive_folder,
+        drive_folder=None,        # Drive/Slack通知はここでは行わない
         ncols=ncols,
         npages=npages,
+        save_callback=custom_save_callback,  # 画像ごとに呼ばれるコールバック
     )
+
 
 if __name__ == "__main__":
     main()
