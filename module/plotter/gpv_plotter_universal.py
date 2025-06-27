@@ -2,17 +2,18 @@
 # ===============================================================
 # 全国・秋田・任意局地ハイブリッド天気図パネル自動生成コア
 # 引数で描画関数リスト・範囲・モデルを切り替え可
-# 2025-06-27
 # ===============================================================
 
 import os
+import datetime
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
+import cfgrib
+import xarray as xr
+
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
-import cfgrib
-import xarray as xr
 
 def generate_universal_panel_and_notify(
     ymd,
@@ -23,8 +24,8 @@ def generate_universal_panel_and_notify(
     ncols=4,
     npages=1,
     nrows=7,
-    panel_def=None,    # [(plot_func, ds, title), ...] × 段数
-    lat_range=None,    # 任意局地なら設定
+    panel_def=None,    # [(plot_func, ds, title), ...]
+    lat_range=None,    # 任意局地
     lon_range=None,
     pin_lat=None,
     pin_lon=None,
@@ -32,21 +33,15 @@ def generate_universal_panel_and_notify(
     slack_channel=None,
     log_callback=None
 ):
-    """
-    全国・秋田・任意局地 共通パネル生成
-    """
     def log(msg):
         print(msg)
         if log_callback:
             log_callback(msg)
 
     os.makedirs(output_dir, exist_ok=True)
+    dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
 
-    # --- データ取得 ---
-    # ここでモデル・範囲に応じてダウンロード（全国・局地で切り替え）
-    dt = f"{ymd}{hh}"
-    dt = dt if isinstance(dt, str) else dt.strftime("%Y%m%d%H")
-    # patternsをモデルごと・範囲で切り替え
+    # ダウンロード
     patterns = MODEL_CONFIG.get(model, MODEL_CONFIG["MSM"])["patterns"]
     panel_files = download_gpv_panel(
         patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages,
@@ -56,7 +51,6 @@ def generate_universal_panel_and_notify(
         log("[ERROR] GPVファイルが見つかりません")
         raise FileNotFoundError("GPVファイルが見つかりません")
 
-    # cfgribオープン
     l_pall_fname, _ = panel_files[0][0]
     lsurf_fname, _ = panel_files[0][1]
     ds_isobaric = [d for d in cfgrib.open_datasets(l_pall_fname) if "isobaricInhPa" in d.variables][0]
@@ -64,7 +58,7 @@ def generate_universal_panel_and_notify(
         lsurf_fname, engine="cfgrib", filter_by_keys={"stepType": "instant"}
     )
 
-    # --- panel_defを自動で与えなければ、全国 or MSMデフォルト ---
+    # デフォルトpanel_def
     if panel_def is None:
         from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
         from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
@@ -82,10 +76,11 @@ def generate_universal_panel_and_notify(
             (plot_850hpa_temp_wind_700hpa_w, ds_isobaric, "850hPa温度・風＋700hPa鉛直流"),
             (plot_850hpa_thetae_stream, ds_isobaric, "850hPa θe流線"),
             (plot_975hpa_temp_wind_dindex, ds_isobaric, "975hPa温度・風・湿数"),
+            (plot_925hpa_temp_wind_dindex, ds_isobaric, "925hPa温度・風・湿数"),
             (plot_surface_pressure_and_wind_msm, ds_surf_instant, "地上気圧・風・降水"),
         ]
+        nrows = len(panel_def)
 
-    # --- 画像ページ分割描画 ---
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -113,25 +108,21 @@ def generate_universal_panel_and_notify(
                     axes[row, col].axis("off")
 
         page_time_range = f"{ymd} UTC{hh} +{page*ncols*3}h〜+{(page+1)*ncols*3-3}h"
-        fig.suptitle(
-            f"{city_name or '全国'}天気図パネル（{page_time_range}）",
-            fontsize=20
-        )
-        out_name = f"panel_{city_name or 'japan'}_{ymd}_UTC{hh}_p{page+1}.jpg"
+        city_tag = city_name or 'japan'
+        fig.suptitle(f"{city_tag}天気図パネル（{page_time_range}）", fontsize=20)
+        out_name = f"panel_{city_tag}_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
         plt.savefig(out_path, dpi=300)
         plt.close()
         log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
-    # --- ZIP ---
-    zip_name = f"panel_{city_name or 'japan'}_{ymd}_UTC{hh}.zip"
+    zip_name = f"panel_{city_tag}_{ymd}_UTC{hh}.zip"
     zip_path = os.path.join(output_dir, zip_name)
     log("[STEP3] JPGをZIP圧縮")
     zip_files(panel_imgs, zip_path)
     log(f"[OK] ZIP作成: {zip_path}")
 
-    # --- Drive ---
     drive_url = "(未アップロード)"
     if drive_folder:
         log("[STEP4] Google Driveへアップロード")
