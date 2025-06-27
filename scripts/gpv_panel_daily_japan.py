@@ -38,7 +38,6 @@ def main():
         drive_folder=None,        # Drive/Slack通知はここでは行わない
         ncols=ncols,
         npages=npages,
-        save_callback=custom_save_callback,  # 画像ごとに呼ばれるコールバック
     )
 
 
