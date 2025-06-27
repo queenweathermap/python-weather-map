@@ -92,7 +92,7 @@ try:
     print("[STEP5] Slack通知")
     full_log = log_buffer.getvalue()
     msg = (
-        f":white_check_mark: {today} Weathercaster天気図 処理完了\n"
+        f":earth_asia: {today} Weathercaster天気図 処理完了\n"
         f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
         f"--- LOG ---\n```{full_log[-1800:]}```"
     )
