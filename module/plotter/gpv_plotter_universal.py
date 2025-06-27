@@ -44,8 +44,7 @@ def generate_universal_panel_and_notify(
     # ダウンロード
     patterns = MODEL_CONFIG.get(model, MODEL_CONFIG["MSM"])["patterns"]
     panel_files = download_gpv_panel(
-        patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages,
-        lat_range=lat_range, lon_range=lon_range
+        patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages
     )
     if not panel_files or not panel_files[0] or not all(panel_files[0]):
         log("[ERROR] GPVファイルが見つかりません")
