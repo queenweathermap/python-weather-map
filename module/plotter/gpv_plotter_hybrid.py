@@ -1,9 +1,7 @@
 # module/plotter/gpv_plotter_hybrid.py
 # ===============================================================
 # 日本全国・ハイブリッド（GSM+MSM）天気図パネル自動生成メイン関数
-# ・GSM/MSMデータ取得・読み込み
-# ・複数ページ分パネル描画
-# ・jpg保存、Zip、Driveアップロード、Slack通知
+# 画像のみ生成（Drive/Slackは呼び出し元で管理）
 # ===============================================================
 
 import os
@@ -12,9 +10,6 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
-from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
-from module.utils.slack_utils import send_slack_message
-from module.utils.zip_utils import zip_files
 
 from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
 from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
@@ -28,25 +23,22 @@ from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_
 import cfgrib
 import xarray as xr
 
-def generate_japan_panel_and_notify(
+def generate_japan_panel_images(
     ymd,
     hh,
     model="HYBRID",
     output_dir="./data",
-    drive_folder=None,
     ncols=4,
     npages=4,
-    slack_channel=None,
 ):
     """
-    全国パネル生成＋Zip＋Driveアップ＋Slack通知一括実行
+    全国パネル画像をページ分割して出力し、ファイルパスリストを返す
     """
     dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- 1. データダウンロード ---
     patterns = MODEL_CONFIG["MSM"]["patterns"]  # HYBRID時は工夫
-    panel_files = download_gpv_panel(patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages)
+    panel_files = download_gpv_panel(patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols * npages)
     if not panel_files or not panel_files[0] or not all(panel_files[0]):
         raise FileNotFoundError("GPVファイルが見つかりません")
 
@@ -68,7 +60,6 @@ def generate_japan_panel_and_notify(
         (plot_surface_pressure_and_wind_msm, ds_surf_instant, "地上気圧・風・降水"),
     ]
 
-    # --- 2. 画像ページ分割描画 ---
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -94,30 +85,13 @@ def generate_japan_panel_and_notify(
                     print(f"[ERROR] {title}: {e}")
                     axes[row, col].axis("off")
 
-        page_time_range = f"{ymd} {hh}00 +{page*ncols*3}h〜+{(page+1)*ncols*3-3}h"
+        page_time_range = f"{ymd} UTC{hh} +{page*ncols*3}h〜+{(page+1)*ncols*3-3}h"
         fig.suptitle(f"全国天気図パネル（{page_time_range}）", fontsize=20)
         out_name = f"panel_japan_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
         plt.savefig(out_path, dpi=300)
         plt.close()
-        print("[OK] Saved:", out_path)
+        print(f"[OK] Saved: {out_path}")
         panel_imgs.append(out_path)
 
-    # --- 3. ZIP圧縮 ---
-    zip_path = os.path.join(output_dir, f"panel_japan_{ymd}{hh}.zip")
-    zip_files(panel_imgs, zip_path)
-
-    # --- 4. Google Driveにアップロード ---
-    drive_url = "(未アップロード)"
-    if drive_folder:
-        delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
-        drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
-
-    # --- 5. Slack通知 ---
-    msg = (
-        f"全国天気図パネル {ymd} UTC{hh}\n"
-        f"Google Driveリンク:\n{drive_url}\n"
-    )
-    send_slack_message(msg)
-
-    print("[DONE] 全国天気図パネルの自動生成・通知が完了しました")
+    return panel_imgs
