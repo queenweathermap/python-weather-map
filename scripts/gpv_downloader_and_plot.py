@@ -11,8 +11,10 @@ from module.core.gpv_data_loader import load_grib2
 from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
 
 import matplotlib.pyplot as plt
-plt.rcParams['font.family'] = 'IPAexGothic'
 import cartopy.crs as ccrs
+
+# 日本語フォント（IPAGothic）を指定
+plt.rcParams['font.family'] = 'IPAGothic'
 
 def main(yyyymmddhh, model="GSM", out_dir="./data"):
     # ダウンロード
