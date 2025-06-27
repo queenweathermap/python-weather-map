@@ -32,7 +32,7 @@ def main():
     # Slack通知例
     file_log = "\n".join([os.path.basename(p) for p in panel_imgs] + [os.path.basename(zip_path)])
     msg = (
-        f":earth_asia: 全国天気図パネル {ymd} UTC{hh}\n"
+        f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
         "--- LOG ---\n"
         f"{file_log}\n"
         f"{drive_url}"
