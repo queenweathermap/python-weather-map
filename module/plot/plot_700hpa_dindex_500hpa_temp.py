@@ -4,17 +4,14 @@
 # ===============================================
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from matplotlib.colors import LinearSegmentedColormap
+from scipy.ndimage import maximum_filter, minimum_filter
+from module.utils.var_utils import get_var
 
-from module.utils.var_utils import get_var_2d, get_var
+from module.plot.plot_utils import set_japanese_font, plot_no_data_japan_map
+set_japanese_font()  # 日本語フォントを全描画で有効化
 
-plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
 def get_lon_lat(ds):
     lon = get_var(ds, "longitude")
