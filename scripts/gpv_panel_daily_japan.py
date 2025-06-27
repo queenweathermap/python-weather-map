@@ -30,29 +30,5 @@ def main():
         npages=npages,
     )
 
-    # --- ② ZIPにまとめる ---
-    print("[STEP2] ZIP圧縮")
-    zip_path = os.path.join(output_dir, f"panel_japan_{ymd}_{hh}.zip")
-    zip_files(panel_imgs, zip_path)
-
-    # --- ③ Google Driveにアップロード ---
-    print("[STEP3] Google Driveへアップロード")
-    drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
-    print(f"[OK] Drive URL: {drive_url}")
-
-    # --- ④ Slackに通知（Drive URLのみ or 添付も可） ---
-    print("[STEP4] Slack通知")
-    msg = (
-        f":white_check_mark: 全国天気図パネル {ymd} UTC{hh}\n"
-        f"Google Driveリンク（JPG ZIP）:\n{drive_url}\n"
-        f"--- LOG ---\n"
-        # 実行ログや抜粋をここに
-    )
-    send_slack_text(channel=slack_channel, message=msg)
-
-    # --- ⑤ Google Drive内の古いファイル自動削除 ---
-    print("[STEP5] Google Driveの古いファイル自動削除")
-    delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
-
 if __name__ == "__main__":
     main()
