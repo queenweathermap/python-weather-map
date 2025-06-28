@@ -51,7 +51,7 @@ def main():
         city_name = "japan"
         ncols, npages = 4, 4
 
-        # 必要ファイルDL
+        # --- 必要ファイルDL ---
         for info in file_infos:
             if not os.path.exists(info["local"]):
                 resp = requests.get(info["url"])
@@ -63,13 +63,30 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
-        # --- データセット抽出 ---
-        l_pall_path = file_infos[0]["local"]
-        lsurf_path = file_infos[1]["local"]
-        ds_isobaric = open_isobaric_dataset(l_pall_path)
-        ds_surf_instant = open_surface_dataset(lsurf_path)
+        # --- ファイル名を自動で仕分け ---
+        gsm_l_pall_path = None
+        msm_l_pall_path = None
+        msm_lsurf_path = None
+        for info in file_infos:
+            fname = info["local"]
+            if "GSM_GPV_Rjp_L-pall" in fname:
+                gsm_l_pall_path = fname
+            elif "MSM_GPV_Rjp_L-pall" in fname:
+                msm_l_pall_path = fname
+            elif "MSM_GPV_Rjp_Lsurf" in fname:
+                msm_lsurf_path = fname
 
-        panel_def = get_panel_def_japan(ds_isobaric, ds_surf_instant)
+        # --- ファイルが全部揃っているかチェック ---
+        if not (gsm_l_pall_path and msm_l_pall_path and msm_lsurf_path):
+            raise FileNotFoundError(f"必要なGPVファイルが不足: gsm_l_pall={gsm_l_pall_path}, msm_l_pall={msm_l_pall_path}, msm_lsurf={msm_lsurf_path}")
+
+        # --- データセットをモデル別に作成 ---
+        ds_gsm_isobaric = open_isobaric_dataset(gsm_l_pall_path)
+        ds_msm_isobaric = open_isobaric_dataset(msm_l_pall_path)
+        ds_msm_surf_instant = open_surface_dataset(msm_lsurf_path)
+
+        # --- パネル定義 ---
+        panel_def = get_panel_def_japan(ds_gsm_isobaric, ds_msm_isobaric, ds_msm_surf_instant)
         extent = REGION_EXTENTS["japan"]
 
         # --- パネル生成 ---
