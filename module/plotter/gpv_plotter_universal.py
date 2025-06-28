@@ -18,6 +18,16 @@ from module.utils.drive_utils import upload_to_drive, delete_old_files_from_driv
 from module.utils.zip_utils import zip_files
 from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan  # 必要に応じて他エリアのgetterもimport
 
+from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
+from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
+from module.plot.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp
+from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
+from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
+from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
+from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
+from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+from module.panel_utils import open_isobaric_dataset, open_surface_dataset
+
 
 file_path = "./data/Z__C_RJTD_20250627000000_MSM_GPV_Rjp_L-pall_FH00-15_grib2.nc"
 
