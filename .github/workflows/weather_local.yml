@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-akita-panel:
+  run-local-panel:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
