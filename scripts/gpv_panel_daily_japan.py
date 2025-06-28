@@ -1,13 +1,15 @@
 # scripts/gpv_panel_daily_japan.py
 # ===============================================================
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 2025-06-28 改訂（RISH存在サイクル自動探索方式）
+# 2025-06-28 改訂（panel_definitions準拠）
 # ===============================================================
 
 import os
 import datetime
 import requests
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
+from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
+from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
@@ -23,7 +25,6 @@ def find_latest_available_files_japan(base_url=BASE_URL, max_days=2):
             y, m, d, hh = t.strftime("%Y %m %d %H").split()
             data_url = f"{base_url}/{y}/{m}/{d}/"
             target_init = f"{y}{m}{d}{hh}0000"
-            # 全国用の必要ファイルパターン（必要に応じて拡張可）
             file_patterns = [
                 f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",
                 f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin"
@@ -41,17 +42,16 @@ def find_latest_available_files_japan(base_url=BASE_URL, max_days=2):
     raise FileNotFoundError("利用可能なGPVファイルが見つかりません")
 
 def main():
-    # ==== サイクル自動判定 ====
     try:
         ymd, hh, file_infos = find_latest_available_files_japan()
         model = "HYBRID"
         output_dir = "./data"
         drive_folder = os.environ["DRIVE_FOLDER_ID"]
         slack_channel = os.environ["SLACK_CHANNEL_ID"]
-        ncols, npages, nrows = 4, 4, 7
         city_name = "japan"
+        ncols, npages = 4, 4
 
-        # ---- 必要ファイルDL（なければDLをスキップ。ここではパスのみ使う設計例） ----
+        # 必要ファイルDL
         for info in file_infos:
             if not os.path.exists(info["local"]):
                 resp = requests.get(info["url"])
@@ -63,20 +63,34 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
-        # ---- パネル生成＋Drive＋Slack通知 ----
+        # --- データセット抽出 ---
+        l_pall_path = file_infos[0]["local"]
+        lsurf_path = file_infos[1]["local"]
+        ds_isobaric = open_isobaric_dataset(l_pall_path)
+        ds_surf_instant = open_surface_dataset(lsurf_path)
+
+        panel_def = get_panel_def_japan(ds_isobaric, ds_surf_instant)
+        extent = REGION_EXTENTS["japan"]
+
+        # --- パネル生成 ---
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-            ...,
-            ncols=4,
-            nrows=7,
-            npages=4,
-            city_name="akita",
-            # extent=...,  # 必要に応じて
+            ymd=ymd,
+            hh=hh,
+            model=model,
+            output_dir=output_dir,
+            drive_folder=drive_folder,
+            ncols=ncols,
+            npages=npages,
+            nrows=len(panel_def),
+            panel_def=panel_def,
+            city_name=city_name,
+            extent=extent,
         )
-                msg = (
+        msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
             f"{os.path.basename(zip_path)}\n"
-            f"{drive_url}"
+            f"{drive_url if drive_url else '(Driveアップロード未設定)'}"
         )
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
