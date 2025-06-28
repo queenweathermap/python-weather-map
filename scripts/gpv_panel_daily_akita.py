@@ -9,8 +9,8 @@ import requests
 import traceback
 from module.utils.slack_utils import send_slack_text
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
-
-
+from module.panel_definitions import get_panel_def_akita, REGION_EXTENTS
+from module.panel_utils import open_isobaric_dataset, open_surface_dataset  # 追加
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
@@ -61,33 +61,35 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
-        # ---- 4時刻分ループで秋田局地パネル生成 ----
-        # 例：+0h, +3h, +6h, +9h（必要に応じてstep_rangeは調整）
-        step_range = [0, 3, 6, 9]
-        panel_imgs = []
-        
-        for idx, step in enumerate(step_range):
-            # ---- 4時刻分ループ不要！一括でOK ----
-            panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-                ymd=ymd,
-                hh=hh,
-                model=model,
-                output_dir=output_dir,
-                drive_folder=drive_folder,
-                city_name=city_name,
-                ncols=4,     # ←4ページ=4時刻（+0h, +3h, +6h, +9h）が横並びで出る設計
-                npages=1     # ←1枚だけ（ページ分割したいならここを増やす）
-            )
-            if isinstance(panel_img, list):
-                panel_imgs.extend(panel_img)
-            else:
-                panel_imgs.append(panel_img)
+        # --- データセット読み込み ---
+        # それぞれ適切な気圧面などでopen_isobaric_dataset, open_surface_datasetなどで抽出
+        l_pall_path = file_infos[0]["local"]
+        lsurf_path = file_infos[1]["local"]
 
-        # --- ZIP化・Google Driveアップロード ---
-        from module.utils.zip_utils import zip_files
-        zip_path = zip_files(panel_imgs, output_dir)
-        from module.utils.drive_utils import upload_to_drive
-        drive_url = upload_to_drive(zip_path, drive_folder)
+        # 仮のサンプル。isobaricInhPa=850, 925, 975 などを使い分けて下さい
+        ds_emagram = open_isobaric_dataset(l_pall_path)
+        ds_850 = open_isobaric_dataset(l_pall_path, hPa=850)
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe用抽出があれば
+        ds_925 = open_isobaric_dataset(l_pall_path, hPa=925)
+        ds_975 = open_isobaric_dataset(l_pall_path, hPa=975)
+        ds_surface = open_surface_dataset(lsurf_path)
+
+        panel_def_akita = get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface)
+        extent = REGION_EXTENTS["akita"]
+
+        # --- パネル生成（7段×4列×4ページ） ---
+        panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
+            ymd=ymd,
+            hh=hh,
+            model="MSM",
+            output_dir=output_dir,
+            drive_folder=drive_folder,
+            ncols=4, npages=4,
+            panel_def=panel_def_akita,
+            nrows=7,
+            city_name="akita",
+            extent=extent,
+        )
 
         msg = (
             f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
@@ -95,7 +97,6 @@ def main():
             f"{os.path.basename(zip_path)}\n"
             f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
         )
-        from module.utils.slack_utils import send_slack_text
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 秋田局地パネル自動化 完了")
     except Exception as e:
