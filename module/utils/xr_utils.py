@@ -22,7 +22,7 @@ def align_datasets_common(ds_list, dims=('time', 'latitude', 'longitude')):
     # 各次元の共通部分（intersection）を抽出
     common = {}
     for dim in dims:
-        arrs = [ds[dim].values for ds in ds_list if dim in ds.dims or dim in ds.coords]
+        arrs = [ds[dim].values for ds in ds_list if dim in ds.sizes or dim in ds.coords]
         if not arrs:
             continue
         common[dim] = arrs[0]
