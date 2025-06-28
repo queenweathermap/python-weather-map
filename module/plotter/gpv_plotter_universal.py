@@ -29,16 +29,20 @@ from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dinde
 from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
 from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
 
-# -----------------------------------------------
+
 # ファイルパス例
 # 例: 3時間ごと全12期間（00-33h）をDLしてペアが揃ったものだけを抽出
 periods = ["FH00-03", "FH03-06", "FH06-09", "FH09-12", "FH12-15", "FH15-18", "FH18-21", "FH21-24", "FH24-27", "FH27-30", "FH30-33"]
 base_dir = "./data"
 mirrors = GPV_MIRROR_URLS  # いつも使っているもの
-download_func = your_download_func  # pattern, base_dir, mirrors でファイルDLする関数
+
 
 matched_pairs = find_latest_matched_pairs(periods, base_dir, mirrors, download_func=download_func)
-
+# --- データセット取得 ---
+# panel_files[0][0] ← l_pall
+# panel_files[0][1] ← lsurf
+l_pall_fname, _ = panel_files[0][0]
+lsurf_fname, _ = panel_files[0][1]
 if not matched_pairs:
     print("[ERROR] L-pall/Lsurf のペアが揃いません")
     exit(1)
@@ -76,7 +80,7 @@ print("最新L-pallファイル:", latest_l_pall)
 print("最新Lsurfファイル:", latest_lsurf)
 
 
-
+# -----------------------------------------------
 # cfgrib.open_datasetsで分割された各サブセット（filter_by_keysごと）をすべて確認
 datasets = cfgrib.open_datasets(file_path)
 print(f"全{len(datasets)}サブセット")
