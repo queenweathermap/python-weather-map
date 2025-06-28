@@ -99,7 +99,7 @@ def generate_universal_panel_and_notify(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
-            n_steps = ds.dims["step"] if (ds is not None and "step" in ds.dims) else 0
+            n_steps = ds.sizes["step"] if (ds is not None and "step" in ds.sizes) else 0
             for col in range(ncols):
                 step = page * ncols + col
                 ax = axes[row, col]
