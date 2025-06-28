@@ -2,6 +2,7 @@
 # module/panel_utils.py
 # パネル可視化・NO DATA生成など可視化ユーティリティ
 # ===============================================
+import os
 import cfgrib
 import xarray as xr
 import numpy as np
@@ -13,11 +14,10 @@ plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 from module.utils.var_utils import get_var
 from module.utils.xr_utils import align_datasets_common
 
-
 def make_nodata_weather_panel(
-    times, 
-    save_path="nodata_panel.jpg", 
-    title="NO DATA", 
+    times,
+    save_path="nodata_panel.jpg",
+    title="NO DATA",
     city_name=None
 ):
     """
@@ -52,119 +52,6 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の形状が不正")
     return lon2d, lat2d
 
-def make_local_weather_panel(
-    ds, times, save_path,
-    pin_lat, pin_lon, city_name,
-    lat_range=None, lon_range=None,    # Optionally restrict the map area
-    plot_func_list=None,
-    nrows=6, ncols=12
-):
-    """
-    Generate a local weather panel (with emagram) for a specified city/point.
-    """
-    import cartopy.crs as ccrs
-
-    fig = plt.figure(figsize=(ncols * 2.5, nrows * 3.5))
-    axes = np.empty((nrows, ncols), dtype=object)
-    for row in range(1, nrows):
-        for col in range(ncols):
-            axes[row, col] = fig.add_subplot(nrows, ncols, row * ncols + col + 1, projection=ccrs.PlateCarree())
-
-    # Prepare time labels
-    init_time = pd.Timestamp(times[0])
-    col_labels, hh_labels = [], []
-    for time in times:
-        t = pd.Timestamp(time)
-        hour_diff = int((t - init_time).total_seconds() // 3600)
-        label = f"{t.strftime('%Y%m%d %HUTC')} (+" + f"{hour_diff:02d}h)"
-        col_labels.append(label)
-        hh_labels.append(f"+{hour_diff:02d}")
-
-    # Draw each time slot
-    for col, time in enumerate(times):
-        if pd.to_datetime(time) not in pd.to_datetime(ds.time.values):
-            for row in range(nrows):
-                ax = axes[row, col] if row > 0 else None
-                if ax is not None:
-                    ax.set_facecolor("white")
-                    ax.text(0.5, 0.5, "NO DATA", ha="center", va="center", fontsize=16, color="gray", transform=ax.transAxes)
-            continue
-
-        # Pinpoint for emagram
-        dsi_point = ds.sel(latitude=pin_lat, longitude=pin_lon, time=time, method='nearest')
-        if plot_func_list:
-            plot_func_list[0](fig, col, dsi_point, pin_lat, pin_lon, city_name, nrows, ncols)
-        # Region selection for city
-        if lat_range and lon_range:
-            dsi = ds.sel(
-                latitude=slice(*lat_range),
-                longitude=slice(*lon_range),
-                time=time
-            )
-        else:
-            dsi = ds.sel(time=time)
-        # Map panels for all but first row
-        if plot_func_list:
-                for row, func in enumerate(plot_func_list[1:], 1):
-                    func(axes[row, col], dsi)
-
-    for row in range(1, nrows):
-        for col in range(ncols):
-            ax = axes[row, col]
-            gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-            gl.top_labels = False
-            gl.right_labels = False
-
-    fig.suptitle(
-        f"[{city_name} Local] Weather Panel (incl. Emagram)\nInit: {init_time.strftime('%Y%m%d %HUTC')} | Forecasts: {', '.join(hh_labels)}",
-        fontsize=12, y=1.02
-    )
-    fig.savefig(save_path, dpi=200, bbox_inches='tight')
-    plt.close(fig)
-    print("File exported:", save_path)
-
-def make_daily_weather_panel_multi_time(ds, times, save_path="weather_panel.jpg", plot_func_list=None, nrows=6, ncols=12):
-    """
-    Draw a multi-time, multi-row weather panel for a given day.
-    """
-    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 2.5, nrows * 2.2), constrained_layout=True)
-    axes = axes.flatten() if isinstance(axes, np.ndarray) else [axes]
-    n_panel = nrows * ncols
-    n_data = len(times)
-
-    for idx in range(n_panel):
-        ax = axes[idx]
-        ax.set_axis_off()
-        if idx < n_data:
-            t = times[idx]
-            # plot_func_listがある場合は関数を呼ぶ
-            if plot_func_list and idx < len(plot_func_list):
-                try:
-                    plot_func_list[idx](ax, ds, t)
-                except Exception as e:
-                    ax.text(0.5, 0.5, "Plot Error", fontsize=10, ha="center", va="center")
-            else:
-                ax.set_facecolor("lightgray")
-                ax.text(0.5, 0.5, "NO DATA", fontsize=16, ha="center", va="center")
-            ax.set_title(str(t))
-        else:
-            ax.set_axis_off()
-
-    fig.suptitle("Weather Panel", fontsize=22)
-    fig.savefig(save_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
-    print(f"[Weather Panel] {save_path} exported.")
-
-
-
-def make_lfm_panel(ds, times, save_path):
-    # LFM用天気図パネル描画処理
-    # ds: xarray.Dataset
-    # times: list of datetime
-    # save_path: 画像保存パス
-    pass
-
-
 def open_isobaric_dataset(fname, hPa=None):
     """
     指定GRIB2ファイルから isobaricInhPa（気圧面）層を優先的に読み込む。
@@ -186,10 +73,10 @@ def open_surface_dataset(fname):
     """
     for ds in cfgrib.open_datasets(fname):
         try:
-            if ("stepType" in ds.variables and 
-                hasattr(ds, "stepType") and 
+            if ("stepType" in ds.variables and
+                hasattr(ds, "stepType") and
                 (getattr(ds, "stepType", None) == "instant" or
-                 (hasattr(ds.stepType, "values") and 
+                 (hasattr(ds.stepType, "values") and
                   all(ds.stepType.values == "instant")))):
                 return ds
         except Exception:
@@ -201,13 +88,63 @@ def open_surface_dataset(fname):
         pass
     raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
 
+# --- 新・共通パネル描画関数 ---
+def make_universal_weather_panel(
+    save_dir,
+    panel_def,
+    times,
+    base_title,
+    city_name="japan",
+    ncols=4, nrows=7, npages=4,
+    extent=None,
+    dpi=200
+):
+    """
+    7段×4列×4ページパネルを任意定義で一括生成。
+    panel_def = [(plot_func, ds, title), ...] で7要素。
+    plot_func=None, ds=None, title=""の箇所は空欄マスになる。
+    """
+    import cartopy.crs as ccrs
+    os.makedirs(save_dir, exist_ok=True)
+    panel_imgs = []
+    for page in range(npages):
+        fig, axes = plt.subplots(
+            nrows=nrows, ncols=ncols,
+            figsize=(ncols*3, nrows*3),
+            constrained_layout=True,
+            subplot_kw=dict(projection=ccrs.PlateCarree())
+        )
+        for row, (plot_func, ds, title) in enumerate(panel_def):
+            for col in range(ncols):
+                step = page * ncols + col
+                ax = axes[row, col]
+                if extent:
+                    ax.set_extent(extent, crs=ccrs.PlateCarree())
+                if plot_func is None or ds is None:
+                    ax.axis("off")
+                    ax.set_title("")
+                    continue
+                try:
+                    ds_step = ds.isel(step=step) if "step" in ds.dims else ds
+                    plot_func(ax, ds_step)
+                    ax.set_title(f"{title} (+{step*3}h)")
+                except Exception as e:
+                    ax.axis("off")
+                    ax.set_title(f"{title} (error)")
+        fig.suptitle(f"{base_title}（{city_name}） page{page+1}", fontsize=18)
+        out_name = f"panel_{city_name}_{base_title}_p{page+1}.jpg"
+        out_path = os.path.join(save_dir, out_name)
+        fig.savefig(out_path, dpi=dpi)
+        plt.close(fig)
+        panel_imgs.append(out_path)
+    return panel_imgs
+
 # --- 公開関数リストに追加 ---
 __all__ = [
     "make_nodata_weather_panel",
-    "make_local_weather_panel",
-    "make_daily_weather_panel_multi_time",
     "get_lon_lat",
     "align_datasets_common",
-    "open_isobaric_dataset",     # 追加
-    "open_surface_dataset",      # 追加
+    "open_isobaric_dataset",
+    "open_surface_dataset",
+    "make_universal_weather_panel"
 ]
