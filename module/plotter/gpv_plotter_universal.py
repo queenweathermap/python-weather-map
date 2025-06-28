@@ -16,14 +16,7 @@ from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
-
-# --- 地域ごとのデフォルトズーム範囲定義 ---
-REGION_EXTENTS = {
-    "japan": [122, 153, 20, 46],
-    "akita": [139.5, 141.0, 38.8, 40.5],
-    "tokyo": [138.5, 140.0, 34.7, 36.2],
-    # 必要に追加
-}
+from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan  # 必要に応じて他エリアのgetterもimport
 
 def generate_universal_panel_and_notify(
     ymd, hh, model, output_dir,
@@ -37,6 +30,8 @@ def generate_universal_panel_and_notify(
 ):
     """
     描画範囲は city_name で自動切替。直接 extent で上書きも可能。
+    panel_defは外部（panel_definitions.py）から渡す運用推奨。
+    指定がなければ全国デフォルトpanel_defを適用。
     """
     def log(msg):
         print(msg)
@@ -46,7 +41,7 @@ def generate_universal_panel_and_notify(
     os.makedirs(output_dir, exist_ok=True)
     dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
 
-    # --- データダウンロード（省略: 必要に応じてカスタムダウンロード処理） ---
+    # --- データダウンロード ---
     patterns = MODEL_CONFIG.get(model, MODEL_CONFIG["MSM"])["patterns"]
     panel_files = download_gpv_panel(patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages)
     if not panel_files or not panel_files[0] or not all(panel_files[0]):
@@ -61,28 +56,13 @@ def generate_universal_panel_and_notify(
 
     # --- パネル定義 ---
     if panel_def is None:
-        from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
-        from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
-        from module.plot.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp
-        from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
-        from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
-        from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
-        from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
-        from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
-
-        panel_def = [
-            (plot_300hpa_height_wind, ds_isobaric, "300hPa高度・風"),
-            (plot_500hpa_vorticity, ds_isobaric, "500hPa渦度"),
-            (plot_700hpa_dindex_500hpa_temp, ds_isobaric, "700hPa湿数＋500hPa気温"),
-            (plot_850hpa_temp_wind_700hpa_w, ds_isobaric, "850hPa温度・風＋700hPa鉛直流"),
-            (plot_850hpa_thetae_stream, ds_isobaric, "850hPa θe流線"),
-            (plot_975hpa_temp_wind_dindex, ds_isobaric, "975hPa温度・風・湿数"),
-            (plot_925hpa_temp_wind_dindex, ds_isobaric, "925hPa温度・風・湿数"),
-            (plot_surface_pressure_and_wind_msm, ds_surf_instant, "地上気圧・風・降水"),
-        ]
+        # デフォルトは全国用
+        panel_def = get_panel_def_japan(ds_isobaric, ds_surf_instant)
+        nrows = len(panel_def)
+    else:
         nrows = len(panel_def)
 
-    # --- 範囲選択（city_name優先・直接渡しなら上書き） ---
+    # --- 範囲選択 ---
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
     # --- 描画 ---
@@ -95,24 +75,24 @@ def generate_universal_panel_and_notify(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
-            n_steps = ds.dims["step"] if "step" in ds.dims else 1
+            # step数判定（空欄マスはds=Noneなのでn_steps=0）
+            n_steps = ds.dims["step"] if (ds is not None and "step" in ds.dims) else 0
             for col in range(ncols):
                 step = page * ncols + col
                 ax = axes[row, col]
                 ax.set_extent(extent, crs=ccrs.PlateCarree())
-                if step >= n_steps:
+                if plot_func is None or ds is None or step >= n_steps:
                     ax.axis("off")
-                    ax.set_title(f"{title} (no data)")
+                    ax.set_title("" if plot_func is None else f"{title} (no data)")
                     continue
                 try:
                     ds_step = ds.isel(step=step)
-                    if plot_func:
-                        plot_func(ax, ds_step)
+                    plot_func(ax, ds_step)
                     ax.set_title(f"{title} (+{step*3}h)")
                 except Exception as e:
+                    ax.axis("off")
                     ax.set_title(f"{title} (エラー)")
                     log(f"[ERROR] {title}: {e}")
-                    ax.axis("off")
         fig.suptitle(f"{city_name}天気図パネル（{ymd} UTC{hh}）", fontsize=20)
         out_name = f"panel_{city_name}_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
