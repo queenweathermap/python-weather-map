@@ -18,6 +18,26 @@ from module.utils.drive_utils import upload_to_drive, delete_old_files_from_driv
 from module.utils.zip_utils import zip_files
 from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan  # 必要に応じて他エリアのgetterもimport
 
+
+file_path = "（例）./data/Z__C_RJTD_20250627000000_MSM_GPV_Rjp_L-pall_FH00-15_grib2.nc"
+
+# cfgribエンジンで読み込み
+ds = xr.open_dataset(file_path, engine="cfgrib")
+
+print("\n[変数名一覧]")
+print(list(ds.data_vars))
+
+for var in ds.data_vars:
+    print(f"\n=== {var} ===")
+    print(ds[var])
+    print("coords:", ds[var].coords)
+    print("attrs :", ds[var].attrs)
+
+print("\n[座標軸一覧]")
+print(ds.coords)
+
+
+
 def generate_universal_panel_and_notify(
     ymd, hh, model, output_dir,
     drive_folder=None,
