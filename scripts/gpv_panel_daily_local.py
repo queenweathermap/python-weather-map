@@ -88,20 +88,20 @@ def main():
             output_dir=output_dir,
             drive_folder=drive_folder,
             ncols=4, npages=4,
-            panel_def=panel_def_akita,
+            panel_def=panel_def_local,
             nrows=7,
-            city_name="akita",
+            city_name="tokyo",
             extent=extent,
         )
 
         msg = (
-            f":red_circle: 秋田局地天気図パネル {ymd} UTC{hh}\n"
+            f":yellow_circle: ワンポイント天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
             f"{os.path.basename(zip_path)}\n"
             f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
         )
         send_slack_text(channel=slack_channel, message=msg)
-        print("[OK] 秋田局地パネル自動化 完了")
+        print("[OK] 任意局地パネル自動化 完了")
     except Exception as e:
         print(f"[ERROR] {e}")
         traceback.print_exc()
