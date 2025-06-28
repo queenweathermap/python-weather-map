@@ -49,7 +49,7 @@ def main():
         slack_channel = os.environ["SLACK_CHANNEL_ID"]
         city_name = "akita"
 
-        # GPVファイルDL
+        # --- GPVファイルDL ---
         for info in file_infos:
             if not os.path.exists(info["local"]):
                 resp = requests.get(info["url"])
@@ -61,15 +61,23 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
-        # --- データセット読み込み ---
-        # それぞれ適切な気圧面などでopen_isobaric_dataset, open_surface_datasetなどで抽出
-        l_pall_path = file_infos[0]["local"]
-        lsurf_path = file_infos[1]["local"]
+        # --- ファイル仕分け ---
+        l_pall_path = None
+        lsurf_path = None
+        for info in file_infos:
+            fname = info["local"]
+            if "MSM_GPV_Rjp_L-pall" in fname:
+                l_pall_path = fname
+            elif "MSM_GPV_Rjp_Lsurf" in fname:
+                lsurf_path = fname
 
-        # 仮のサンプル。isobaricInhPa=850, 925, 975 などを使い分けて下さい
+        if not (l_pall_path and lsurf_path):
+            raise FileNotFoundError(f"必要なMSM GPVファイルが不足: l_pall={l_pall_path}, lsurf={lsurf_path}")
+
+        # --- データセット抽出（気圧面ごとに分離） ---
         ds_emagram = open_isobaric_dataset(l_pall_path)
         ds_850 = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe用抽出があれば
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # 必要に応じて独自抽出へ
         ds_925 = open_isobaric_dataset(l_pall_path, hPa=925)
         ds_975 = open_isobaric_dataset(l_pall_path, hPa=975)
         ds_surface = open_surface_dataset(lsurf_path)
@@ -82,12 +90,12 @@ def main():
             ymd=ymd,
             hh=hh,
             model="MSM",
-            output_dir=output_dir,
+            output_dir=output_akita,
             drive_folder=drive_folder,
             ncols=4, npages=4,
             panel_def=panel_def_akita,
             nrows=7,
-            city_name="akita",
+            city_name=city_name,
             extent=extent,
         )
 
@@ -101,7 +109,7 @@ def main():
         print("[OK] 秋田局地パネル自動化 完了")
     except Exception as e:
         print(f"[ERROR] {e}")
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         exit(1)
 
 if __name__ == "__main__":
