@@ -58,7 +58,7 @@ def open_isobaric_dataset(fname, hPa=None):
     hPaを指定すると、その気圧面のみ抽出。
     """
     for ds in cfgrib.open_datasets(fname):
-        if "isobaricInhPa" in ds.variables and "step" in ds.dims:
+        if "isobaricInhPa" in ds.variables and "step" in ds.sizes:
             if hPa is not None:
                 if hPa in ds["isobaricInhPa"]:
                     return ds.sel(isobaricInhPa=hPa)
@@ -125,7 +125,7 @@ def make_universal_weather_panel(
                     ax.set_title("")
                     continue
                 try:
-                    ds_step = ds.isel(step=step) if "step" in ds.dims else ds
+                    ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
                     plot_func(ax, ds_step)
                     ax.set_title(f"{title} (+{step*3}h)")
                 except Exception as e:
