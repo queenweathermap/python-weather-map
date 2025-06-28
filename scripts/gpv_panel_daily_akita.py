@@ -65,7 +65,7 @@ def main():
         # 例：+0h, +3h, +6h, +9h（必要に応じてstep_rangeは調整）
         step_range = [0, 3, 6, 9]
         panel_imgs = []
-
+        
         for idx, step in enumerate(step_range):
             panel_img, *_ = generate_universal_panel_and_notify(
                 ymd=ymd,
@@ -74,11 +74,10 @@ def main():
                 output_dir=output_dir,
                 drive_folder=drive_folder,
                 city_name=city_name,
-                step=step,   # 追加: 各予報時刻を明示的に指定
+                step=step,
                 panel_suffix=f"p{idx+1}"
             )
             if isinstance(panel_img, list):
-                # もしリストで返ってきた場合はリスト展開
                 panel_imgs.extend(panel_img)
             else:
                 panel_imgs.append(panel_img)
