@@ -65,12 +65,14 @@ def main():
 
         # ---- パネル生成＋Drive＋Slack通知 ----
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-            ymd=ymd, hh=hh, model=model, output_dir=output_dir,
-            drive_folder=drive_folder,
-            ncols=ncols, npages=npages, nrows=nrows,
-            city_name=city_name
+            ...,
+            ncols=4,
+            nrows=7,
+            npages=4,
+            city_name="akita",
+            # extent=...,  # 必要に応じて
         )
-        msg = (
+                msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
             f"{os.path.basename(zip_path)}\n"
