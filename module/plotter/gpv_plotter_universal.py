@@ -12,12 +12,11 @@ import cartopy.crs as ccrs
 import cfgrib
 import xarray as xr
 
-from module.gpv_download_utils import find_latest_matched_pairs
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
-from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan  # 必要に応じ他エリアもimport
+from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
 
 # --- プロット関数 ---
 from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
@@ -29,76 +28,7 @@ from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dinde
 from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
 from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
 
-
-# ファイルパス例
-# 例: 3時間ごと全12期間（00-33h）をDLしてペアが揃ったものだけを抽出
-periods = ["FH00-03", "FH03-06", "FH06-09", "FH09-12", "FH12-15", "FH15-18", "FH18-21", "FH21-24", "FH24-27", "FH27-30", "FH30-33"]
-base_dir = "./data"
-mirrors = GPV_MIRROR_URLS  # いつも使っているもの
-
-
-matched_pairs = find_latest_matched_pairs(periods, base_dir, mirrors, download_func=download_func)
-# --- データセット取得 ---
-# panel_files[0][0] ← l_pall
-# panel_files[0][1] ← lsurf
-l_pall_fname, _ = panel_files[0][0]
-lsurf_fname, _ = panel_files[0][1]
-if not matched_pairs:
-    print("[ERROR] L-pall/Lsurf のペアが揃いません")
-    exit(1)
-
-# 最新のペアだけを使いたい場合（例：時刻が新しい順でソート）
-matched_pairs.sort(key=lambda x: x[2])  # x[2]=init_time
-latest_l_pall, latest_lsurf, latest_time, fh = matched_pairs[-1]
-
-print("L-pallファイル:", latest_l_pall)
-print("Lsurfファイル:", latest_lsurf)
-
-
-patterns = MODEL_CONFIG["MSM"]["patterns"]  # ["MSM_GPV_Rjp_L-pall", "MSM_GPV_Rjp_Lsurf"]
-base_dir = "./data"
-init_dt = datetime(2024, 6, 27, 0)  # ここは必要な初期時刻を入れてください
-ncols = 12
-
-out_list = download_gpv_panel(patterns, base_dir, init_dt, GPV_MIRROR_URLS, ncols=ncols)
-
-# 使えるペアだけ抜き出す
-matched_pairs = []
-for col in out_list:
-    if col is not None and all(col):
-        l_pall, lsurf = col
-        # l_pall, lsurfはそれぞれ (fpath, t) のタプル
-        matched_pairs.append((l_pall[0], lsurf[0], l_pall[1]))
-
-if not matched_pairs:
-    print("[ERROR] L-pall/Lsurf のペアが揃いません")
-    exit(1)
-
-# 最新のペアを使う場合
-latest_l_pall, latest_lsurf, latest_time = matched_pairs[-1]
-print("最新L-pallファイル:", latest_l_pall)
-print("最新Lsurfファイル:", latest_lsurf)
-
-
-# -----------------------------------------------
-# cfgrib.open_datasetsで分割された各サブセット（filter_by_keysごと）をすべて確認
-datasets = cfgrib.open_datasets(file_path)
-print(f"全{len(datasets)}サブセット")
-
-for i, ds in enumerate(datasets):
-    print(f"\n--- Dataset #{i+1} ---")
-    print("Variables:", list(ds.data_vars))
-    print("Coords:", list(ds.coords))
-    print("Attrs:", ds.attrs)
-    # 詳細を表示したい場合は
-    for var in ds.data_vars:
-        print(f"\n  [{var}]")
-        print(ds[var])
-        print("    coords:", ds[var].coords)
-        print("    attrs :", ds[var].attrs)
-
-
-
+# ----------------------------------------------------------------------
 # ★ 変数一覧ダンプユーティリティ（必要な時だけ使う）★
 def dump_grib_vars(file_path):
     print(f"\n==== ファイル: {file_path} ====")
@@ -112,15 +42,15 @@ def dump_grib_vars(file_path):
             print(f"\n[{step}] 変数:", list(ds.data_vars))
         except Exception as e:
             print(f"[{step}] 読み込み不可: {e}")
-# -----------------------------------------------
 
+# ----------------------------------------------------------------------
 def generate_universal_panel_and_notify(
     ymd, hh, model, output_dir,
     drive_folder=None,
     ncols=4, npages=1, nrows=None,
     panel_def=None,
     city_name="japan",
-    extent=None,    # 任意範囲も直接指定OK
+    extent=None,
     slack_channel=None,
     log_callback=None,
 ):
@@ -207,7 +137,7 @@ def generate_universal_panel_and_notify(
     return panel_imgs, zip_path, drive_url
 
 # -----------------------------------------------
-# （例）全国用ラッパー　※局地用も同様にwrapperを作るだけ！
+# 全国用ラッパー（例）局地用も同様にwrapperを作るだけ
 def generate_japan_panel_and_notify(
     ymd,
     hh,
@@ -228,9 +158,7 @@ def generate_japan_panel_and_notify(
         log_callback=log_callback
     )
 
-# -----------------------------------------------
-
-# --- 必要なら局地エリア版ラッパーを追加でOK ---
+# --- 必要なら局地エリア版ラッパーも同じ構造で追加OK ---
 # def generate_local_panel_and_notify(...):  # panel_def/extentだけ局地用に
 
 # --- ダンプユーティリティの使い方例 ---
