@@ -50,11 +50,10 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 def open_isobaric_dataset(fname, hPa=None):
-    """
-    指定GRIB2ファイルから isobaricInhPa（気圧面）層を優先的に読み込む。
-    hPaを指定すると、その気圧面のみ抽出。
-    """
-    # print("fname type:", type(fname), fname)  ← デバッグしたい場合のみ残す
+    # すでにxarray.Datasetならそのまま返す
+    if isinstance(fname, xr.Dataset):
+        return fname
+    # ここから先はファイルパス（str）のみ通す
     for ds in cfgrib.open_datasets(fname):
         if "isobaricInhPa" in ds.variables and "step" in ds.sizes:
             if hPa is not None:
@@ -66,10 +65,10 @@ def open_isobaric_dataset(fname, hPa=None):
     raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
 
 
+
 def open_surface_dataset(fname):
-    """
-    指定GRIB2ファイルから地上値（stepType="instant"）のデータセットを優先して取得
-    """
+    if isinstance(fname, xr.Dataset):
+        return fname
     for ds in cfgrib.open_datasets(fname):
         try:
             if ("stepType" in ds.variables and
