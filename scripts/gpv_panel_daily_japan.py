@@ -11,9 +11,22 @@ from module.plotter.gpv_plotter_universal import generate_universal_panel_and_no
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
+from module.gpv_download_utils import find_latest_matched_pairs
+from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM例。GSM主体なら00,06,12,18でもOK
+
+# 例: GSM・MSM両モデルの最新ペアを取得
+periods = ["FD0000-0100", ...] # or ["FH00-15", ...] 必要に応じて
+matched = find_latest_matched_pairs(
+    periods=periods,
+    base_dir="./data",
+    mirrors=GPV_MIRROR_URLS,
+    l_pall_prefix="GSM_GPV_Rjp_Gll0p1deg_L-pall",
+    lsurf_prefix="MSM_GPV_Rjp_Lsurf",    # MSMならこのprefix
+    download_func=your_download_func     # 必要ならラップ
+)
 
 def find_latest_available_files_japan(base_url=BASE_URL, max_days=2):
     """
