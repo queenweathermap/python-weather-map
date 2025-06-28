@@ -7,38 +7,11 @@ name: Local Weather Panel
 
 on:
   workflow_dispatch:
-    inputs:
-      model:
-        description: 'データ種別（gsm or msm）'
-        required: true
-        default: 'msm'
-        type: choice
-        options:
-          - gsm
-          - msm
-      city:
-        description: '地名（例：Nagaoka Fireworks）'
-        required: true
-        type: string
-      pin_lat:
-        description: 'ピンポイント緯度（例：37.4462）'
-        required: true
-        type: number
-      pin_lon:
-        description: 'ピンポイント経度（例：138.8521）'
-        required: true
-        type: number
-      range_width:
-        description: '中心からの半径（度, デフォルト2.5）'
-        required: false
-        default: 2.5
-        type: number
-
 
 jobs:
-    run-local-panel:
-    runs-on: ubuntu-latest
-    steps:
+      run-local-panel:
+      runs-on: ubuntu-latest
+      steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
