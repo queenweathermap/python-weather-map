@@ -1,10 +1,12 @@
-# ===============================================
 # module/utils/var_utils.py
+# ===============================================
 # 変数取得＋2D保証（標準名マッピング付き）完全最新版
 # ===============================================
 
 import numpy as np
 import re
+import xarray as xr
+import cfgrib
 
 # --- 標準名エイリアス辞書 ---
 VAR_ALIASES = {
@@ -20,6 +22,22 @@ VAR_ALIASES = {
     "latitude":     ["lat", "latitude"],
 }
 
+def open_all_subdatasets(file_path):
+    """cfgrib.open_datasetsで全サブセット取得"""
+    return cfgrib.open_datasets(file_path)
+
+def select_subdataset_by_var(datasets, var_name):
+    """複数サブセットから、指定変数を含むサブセットを返す"""
+    for ds in datasets:
+        if var_name in ds.data_vars:
+            return ds
+    # エイリアスも探索
+    for ds in datasets:
+        for aliases in VAR_ALIASES.get(var_name, []):
+            if aliases in ds.data_vars:
+                return ds
+    raise ValueError(f"{var_name} が見つかりません")
+
 def get_var(ds, key):
     # 標準名・エイリアスに対応
     if key in ds.variables:
@@ -32,61 +50,40 @@ def get_var(ds, key):
         return ds[key.lower()]
     return None
 
-def get_var_2d(ds, var_name, level=None):
+def get_var_2d_from_ds(ds, var_name, level=None, time_idx=None, step_idx=None):
     """
-    ds: xarray.Dataset（時刻・stepで既にスライス済みで渡す！）
-    var_name: 標準名
+    ds: xarray.Dataset
+    var_name: 標準名（TMP_850mbなど）
     level: 取得したい気圧面（例 850, 700）
+    time_idx, step_idx: スライス指定（必要に応じて）
     """
     da = get_var(ds, var_name)
-    print(f"[DEBUG] get_var_2d({var_name}) got {da}")
     if da is None:
-        print(f"[WARN] get_var_2d({var_name}) -> None")
-        return None
-    print(f"[DEBUG] get_var({var_name}) →", type(da), "dims:", getattr(da, "dims", None))
+        raise ValueError(f"{var_name} が ds.variables に見つかりません")
     arr = da
+    # レベル抽出
+    if level is None:
+        m = re.match(r"[A-Z]+_(\d+)mb", var_name)
+        if m:
+            level = int(m.group(1))
     if level is not None:
-        # "isobaricInhPa" or "level" で切る。存在しなければスキップ
         for lev_key in ["isobaricInhPa", "level"]:
             if lev_key in arr.dims or lev_key in arr.coords:
                 arr = arr.sel({lev_key: level}, method="nearest")
-    return arr
-
-    
-    # 気圧面名抽出（例 TMP_850mb → 850）
-    if level is None:
-        m = re.match(r"[A-Z]+_(\d+)mb", var_name)
-        if m:
-            level = int(m.group(1))
-    print("==== isobaricInhPa ====")
-    if "isobaricInhPa" in arr.dims:
-        print(f"[DEBUG] {var_name}: isobaricInhPa:", arr.coords["isobaricInhPa"].values)
-        print(ds.coords["isobaricInhPa"].values)
-    else:
-        print("No isobaricInhPa in ds.coords")
-
-    # 気圧面名抽出（例 TMP_850mb → 850）
-    if level is None:
-        m = re.match(r"[A-Z]+_(\d+)mb", var_name)
-        if m:
-            level = int(m.group(1))
-
-
-    # --- 多次元配列のスライス処理 ---
-    #  if "step" in arr.dims:
-    #     arr = arr.isel(step=step_idx)
-    # isobaricInhPa選択
-    if "isobaricInhPa" in arr.dims and level is not None:
-        level_vals = arr.coords["isobaricInhPa"].values
-        ilevel = np.abs(level_vals - level).argmin()
-        arr = arr.isel(isobaricInhPa=ilevel)
-    # time選択（もし存在する場合）
-    if "time" in arr.dims:
+    # 時間・ステップスライス
+    if (time_idx is not None) and ("time" in arr.dims):
         arr = arr.isel(time=time_idx)
-
-    arr2d = np.asarray(arr.squeeze())
+    if (step_idx is not None) and ("step" in arr.dims):
+        arr = arr.isel(step=step_idx)
+    arr2d = arr.squeeze()
     if arr2d.ndim != 2:
         raise ValueError(f"Output is not 2D: shape={arr2d.shape}, dims={arr.dims}")
     return arr2d
 
-__all__ = ["get_var", "get_var_2d"]
+def get_var_2d(file_path, var_name, level=None, time_idx=None, step_idx=None):
+    """ファイルパス→自動サブセット抽出→2D"""
+    datasets = open_all_subdatasets(file_path)
+    ds = select_subdataset_by_var(datasets, var_name)
+    return get_var_2d_from_ds(ds, var_name, level, time_idx, step_idx)
+
+__all__ = ["get_var", "get_var_2d", "get_var_2d_from_ds"]
