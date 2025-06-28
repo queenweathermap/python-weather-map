@@ -31,6 +31,10 @@ from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_
 # -----------------------------------------------
 # ファイルパス例
 file_path = "./data/Z__C_RJTD_20250626000000_GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
+if not os.path.exists(file_path):
+    print("[ERROR] ファイルがありません:", file_path)
+    print("data/ディレクトリの中身:", os.listdir("./data"))
+    raise FileNotFoundError(file_path)
 
 # cfgrib.open_datasetsで分割された各サブセット（filter_by_keysごと）をすべて確認
 datasets = cfgrib.open_datasets(file_path)
