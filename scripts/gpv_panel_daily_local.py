@@ -52,7 +52,7 @@ def main():
         slack_channel = os.environ["SLACK_CHANNEL_ID"]
         city_name = "tokyo"
 
-        # GPVファイルDL
+        # --- GPVファイルDL ---
         for info in file_infos:
             if not os.path.exists(info["local"]):
                 resp = requests.get(info["url"])
@@ -64,18 +64,28 @@ def main():
                 else:
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
-        # --- データセット読み込み ---
-        l_pall_path = file_infos[0]["local"]
-        lsurf_path = file_infos[1]["local"]
+        # --- ファイル自動仕分け ---
+        l_pall_path = None
+        lsurf_path = None
+        for info in file_infos:
+            fname = info["local"]
+            if "MSM_GPV_Rjp_L-pall" in fname:
+                l_pall_path = fname
+            elif "MSM_GPV_Rjp_Lsurf" in fname:
+                lsurf_path = fname
 
+        if not (l_pall_path and lsurf_path):
+            raise FileNotFoundError(f"必要なMSM GPVファイルが不足: l_pall={l_pall_path}, lsurf={lsurf_path}")
+
+        # --- データセット気圧面ごと抽出 ---
         ds_emagram = open_isobaric_dataset(l_pall_path)
         ds_850 = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe用は要カスタマイズ可
         ds_925 = open_isobaric_dataset(l_pall_path, hPa=925)
         ds_975 = open_isobaric_dataset(l_pall_path, hPa=975)
         ds_surface = open_surface_dataset(lsurf_path)
 
-        # 必要なパネル構成に合わせて定義
+        # --- パネル定義（必要に応じて7段以上も可）---
         from module.plot.plot_emagram import plot_emagram
         from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
         from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
@@ -93,13 +103,13 @@ def main():
             (None, None, ""),   # 7段目は空欄
         ]
         panel_def_local = get_panel_def_local(custom_items, total_rows=7)
-        extent = REGION_EXTENTS["tokyo"]
+        extent = REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
         # --- パネル生成 ---
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
-            model="MSM",
+            model=model,
             output_dir=output_dir,
             drive_folder=drive_folder,
             ncols=4, npages=4,
@@ -119,7 +129,7 @@ def main():
         print("[OK] 任意局地パネル自動化 完了")
     except Exception as e:
         print(f"[ERROR] {e}")
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         exit(1)
 
 if __name__ == "__main__":
