@@ -44,6 +44,8 @@ def dump_grib_vars(file_path):
             print(f"[{step}] 読み込み不可: {e}")
 
 # ----------------------------------------------------------------------
+
+
 def generate_universal_panel_and_notify(
     ymd, hh, model, output_dir,
     drive_folder=None,
@@ -54,10 +56,6 @@ def generate_universal_panel_and_notify(
     slack_channel=None,
     log_callback=None,
 ):
-    """
-    全国・局地どちらも city_name/panel_def/extent で切替。
-    必要なら外部でget_panel_def_xxx, REGION_EXTENTS等を定義して呼び出す。
-    """
     def log(msg):
         print(msg)
         if log_callback:
@@ -73,6 +71,7 @@ def generate_universal_panel_and_notify(
         log("[ERROR] GPVファイルが見つかりません")
         raise FileNotFoundError("GPVファイルが見つかりません")
 
+    # --- Dataset化はここだけ ---
     l_pall_fname, _ = panel_files[0][0]
     lsurf_fname, _ = panel_files[0][1]
     ds_isobaric = open_isobaric_dataset(l_pall_fname)
@@ -80,13 +79,11 @@ def generate_universal_panel_and_notify(
 
     # --- パネル定義 ---
     if panel_def is None:
-        # 全国デフォルト
         panel_def = get_panel_def_japan(ds_isobaric, ds_surf_instant)
         nrows = len(panel_def)
     else:
         nrows = len(panel_def)
 
-    # --- 範囲（全国・局地…） ---
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
     # --- 描画 ---
@@ -99,6 +96,8 @@ def generate_universal_panel_and_notify(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
+            if ds is not None and not isinstance(ds, xr.Dataset):
+                raise TypeError(f"panel_defのdsは必ずDatasetで: {title}, type={type(ds)}")
             n_steps = ds.sizes["step"] if (ds is not None and "step" in ds.sizes) else 0
             for col in range(ncols):
                 step = page * ncols + col
@@ -135,6 +134,8 @@ def generate_universal_panel_and_notify(
         log(f"[OK] Drive URL: {drive_url}")
 
     return panel_imgs, zip_path, drive_url
+
+
 
 # -----------------------------------------------
 # 全国用ラッパー（例）局地用も同様にwrapperを作るだけ
