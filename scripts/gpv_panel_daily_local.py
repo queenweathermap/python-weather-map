@@ -12,13 +12,13 @@ import requests
 import traceback
 from module.utils.slack_utils import send_slack_text
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
-from module.panel_definitions import get_panel_def_akita, REGION_EXTENTS
-from module.panel_utils import open_isobaric_dataset, open_surface_dataset  # 追加
+from module.panel_definitions import get_panel_def_local, REGION_EXTENTS
+from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
 
-def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
+def find_latest_available_files_local(base_url=BASE_URL, max_days=2):
     now = datetime.datetime.utcnow()
     for day_delta in range(max_days):
         day = now - datetime.timedelta(days=day_delta)
@@ -45,12 +45,12 @@ def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
 
 def main():
     try:
-        ymd, hh, file_infos = find_latest_available_files_akita()
+        ymd, hh, file_infos = find_latest_available_files_local()
         model = "MSM"
-        output_dir = "./output_akita"
+        output_dir = "./output_local"
         drive_folder = os.environ["DRIVE_FOLDER_ID"]
         slack_channel = os.environ["SLACK_CHANNEL_ID"]
-        city_name = "akita"
+        city_name = "tokyo"
 
         # GPVファイルDL
         for info in file_infos:
@@ -65,22 +65,37 @@ def main():
                     print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
 
         # --- データセット読み込み ---
-        # それぞれ適切な気圧面などでopen_isobaric_dataset, open_surface_datasetなどで抽出
         l_pall_path = file_infos[0]["local"]
         lsurf_path = file_infos[1]["local"]
 
-        # 仮のサンプル。isobaricInhPa=850, 925, 975 などを使い分けて下さい
         ds_emagram = open_isobaric_dataset(l_pall_path)
         ds_850 = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe用抽出があれば
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)
         ds_925 = open_isobaric_dataset(l_pall_path, hPa=925)
         ds_975 = open_isobaric_dataset(l_pall_path, hPa=975)
         ds_surface = open_surface_dataset(lsurf_path)
 
-        panel_def_akita = get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface)
+        # 必要なパネル構成に合わせて定義
+        from module.plot.plot_emagram import plot_emagram
+        from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
+        from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
+        from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
+        from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
+        from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+
+        custom_items = [
+            (plot_emagram, ds_emagram, "エマグラム"),
+            (plot_850hpa_temp_wind_700hpa_w, ds_850, "850hPa気温・風・700hPa鉛直流"),
+            (plot_850hpa_thetae_stream, ds_850_thetae, "850hPa相当温位・流線"),
+            (plot_925hpa_temp_wind_dindex, ds_925, "925hPa気温・風・湿数"),
+            (plot_975hpa_temp_wind_dindex, ds_975, "975hPa気温・風・湿数"),
+            (plot_surface_pressure_and_wind_msm, ds_surface, "地上"),
+            (None, None, ""),   # 7段目は空欄
+        ]
+        panel_def_local = get_panel_def_local(custom_items, total_rows=7)
         extent = REGION_EXTENTS["tokyo"]
 
-        # --- パネル生成（7段×4列×4ページ） ---
+        # --- パネル生成 ---
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
@@ -90,7 +105,7 @@ def main():
             ncols=4, npages=4,
             panel_def=panel_def_local,
             nrows=7,
-            city_name="tokyo",
+            city_name=city_name,
             extent=extent,
         )
 
