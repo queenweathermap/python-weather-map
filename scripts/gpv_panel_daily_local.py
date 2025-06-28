@@ -110,7 +110,7 @@ def main():
         )
 
         msg = (
-            f":yellow_circle: ワンポイント天気図パネル {ymd} UTC{hh}\n"
+            f"🟡 ワンポイント天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
             f"{os.path.basename(zip_path)}\n"
             f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
