@@ -8,6 +8,7 @@ import os
 import datetime
 import requests
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
+from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
@@ -15,60 +16,42 @@ from module.utils.slack_utils import send_slack_text
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM/実用運用用。GSMも00/06/12/18でOK
 
-def find_latest_available_files_japan(base_url=BASE_URL, max_days=2):
-    """
-    利用可能な最新GPVファイル（全国用/GSM+MSM両方）を探索
-    GSMは複数パターンで探索し、最初に見つかったものを採用
-    """
+def find_latest_available_files_japan_v2(base_dir="./data", days_back=2):
+    """index.htmlをパースしてGSM/MSMの最新ファイルを抽出する"""
+    base_url = GPV_MIRROR_URLS[0]
     now = datetime.datetime.utcnow()
-    for day_delta in range(max_days):
+    CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
+    gsm_pattern = "GSM_GPV_Rjp_Gll0p1deg_L-pall"
+    msm_l_pall_pattern = "MSM_GPV_Rjp_L-pall"
+    msm_lsurf_pattern = "MSM_GPV_Rjp_Lsurf"
+    fh_band_gsm = "FD0000-0100"
+    fh_band_msm = "FH00-15"
+    
+    for day_delta in range(days_back):
         day = now - datetime.timedelta(days=day_delta)
         for h in CYCLE_HOURS:
-            t = day.replace(hour=h, minute=0, second=0, microsecond=0)
-            y, m, d, hh = t.strftime("%Y %m %d %H").split()
-            data_url = f"{base_url}/{y}/{m}/{d}/"
-            target_init = f"{y}{m}{d}{hh}0000"
-
-            # --- GSMパターン拡張 ---
-            gsm_patterns = [
-                f"Z__C_RJTD_{target_init}_GSM_GPV_Rjp_L-pall_FD0000_grib2.bin",
-                f"Z__C_RJTD_{target_init}_GSM_GPV_Rjp_L-pall_FD0000-0100_grib2.bin",
-                f"Z__C_RJTD_{target_init}_GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000_grib2.bin",
-                f"Z__C_RJTD_{target_init}_GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
-            ]
-            # MSMパターン
-            msm_patterns = [
-                f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",
-                f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin"
-            ]
-
-            gsm_found, msm_found = None, []
-            # --- GSM探索 ---
-            for fname in gsm_patterns:
-                url = f"{data_url}{fname}"
-                try:
-                    r = requests.head(url, timeout=5)
-                    if r.status_code == 200:
-                        gsm_found = {"url": url, "local": os.path.join("./data", fname)}
-                        break
-                except Exception:
-                    continue
-
-            # --- MSM探索 ---
-            for fname in msm_patterns:
-                url = f"{data_url}{fname}"
-                try:
-                    r = requests.head(url, timeout=5)
-                    if r.status_code == 200:
-                        msm_found.append({"url": url, "local": os.path.join("./data", fname)})
-                except Exception:
-                    continue
-
-            # --- 全部揃ったらreturn ---
-            if gsm_found and len(msm_found) == 2:
-                return y + m + d, hh, [gsm_found] + msm_found
-
-    raise FileNotFoundError("利用可能なGSM+MSM GPVファイルが見つかりません")
+            dt = day.replace(hour=h, minute=0, second=0, microsecond=0)
+            # 1. GSMファイルリスト取得
+            gsm_files = list_files_on_server(dt, gsm_pattern, fh_band_gsm)
+            # 2. MSM L-pall/Lsurfリスト取得
+            msm_l_pall_files = list_files_on_server(dt, msm_l_pall_pattern, fh_band_msm)
+            msm_lsurf_files  = list_files_on_server(dt, msm_lsurf_pattern, fh_band_msm)
+            
+            # 3. どれも1個以上見つかった時点でreturn
+            if gsm_files and msm_l_pall_files and msm_lsurf_files:
+                y, m, d, hh = dt.strftime("%Y %m %d %H").split()
+                data_url = f"{base_url}/{y}/{m}/{d}/"
+                target_init = f"{y}{m}{d}{hh}0000"
+                gsm_fname = gsm_files[0]
+                msm_l_pall_fname = msm_l_pall_files[0]
+                msm_lsurf_fname  = msm_lsurf_files[0]
+                file_infos = [
+                    {"url": f"{data_url}{gsm_fname}", "local": os.path.join(base_dir, gsm_fname)},
+                    {"url": f"{data_url}{msm_l_pall_fname}", "local": os.path.join(base_dir, msm_l_pall_fname)},
+                    {"url": f"{data_url}{msm_lsurf_fname}", "local": os.path.join(base_dir, msm_lsurf_fname)},
+                ]
+                return y+m+d, hh, file_infos
+    raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
 def main():
     try:
