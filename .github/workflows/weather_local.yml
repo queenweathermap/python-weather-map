@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
 
 jobs:
-      run-local-panel:
-      runs-on: ubuntu-latest
-      steps:
+  run-akita-panel:
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
