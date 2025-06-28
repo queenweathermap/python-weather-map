@@ -12,6 +12,7 @@ import cartopy.crs as ccrs
 import cfgrib
 import xarray as xr
 
+from module.gpv_download_utils import find_latest_matched_pairs
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
@@ -30,11 +31,26 @@ from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_
 
 # -----------------------------------------------
 # ファイルパス例
-file_path = "./data/Z__C_RJTD_20250626000000_GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
-if not os.path.exists(file_path):
-    print("[ERROR] ファイルがありません:", file_path)
-    print("data/ディレクトリの中身:", os.listdir("./data"))
-    raise FileNotFoundError(file_path)
+# 例: 3時間ごと全12期間（00-33h）をDLしてペアが揃ったものだけを抽出
+periods = ["FH00-03", "FH03-06", "FH06-09", "FH09-12", "FH12-15", "FH15-18", "FH18-21", "FH21-24", "FH24-27", "FH27-30", "FH30-33"]
+base_dir = "./data"
+mirrors = GPV_MIRROR_URLS  # いつも使っているもの
+download_func = your_download_func  # pattern, base_dir, mirrors でファイルDLする関数
+
+matched_pairs = find_latest_matched_pairs(periods, base_dir, mirrors, download_func=download_func)
+
+if not matched_pairs:
+    print("[ERROR] L-pall/Lsurf のペアが揃いません")
+    exit(1)
+
+# 最新のペアだけを使いたい場合（例：時刻が新しい順でソート）
+matched_pairs.sort(key=lambda x: x[2])  # x[2]=init_time
+latest_l_pall, latest_lsurf, latest_time, fh = matched_pairs[-1]
+
+print("L-pallファイル:", latest_l_pall)
+print("Lsurfファイル:", latest_lsurf)
+
+
 
 # cfgrib.open_datasetsで分割された各サブセット（filter_by_keysごと）をすべて確認
 datasets = cfgrib.open_datasets(file_path)
