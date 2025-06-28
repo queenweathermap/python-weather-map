@@ -83,6 +83,30 @@ def open_isobaric_dataset(fname, hPa=None):
         pass
     raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
 
+
+def open_surface_dataset(fname):
+    """
+    指定GRIB2ファイルから地上値（stepType="instant"）のデータセットを優先して取得
+    """
+    for ds in cfgrib.open_datasets(fname):
+        try:
+            if ("stepType" in ds.variables and
+                hasattr(ds, "stepType") and
+                (getattr(ds, "stepType", None) == "instant" or
+                 (hasattr(ds.stepType, "values") and
+                  all(ds.stepType.values == "instant")))):
+                return ds
+        except Exception:
+            pass
+    try:
+        ds = xr.open_dataset(fname, engine="cfgrib", filter_by_keys={"stepType": "instant"})
+        return ds
+    except Exception:
+        pass
+    raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
+
+
+
 def make_universal_weather_panel(
     save_dir,
     panel_def,
