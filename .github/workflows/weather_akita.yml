@@ -7,7 +7,7 @@ name: Akita Weather Panel
 
 on:
   schedule:
-    - cron: '0 4 * * *'   # JST 13時
+    - cron: '0 6 * * *'   # JST 15時
   workflow_dispatch:
 
 jobs:
