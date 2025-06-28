@@ -57,6 +57,7 @@ def get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_su
         (plot_975hpa_temp_wind_dindex, ds_975, "975hPa気温・風・湿数"),
         (plot_surface_pressure_and_wind_msm, ds_surface, "地上"),
         (None, None, ""),  # 7段目空欄
+        (None, None, ""),   # 8段目 空欄 ←NEW!
     ]
 
 # --- 拡張例: 任意ローカル（段数可変・テンプレート化しやすい） ---
