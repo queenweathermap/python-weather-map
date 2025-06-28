@@ -51,6 +51,7 @@ def get_lon_lat(ds):
 
 def open_isobaric_dataset(fname, hPa=None):
     """ファイル名(str)から isobaricInhPa層のDatasetを返す（step・hPa選択対応）"""
+    print("nc_path type:", type(nc_path), nc_path)
     for ds in cfgrib.open_datasets(fname):
         if "isobaricInhPa" in ds.variables and "step" in ds.sizes:
             if hPa is not None:
@@ -61,7 +62,9 @@ def open_isobaric_dataset(fname, hPa=None):
             return ds
     raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
 
-def open_surface_dataset(fname):
+def open_isobaric_dataset(fname, hPa=None):
+    if isinstance(fname, xr.Dataset):
+        return fname
     """ファイル名(str)から地上instantのDatasetを返す"""
     for ds in cfgrib.open_datasets(fname):
         try:
