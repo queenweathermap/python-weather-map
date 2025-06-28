@@ -19,7 +19,7 @@ from module.utils.zip_utils import zip_files
 from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan  # 必要に応じて他エリアのgetterもimport
 
 
-file_path = "（例）./data/Z__C_RJTD_20250627000000_MSM_GPV_Rjp_L-pall_FH00-15_grib2.nc"
+file_path = "./data/Z__C_RJTD_20250627000000_MSM_GPV_Rjp_L-pall_FH00-15_grib2.nc"
 
 # cfgribエンジンで読み込み
 ds = xr.open_dataset(file_path, engine="cfgrib")
