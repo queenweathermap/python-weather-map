@@ -32,7 +32,14 @@ print(os.listdir("./data"))
 
 file_path = "./data/Z__C_RJTD_20250626000000_GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin"
 ds = xr.open_dataset(file_path, engine="cfgrib")
-
+# instantだけ
+ds = xr.open_dataset(
+    file_path,
+    engine="cfgrib",
+    backend_kwargs={'filter_by_keys': {'stepType': 'instant'}}
+)
+print(ds)
+print(ds.data_vars)
 
 # cfgribエンジンで読み込み
 ds = xr.open_dataset(file_path, engine="cfgrib")
