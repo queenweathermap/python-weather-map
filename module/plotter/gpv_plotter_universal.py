@@ -56,6 +56,17 @@ for var in ds.data_vars:
 print("\n[座標軸一覧]")
 print(ds.coords)
 
+for step in ["instant", "accum", "avg"]:
+    try:
+        ds = xr.open_dataset(
+            file_path,
+            engine="cfgrib",
+            backend_kwargs={'filter_by_keys': {'stepType': step}}
+        )
+        print(f"\n==== {step} ====")
+        print(list(ds.data_vars))
+    except Exception as e:
+        print(f"{step}: {e}")
 
 
 def generate_universal_panel_and_notify(
