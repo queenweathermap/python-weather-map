@@ -21,7 +21,7 @@ def generate_panel(ds, plot_funcs, nrows, ncols, figsize, title=None, step_axis=
         fig.suptitle(title, fontsize=18)
     
     # step数の上限（step軸があればそれを使う）
-    n_steps = ds.dims["step"] if "step" in ds.dims else 1
+    n_steps = ds.sizes["step"] if "step" in ds.sizes else 1
 
     for r, plot_func in enumerate(plot_funcs):
         for c in range(ncols):
