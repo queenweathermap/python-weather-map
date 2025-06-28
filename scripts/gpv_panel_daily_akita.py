@@ -67,15 +67,16 @@ def main():
         panel_imgs = []
         
         for idx, step in enumerate(step_range):
-            panel_img, *_ = generate_universal_panel_and_notify(
+            # ---- 4時刻分ループ不要！一括でOK ----
+            panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
                 ymd=ymd,
                 hh=hh,
                 model=model,
                 output_dir=output_dir,
                 drive_folder=drive_folder,
                 city_name=city_name,
-                step=step,
-                panel_suffix=f"p{idx+1}"
+                ncols=4,     # ←4ページ=4時刻（+0h, +3h, +6h, +9h）が横並びで出る設計
+                npages=1     # ←1枚だけ（ページ分割したいならここを増やす）
             )
             if isinstance(panel_img, list):
                 panel_imgs.extend(panel_img)
