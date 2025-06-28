@@ -29,7 +29,7 @@ from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 
 
-file_path = "./data/Z__C_RJTD_20250627000000_MSM_GPV_Rjp_L-pall_FH00-15_grib2.nc"
+file_path = "./data/Z__C_RJTD_20250627000000_MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin"
 
 # cfgribエンジンで読み込み
 ds = xr.open_dataset(file_path, engine="cfgrib")
