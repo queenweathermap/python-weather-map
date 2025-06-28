@@ -29,6 +29,27 @@ from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dinde
 from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
 
 # -----------------------------------------------
+# ファイルパス例
+file_path = "./data/Z__C_RJTD_20250626000000_GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
+
+# cfgrib.open_datasetsで分割された各サブセット（filter_by_keysごと）をすべて確認
+datasets = cfgrib.open_datasets(file_path)
+print(f"全{len(datasets)}サブセット")
+
+for i, ds in enumerate(datasets):
+    print(f"\n--- Dataset #{i+1} ---")
+    print("Variables:", list(ds.data_vars))
+    print("Coords:", list(ds.coords))
+    print("Attrs:", ds.attrs)
+    # 詳細を表示したい場合は
+    for var in ds.data_vars:
+        print(f"\n  [{var}]")
+        print(ds[var])
+        print("    coords:", ds[var].coords)
+        print("    attrs :", ds[var].attrs)
+
+
+
 # ★ 変数一覧ダンプユーティリティ（必要な時だけ使う）★
 def dump_grib_vars(file_path):
     print(f"\n==== ファイル: {file_path} ====")
