@@ -86,4 +86,22 @@ def get_var_2d(file_path, var_name, level=None, time_idx=None, step_idx=None):
     ds = select_subdataset_by_var(datasets, var_name)
     return get_var_2d_from_ds(ds, var_name, level, time_idx, step_idx)
 
+def get_lon_lat(ds):
+    """
+    xarray.Dataset/DataArrayから2D経度・緯度配列を取得
+    （1Dならmeshgrid化、2Dならそのまま）
+    """
+    lon = ds["longitude"] if "longitude" in ds else ds.coords["longitude"]
+    lat = ds["latitude"] if "latitude" in ds else ds.coords["latitude"]
+    lon = np.asarray(lon)
+    lat = np.asarray(lat)
+    if lon.ndim == 1 and lat.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon, lat)
+    elif lon.ndim == 2 and lat.ndim == 2:
+        lon2d, lat2d = lon, lat
+    else:
+        raise ValueError("緯度経度配列の形状が不正")
+    return lon2d, lat2d
+
+
 __all__ = ["get_var", "get_var_2d", "get_var_2d_from_ds"]
