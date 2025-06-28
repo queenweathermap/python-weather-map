@@ -16,7 +16,14 @@ BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM例。GSM主体なら00,06,12,18でもOK
 
 def find_latest_available_files_japan(base_url=BASE_URL, max_days=2):
-    """利用可能な最新GPVファイル（全国用）を探索"""
+    """
+    利用可能な最新GPVファイル（全国用/GSM+MSM両方）を探索
+    GSMは複数パターンで探索し、最初に見つかったものを採用
+    """
+    import os
+    import datetime
+    import requests
+
     now = datetime.datetime.utcnow()
     for day_delta in range(max_days):
         day = now - datetime.timedelta(days=day_delta)
@@ -25,21 +32,47 @@ def find_latest_available_files_japan(base_url=BASE_URL, max_days=2):
             y, m, d, hh = t.strftime("%Y %m %d %H").split()
             data_url = f"{base_url}/{y}/{m}/{d}/"
             target_init = f"{y}{m}{d}{hh}0000"
-            file_patterns = [
+
+            # --- GSMパターン拡張 ---
+            gsm_patterns = [
+                f"Z__C_RJTD_{target_init}_GSM_GPV_Rjp_L-pall_FD0000_grib2.bin",
+                f"Z__C_RJTD_{target_init}_GSM_GPV_Rjp_L-pall_FD0000-0100_grib2.bin",
+                f"Z__C_RJTD_{target_init}_GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000_grib2.bin",
+                f"Z__C_RJTD_{target_init}_GSM_GPV_Rjp_Gll0p1deg_L-pall_FD0000-0100_grib2.bin"
+            ]
+            # MSMパターン
+            msm_patterns = [
                 f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",
                 f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin"
             ]
-            file_paths = []
-            found = False
-            for fname in file_patterns:
+
+            gsm_found, msm_found = None, []
+            # --- GSM探索 ---
+            for fname in gsm_patterns:
                 url = f"{data_url}{fname}"
-                r = requests.head(url, timeout=5)
-                if r.status_code == 200:
-                    found = True
-                    file_paths.append({"url": url, "local": os.path.join("./data", fname)})
-            if found:
-                return y + m + d, hh, file_paths
-    raise FileNotFoundError("利用可能なGPVファイルが見つかりません")
+                try:
+                    r = requests.head(url, timeout=5)
+                    if r.status_code == 200:
+                        gsm_found = {"url": url, "local": os.path.join("./data", fname)}
+                        break
+                except Exception:
+                    continue
+
+            # --- MSM探索 ---
+            for fname in msm_patterns:
+                url = f"{data_url}{fname}"
+                try:
+                    r = requests.head(url, timeout=5)
+                    if r.status_code == 200:
+                        msm_found.append({"url": url, "local": os.path.join("./data", fname)})
+                except Exception:
+                    continue
+
+            # --- 全部揃ったらreturn ---
+            if gsm_found and len(msm_found) == 2:
+                return y + m + d, hh, [gsm_found] + msm_found
+
+    raise FileNotFoundError("利用可能なGSM+MSM GPVファイルが見つかりません")
 
 def main():
     try:
