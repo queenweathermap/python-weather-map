@@ -35,9 +35,6 @@ def make_nodata_weather_panel(
     print(f"[NO DATA panel] {save_path} exported.")
 
 def get_lon_lat(ds):
-    """
-    xarray.Datasetから2Dのlongitude/latitude配列を返す（2D保証）
-    """
     lon = get_var(ds, "longitude")
     lat = get_var(ds, "latitude")
     if lon is None or lat is None:
@@ -53,10 +50,7 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 def open_isobaric_dataset(fname, hPa=None):
-    """
-    指定GRIB2ファイルから isobaricInhPa（気圧面）層を優先的に読み込む。
-    hPaを指定すると、その気圧面のみ抽出。
-    """
+    """ファイル名(str)から isobaricInhPa層のDatasetを返す（step・hPa選択対応）"""
     for ds in cfgrib.open_datasets(fname):
         if "isobaricInhPa" in ds.variables and "step" in ds.sizes:
             if hPa is not None:
@@ -68,9 +62,7 @@ def open_isobaric_dataset(fname, hPa=None):
     raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
 
 def open_surface_dataset(fname):
-    """
-    指定GRIB2ファイルから地上値（stepType="instant"）のデータセットを優先して取得
-    """
+    """ファイル名(str)から地上instantのDatasetを返す"""
     for ds in cfgrib.open_datasets(fname):
         try:
             if ("stepType" in ds.variables and
@@ -88,7 +80,6 @@ def open_surface_dataset(fname):
         pass
     raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
 
-# --- 新・共通パネル描画関数 ---
 def make_universal_weather_panel(
     save_dir,
     panel_def,
@@ -100,9 +91,7 @@ def make_universal_weather_panel(
     dpi=200
 ):
     """
-    7段×4列×4ページパネルを任意定義で一括生成。
-    panel_def = [(plot_func, ds, title), ...] で7要素。
-    plot_func=None, ds=None, title=""の箇所は空欄マスになる。
+    panel_def = [(plot_func, ds, title), ...] のdsは必ずxarray.Dataset
     """
     import cartopy.crs as ccrs
     os.makedirs(save_dir, exist_ok=True)
@@ -115,6 +104,8 @@ def make_universal_weather_panel(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
+            if ds is not None and not isinstance(ds, xr.Dataset):
+                raise TypeError(f"panel_defのdsは必ずDatasetで: {title}, type={type(ds)}")
             for col in range(ncols):
                 step = page * ncols + col
                 ax = axes[row, col]
@@ -139,7 +130,6 @@ def make_universal_weather_panel(
         panel_imgs.append(out_path)
     return panel_imgs
 
-# --- 公開関数リストに追加 ---
 __all__ = [
     "make_nodata_weather_panel",
     "get_lon_lat",
