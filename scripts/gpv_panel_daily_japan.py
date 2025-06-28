@@ -75,6 +75,22 @@ def main():
                 msm_l_pall_path = fname
             elif "MSM_GPV_Rjp_Lsurf" in fname:
                 msm_lsurf_path = fname
+        
+        # --- ファイルが全部揃っているかチェック ---
+        if not gsm_l_pall_path:
+            print(f"[WARN] GSMファイルが未取得です。全国パネル（GSM+MSM）は作成されません。")
+            msg = f":warning: GSMファイル未取得のため全国パネル（{ymd} UTC{hh}）はスキップされました。"
+            send_slack_text(channel=slack_channel, message=msg)
+            return
+        
+        if not (msm_l_pall_path and msm_lsurf_path):
+            raise FileNotFoundError(f"必要なMSM GPVファイルが不足: msm_l_pall={msm_l_pall_path}, msm_lsurf={msm_lsurf_path}")
+        
+        # --- データセットをモデル別に作成 ---
+        ds_gsm_isobaric = open_isobaric_dataset(gsm_l_pall_path)
+        ds_msm_isobaric = open_isobaric_dataset(msm_l_pall_path)
+        ds_msm_surf_instant = open_surface_dataset(msm_lsurf_path)
+
 
         # --- ファイルが全部揃っているかチェック ---
         if not (gsm_l_pall_path and msm_l_pall_path and msm_lsurf_path):
