@@ -8,7 +8,6 @@ import os
 import datetime
 import requests
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
-from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
@@ -16,7 +15,9 @@ from module.utils.slack_utils import send_slack_text
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM/実用運用用。GSMも00/06/12/18でOK
 
-def find_latest_available_files_japan_v2(base_dir="./data", days_back=2):
+from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
+
+def find_latest_available_files_japan(base_dir="./data", days_back=2):
     """index.htmlをパースしてGSM/MSMの最新ファイルを抽出する"""
     base_url = GPV_MIRROR_URLS[0]
     now = datetime.datetime.utcnow()
@@ -31,17 +32,12 @@ def find_latest_available_files_japan_v2(base_dir="./data", days_back=2):
         day = now - datetime.timedelta(days=day_delta)
         for h in CYCLE_HOURS:
             dt = day.replace(hour=h, minute=0, second=0, microsecond=0)
-            # 1. GSMファイルリスト取得
             gsm_files = list_files_on_server(dt, gsm_pattern, fh_band_gsm)
-            # 2. MSM L-pall/Lsurfリスト取得
             msm_l_pall_files = list_files_on_server(dt, msm_l_pall_pattern, fh_band_msm)
             msm_lsurf_files  = list_files_on_server(dt, msm_lsurf_pattern, fh_band_msm)
-            
-            # 3. どれも1個以上見つかった時点でreturn
             if gsm_files and msm_l_pall_files and msm_lsurf_files:
                 y, m, d, hh = dt.strftime("%Y %m %d %H").split()
                 data_url = f"{base_url}/{y}/{m}/{d}/"
-                target_init = f"{y}{m}{d}{hh}0000"
                 gsm_fname = gsm_files[0]
                 msm_l_pall_fname = msm_l_pall_files[0]
                 msm_lsurf_fname  = msm_lsurf_files[0]
