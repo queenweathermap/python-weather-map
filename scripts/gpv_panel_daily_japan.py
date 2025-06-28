@@ -11,32 +11,15 @@ from module.plotter.gpv_plotter_universal import generate_universal_panel_and_no
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
-from module.gpv_download_utils import find_latest_matched_pairs
-from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
-CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM例。GSM主体なら00,06,12,18でもOK
-
-# 例: GSM・MSM両モデルの最新ペアを取得
-periods = ["FD0000-0100", ...] # or ["FH00-15", ...] 必要に応じて
-matched = find_latest_matched_pairs(
-    periods=periods,
-    base_dir="./data",
-    mirrors=GPV_MIRROR_URLS,
-    l_pall_prefix="GSM_GPV_Rjp_Gll0p1deg_L-pall",
-    lsurf_prefix="MSM_GPV_Rjp_Lsurf",    # MSMならこのprefix
-    download_func=your_download_func     # 必要ならラップ
-)
+CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM/実用運用用。GSMも00/06/12/18でOK
 
 def find_latest_available_files_japan(base_url=BASE_URL, max_days=2):
     """
     利用可能な最新GPVファイル（全国用/GSM+MSM両方）を探索
     GSMは複数パターンで探索し、最初に見つかったものを採用
     """
-    import os
-    import datetime
-    import requests
-
     now = datetime.datetime.utcnow()
     for day_delta in range(max_days):
         day = now - datetime.timedelta(days=day_delta)
@@ -121,7 +104,7 @@ def main():
                 msm_l_pall_path = fname
             elif "MSM_GPV_Rjp_Lsurf" in fname:
                 msm_lsurf_path = fname
-        
+
         # --- ファイルが全部揃っているかチェック ---
         if not gsm_l_pall_path:
             print(f"[WARN] GSMファイルが未取得です。全国パネル（GSM+MSM）は作成されません。")
@@ -131,16 +114,6 @@ def main():
         
         if not (msm_l_pall_path and msm_lsurf_path):
             raise FileNotFoundError(f"必要なMSM GPVファイルが不足: msm_l_pall={msm_l_pall_path}, msm_lsurf={msm_lsurf_path}")
-        
-        # --- データセットをモデル別に作成 ---
-        ds_gsm_isobaric = open_isobaric_dataset(gsm_l_pall_path)
-        ds_msm_isobaric = open_isobaric_dataset(msm_l_pall_path)
-        ds_msm_surf_instant = open_surface_dataset(msm_lsurf_path)
-
-
-        # --- ファイルが全部揃っているかチェック ---
-        if not (gsm_l_pall_path and msm_l_pall_path and msm_lsurf_path):
-            raise FileNotFoundError(f"必要なGPVファイルが不足: gsm_l_pall={gsm_l_pall_path}, msm_l_pall={msm_l_pall_path}, msm_lsurf={msm_lsurf_path}")
 
         # --- データセットをモデル別に作成 ---
         ds_gsm_isobaric = open_isobaric_dataset(gsm_l_pall_path)
