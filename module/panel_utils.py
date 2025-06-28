@@ -62,28 +62,6 @@ def open_isobaric_dataset(fname, hPa=None):
             return ds
     raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
 
-def open_isobaric_dataset(fname, hPa=None):
-    if isinstance(fname, xr.Dataset):
-        return fname
-    """ファイル名(str)から地上instantのDatasetを返す"""
-    for ds in cfgrib.open_datasets(fname):
-        try:
-            if ("stepType" in ds.variables and
-                hasattr(ds, "stepType") and
-                (getattr(ds, "stepType", None) == "instant" or
-                 (hasattr(ds.stepType, "values") and
-                  all(ds.stepType.values == "instant")))):
-                return ds
-        except Exception:
-            pass
-    try:
-        ds = xr.open_dataset(fname, engine="cfgrib", filter_by_keys={"stepType": "instant"})
-        return ds
-    except Exception:
-        pass
-    raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
-
-
 def open_surface_dataset(fname):
     """
     指定GRIB2ファイルから地上値（stepType="instant"）のデータセットを優先して取得
