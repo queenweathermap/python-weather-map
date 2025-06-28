@@ -1,8 +1,8 @@
 # module/plotter/gpv_plotter_universal.py
 # ===============================================================
 # 全国・秋田・任意局地ハイブリッド天気図パネル生成・通知コア
-# city_name・extentの柔軟指定対応
-# 2025-06-28 by ChatGPT
+# city_name・extentの柔軟指定対応（全国も局地もこれ1本でOK！）
+# 2025-06-28 by ChatGPT（統合版・整理済み）
 # ===============================================================
 
 import os
@@ -16,8 +16,9 @@ from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.core.gpv_downloader import download_gpv_panel, MODEL_CONFIG, GPV_MIRROR_URLS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
-from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan  # 必要に応じて他エリアのgetterもimport
+from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan  # 必要に応じ他エリアもimport
 
+# --- プロット関数 ---
 from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
 from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
 from module.plot.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp
@@ -26,64 +27,22 @@ from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
 from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
 from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
 from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
-from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 
-print(os.listdir("./data"))
-
-file_path = "./data/Z__C_RJTD_20250626000000_GSM_GPV_Rjp_Gll0p1deg_Lsurf_FD0000-0100_grib2.bin"
-
-# instantだけ
-ds = xr.open_dataset(
-    file_path,
-    engine="cfgrib",
-    backend_kwargs={'filter_by_keys': {'stepType': 'instant'}}
-)
-
-# 10m風用
-ds_wind10 = xr.open_dataset(
-    file_path,
-    engine="cfgrib",
-    backend_kwargs={'filter_by_keys': {'stepType': 'instant', 'heightAboveGround': 10}}
-)
-
-# 2m気温用（必要なら）
-ds_temp2 = xr.open_dataset(
-    file_path,
-    engine="cfgrib",
-    backend_kwargs={'filter_by_keys': {'stepType': 'instant', 'heightAboveGround': 2}}
-)
-
-
-print(ds)
-print(ds.data_vars)
-
-# cfgribエンジンで読み込み
-ds = xr.open_dataset(file_path, engine="cfgrib")
-
-print("\n[変数名一覧]")
-print(list(ds.data_vars))
-
-for var in ds.data_vars:
-    print(f"\n=== {var} ===")
-    print(ds[var])
-    print("coords:", ds[var].coords)
-    print("attrs :", ds[var].attrs)
-
-print("\n[座標軸一覧]")
-print(ds.coords)
-
-for step in ["instant", "accum", "avg"]:
-    try:
-        ds = xr.open_dataset(
-            file_path,
-            engine="cfgrib",
-            backend_kwargs={'filter_by_keys': {'stepType': step}}
-        )
-        print(f"\n==== {step} ====")
-        print(list(ds.data_vars))
-    except Exception as e:
-        print(f"{step}: {e}")
-
+# -----------------------------------------------
+# ★ 変数一覧ダンプユーティリティ（必要な時だけ使う）★
+def dump_grib_vars(file_path):
+    print(f"\n==== ファイル: {file_path} ====")
+    for step in ["instant", "accum", "avg"]:
+        try:
+            ds = xr.open_dataset(
+                file_path,
+                engine="cfgrib",
+                backend_kwargs={'filter_by_keys': {'stepType': step}}
+            )
+            print(f"\n[{step}] 変数:", list(ds.data_vars))
+        except Exception as e:
+            print(f"[{step}] 読み込み不可: {e}")
+# -----------------------------------------------
 
 def generate_universal_panel_and_notify(
     ymd, hh, model, output_dir,
@@ -91,14 +50,13 @@ def generate_universal_panel_and_notify(
     ncols=4, npages=1, nrows=None,
     panel_def=None,
     city_name="japan",
-    extent=None,    # ★任意範囲を直接指定したい場合
+    extent=None,    # 任意範囲も直接指定OK
     slack_channel=None,
     log_callback=None,
 ):
     """
-    描画範囲は city_name で自動切替。直接 extent で上書きも可能。
-    panel_defは外部（panel_definitions.py）から渡す運用推奨。
-    指定がなければ全国デフォルトpanel_defを適用。
+    全国・局地どちらも city_name/panel_def/extent で切替。
+    必要なら外部でget_panel_def_xxx, REGION_EXTENTS等を定義して呼び出す。
     """
     def log(msg):
         print(msg)
@@ -108,14 +66,13 @@ def generate_universal_panel_and_notify(
     os.makedirs(output_dir, exist_ok=True)
     dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
 
-    # --- データダウンロード ---
+    # --- データDL ---
     patterns = MODEL_CONFIG.get(model, MODEL_CONFIG["MSM"])["patterns"]
     panel_files = download_gpv_panel(patterns, output_dir, dt, GPV_MIRROR_URLS, ncols=ncols*npages)
     if not panel_files or not panel_files[0] or not all(panel_files[0]):
         log("[ERROR] GPVファイルが見つかりません")
         raise FileNotFoundError("GPVファイルが見つかりません")
 
-    # --- データセット取得 ---
     l_pall_fname, _ = panel_files[0][0]
     lsurf_fname, _ = panel_files[0][1]
     ds_isobaric = open_isobaric_dataset(l_pall_fname)
@@ -123,13 +80,13 @@ def generate_universal_panel_and_notify(
 
     # --- パネル定義 ---
     if panel_def is None:
-        # デフォルトは全国用
+        # 全国デフォルト
         panel_def = get_panel_def_japan(ds_isobaric, ds_surf_instant)
         nrows = len(panel_def)
     else:
         nrows = len(panel_def)
 
-    # --- 範囲選択 ---
+    # --- 範囲（全国・局地…） ---
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
     # --- 描画 ---
@@ -142,7 +99,6 @@ def generate_universal_panel_and_notify(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
-            # step数判定（空欄マスはds=Noneなのでn_steps=0）
             n_steps = ds.dims["step"] if (ds is not None and "step" in ds.dims) else 0
             for col in range(ncols):
                 step = page * ncols + col
@@ -179,3 +135,35 @@ def generate_universal_panel_and_notify(
         log(f"[OK] Drive URL: {drive_url}")
 
     return panel_imgs, zip_path, drive_url
+
+# -----------------------------------------------
+# （例）全国用ラッパー　※局地用も同様にwrapperを作るだけ！
+def generate_japan_panel_and_notify(
+    ymd,
+    hh,
+    model="HYBRID",
+    output_dir="./data",
+    drive_folder=None,
+    ncols=4,
+    npages=4,
+    log_callback=None,
+):
+    """
+    全国パネル生成＋Zip＋Driveアップ一括実行
+    """
+    return generate_universal_panel_and_notify(
+        ymd=ymd, hh=hh, model=model, output_dir=output_dir,
+        drive_folder=drive_folder, ncols=ncols, npages=npages,
+        city_name="japan", panel_def=None, extent=None,
+        log_callback=log_callback
+    )
+
+# -----------------------------------------------
+
+# --- 必要なら局地エリア版ラッパーを追加でOK ---
+# def generate_local_panel_and_notify(...):  # panel_def/extentだけ局地用に
+
+# --- ダンプユーティリティの使い方例 ---
+# dump_grib_vars('./data/ファイル名')
+
+# --- これで完全集約できます！ ---
