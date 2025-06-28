@@ -39,6 +39,21 @@ ds = xr.open_dataset(
     backend_kwargs={'filter_by_keys': {'stepType': 'instant'}}
 )
 
+# 10m風用
+ds_wind10 = xr.open_dataset(
+    file_path,
+    engine="cfgrib",
+    backend_kwargs={'filter_by_keys': {'stepType': 'instant', 'heightAboveGround': 10}}
+)
+
+# 2m気温用（必要なら）
+ds_temp2 = xr.open_dataset(
+    file_path,
+    engine="cfgrib",
+    backend_kwargs={'filter_by_keys': {'stepType': 'instant', 'heightAboveGround': 2}}
+)
+
+
 print(ds)
 print(ds.data_vars)
 
