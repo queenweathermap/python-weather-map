@@ -39,7 +39,7 @@ def get_panel_def_japan(ds_isobaric, ds_surf_instant):
 
 def get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface):
     """
-    秋田局地（7段パネル）用 panel_def
+    秋田局地（8段パネル）用 panel_def
     6種類＋空欄1段
     """
     from module.plot.plot_emagram import plot_emagram
@@ -61,7 +61,7 @@ def get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_su
     ]
 
 # --- 拡張例: 任意ローカル（段数可変・テンプレート化しやすい） ---
-def get_panel_def_local(custom_items, total_rows=7):
+def get_panel_def_local(custom_items, total_rows=8):
     """
     任意ローカル局地用（カスタムアイテムリストを受けて7段化）
     custom_items: [(plot_func, ds, title), ...] のリスト（足りない分は空欄で埋める）
