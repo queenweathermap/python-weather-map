@@ -51,6 +51,31 @@ print("L-pallファイル:", latest_l_pall)
 print("Lsurfファイル:", latest_lsurf)
 
 
+patterns = MODEL_CONFIG["MSM"]["patterns"]  # ["MSM_GPV_Rjp_L-pall", "MSM_GPV_Rjp_Lsurf"]
+base_dir = "./data"
+init_dt = datetime(2024, 6, 27, 0)  # ここは必要な初期時刻を入れてください
+ncols = 12
+
+out_list = download_gpv_panel(patterns, base_dir, init_dt, GPV_MIRROR_URLS, ncols=ncols)
+
+# 使えるペアだけ抜き出す
+matched_pairs = []
+for col in out_list:
+    if col is not None and all(col):
+        l_pall, lsurf = col
+        # l_pall, lsurfはそれぞれ (fpath, t) のタプル
+        matched_pairs.append((l_pall[0], lsurf[0], l_pall[1]))
+
+if not matched_pairs:
+    print("[ERROR] L-pall/Lsurf のペアが揃いません")
+    exit(1)
+
+# 最新のペアを使う場合
+latest_l_pall, latest_lsurf, latest_time = matched_pairs[-1]
+print("最新L-pallファイル:", latest_l_pall)
+print("最新Lsurfファイル:", latest_lsurf)
+
+
 
 # cfgrib.open_datasetsで分割された各サブセット（filter_by_keysごと）をすべて確認
 datasets = cfgrib.open_datasets(file_path)
