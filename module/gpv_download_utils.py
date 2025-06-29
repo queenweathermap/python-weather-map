@@ -27,4 +27,42 @@ def find_latest_matched_pairs(
             matched.append((l_pall_path, lsurf_path, itime1, fh))
     return matched
 
-# 追加で「DLできた最新イニシャルで止める」バージョン等も同様に
+# 追加: GSM/任意モデルに汎用化した「イニシャル最新ファイルを返す」関数
+def find_latest_available_files_for_model(
+    base_dir, 
+    mirrors,
+    model_patterns,
+    fh_band="FD0000-0100",   # GSM例
+    cycle_hours=[0, 21, 18, 15, 12, 9, 6, 3],
+    days_back=2,
+    list_files_func=None
+):
+    """
+    指定モデルパターン・FH帯でイニシャル最新ペアを返す
+    model_patterns: ["GSM_GPV_Rjp_Gll0p1deg_L-pall", ...]
+    list_files_func: (datetime, pattern, fh_band) -> ファイル名リスト
+    """
+    import os
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    for day_delta in range(days_back):
+        day = now - timedelta(days=day_delta)
+        for h in cycle_hours:
+            dt = day.replace(hour=h, minute=0, second=0, microsecond=0)
+            found_files = []
+            for pattern in model_patterns:
+                files = list_files_func(dt, pattern, fh_band)
+                if not files:
+                    break
+                fname = files[0]
+                found_files.append(fname)
+            if len(found_files) == len(model_patterns):
+                y, m, d, hh = dt.strftime("%Y %m %d %H").split()
+                base_url = mirrors[0]
+                data_url = f"{base_url}/{y}/{m}/{d}/"
+                file_infos = [
+                    {"url": f"{data_url}{fname}", "local": os.path.join(base_dir, fname)}
+                    for fname in found_files
+                ]
+                return y+m+d, hh, file_infos
+    raise FileNotFoundError("利用可能なモデルGPVファイルがindex.html上に見つかりません")
