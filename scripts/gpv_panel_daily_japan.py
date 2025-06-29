@@ -86,13 +86,21 @@ def main():
 
         # --- ファイルが全部揃っているかチェック ---
         if not gsm_l_pall_path:
-            print(f"[WARN] GSMファイルが未取得です。全国パネル（GSM+MSM）は作成されません。")
-            msg = f":warning: GSMファイル未取得のため全国パネル（{ymd} UTC{hh}）はスキップされました。"
+            msg = f":warning: GSMファイル未取得のため全国パネル（{ymd} UTC{hh}）は**中止**されました（強制終了）"
+            print(msg)
+            from module.utils.slack_utils import send_slack_text
             send_slack_text(channel=slack_channel, message=msg)
-            return
-        
+            import sys
+            sys.exit(1)  # スキップ禁止・確実に止める
+
         if not (msm_l_pall_path and msm_lsurf_path):
-            raise FileNotFoundError(f"必要なMSM GPVファイルが不足: msm_l_pall={msm_l_pall_path}, msm_lsurf={msm_lsurf_path}")
+            msg = (f":warning: 必要なMSM GPVファイルが不足: msm_l_pall={msm_l_pall_path}, "
+                   f"msm_lsurf={msm_lsurf_path}\n全国パネル生成は**中止**します（強制終了）")
+            print(msg)
+            from module.utils.slack_utils import send_slack_text
+            send_slack_text(channel=slack_channel, message=msg)
+            import sys
+            sys.exit(1)
 
         # --- データセットをモデル別に作成 ---
         ds_gsm_isobaric = open_isobaric_dataset(gsm_l_pall_path)
@@ -123,13 +131,15 @@ def main():
             f"{os.path.basename(zip_path)}\n"
             f"{drive_url if drive_url else '(Driveアップロード未設定)'}"
         )
+        from module.utils.slack_utils import send_slack_text
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
 
     except Exception as e:
         print(f"[ERROR] {e}")
         import traceback; traceback.print_exc()
-        exit(1)
+        import sys
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
