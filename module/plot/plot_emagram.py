@@ -7,13 +7,16 @@
 # ===============================================
 
 import numpy as np
-import matplotlib.pyplot as plt
-from metpy.plots import SkewT
-from metpy.units import units
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from matplotlib.colors import LinearSegmentedColormap
+from module.utils.var_utils import get_var_2d, get_lon_lat
+from scipy.ndimage import maximum_filter, minimum_filter
 from module.utils.var_utils import get_var
 
 from module.plot.plot_utils import set_japanese_font, plot_no_data_japan_map
 set_japanese_font()  # 日本語フォントを全描画で有効化
+
 
 def extract_profile_gpv(ds, lat, lon, time_idx=0):
     """
