@@ -4,8 +4,8 @@
 # ===============================================
 
 import numpy as np
-import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib.colors import LinearSegmentedColormap
 from module.utils.var_utils import get_var_2d, get_lon_lat
