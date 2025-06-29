@@ -12,56 +12,44 @@ from module.plotter.gpv_plotter_universal import generate_universal_panel_and_no
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
-
-from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
-
-BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
-CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM/実用運用用
-
-def find_latest_available_files_japan(base_dir="./data", days_back=2):
-    """index.htmlをパースしてGSM/MSMの最新ファイルを抽出する"""
-    base_url = GPV_MIRROR_URLS[0]
-    now = datetime.datetime.utcnow()
-    CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
-    gsm_pattern = "GSM_GPV_Rjp_Gll0p1deg_L-pall"
-    msm_l_pall_pattern = "MSM_GPV_Rjp_L-pall"
-    msm_lsurf_pattern = "MSM_GPV_Rjp_Lsurf"
-    fh_band_gsm = "FD0000-0100"
-    fh_band_msm = "FH00-15"
-    
-    for day_delta in range(days_back):
-        day = now - datetime.timedelta(days=day_delta)
-        for h in CYCLE_HOURS:
-            dt = day.replace(hour=h, minute=0, second=0, microsecond=0)
-            gsm_files = list_files_on_server(dt, gsm_pattern, fh_band_gsm)
-            msm_l_pall_files = list_files_on_server(dt, msm_l_pall_pattern, fh_band_msm)
-            msm_lsurf_files  = list_files_on_server(dt, msm_lsurf_pattern, fh_band_msm)
-            if gsm_files and msm_l_pall_files and msm_lsurf_files:
-                y, m, d, hh = dt.strftime("%Y %m %d %H").split()
-                data_url = f"{base_url}/{y}/{m}/{d}/"
-                gsm_fname = gsm_files[0]
-                msm_l_pall_fname = msm_l_pall_files[0]
-                msm_lsurf_fname  = msm_lsurf_files[0]
-                file_infos = [
-                    {"url": f"{data_url}{gsm_fname}", "local": os.path.join(base_dir, gsm_fname)},
-                    {"url": f"{data_url}{msm_l_pall_fname}", "local": os.path.join(base_dir, msm_l_pall_fname)},
-                    {"url": f"{data_url}{msm_lsurf_fname}", "local": os.path.join(base_dir, msm_lsurf_fname)},
-                ]
-                return y+m+d, hh, file_infos
-    raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
+from module.gpv_download_utils import find_latest_available_files_for_model
+from module.core.gpv_downloader import MODEL_CONFIG, list_files_on_server, GPV_MIRROR_URLS
 
 def main():
-    try:
-        ymd, hh, file_infos = find_latest_available_files_japan()
-        model = "HYBRID"
-        output_dir = "./data"
-        drive_folder = os.environ["DRIVE_FOLDER_ID"]
-        slack_channel = os.environ["SLACK_CHANNEL_ID"]
-        city_name = "japan"
-        ncols, npages = 4, 4
+    base_dir = "./data"
+    days_back = 2
+    slack_channel = os.environ["SLACK_CHANNEL_ID"]
+    drive_folder = os.environ["DRIVE_FOLDER_ID"]
+    output_dir = "./data"
+    city_name = "japan"
+    ncols, npages = 4, 4
+    model = "HYBRID"
 
-        # --- 必要ファイルDL ---
-        for info in file_infos:
+    try:
+        # ---- GSM取得
+        ymd, hh, gsm_file_infos = find_latest_available_files_for_model(
+            base_dir=base_dir,
+            mirrors=GPV_MIRROR_URLS,
+            model_patterns=MODEL_CONFIG["GSM"]["patterns"],
+            fh_band="FD0000-0100",
+            cycle_hours=[0, 21, 18, 15, 12, 9, 6, 3],
+            days_back=days_back,
+            list_files_func=list_files_on_server
+        )
+
+        # ---- MSM取得
+        _, _, msm_file_infos = find_latest_available_files_for_model(
+            base_dir=base_dir,
+            mirrors=GPV_MIRROR_URLS,
+            model_patterns=MODEL_CONFIG["MSM"]["patterns"],
+            fh_band="FH00-15",
+            cycle_hours=[0, 21, 18, 15, 12, 9, 6, 3],
+            days_back=days_back,
+            list_files_func=list_files_on_server
+        )
+
+        # ---- 必要ならDL
+        for info in gsm_file_infos + msm_file_infos:
             if not os.path.exists(info["local"]):
                 resp = requests.get(info["url"])
                 if resp.status_code == 200:
@@ -70,13 +58,13 @@ def main():
                         f.write(resp.content)
                     print(f"[OK] DL: {info['local']}")
                 else:
-                    print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
+                    print(f"[NG] DL: {info['url']} (status={resp.status_code})")
 
         # --- ファイル名を自動で仕分け ---
         gsm_l_pall_path = None
         msm_l_pall_path = None
         msm_lsurf_path = None
-        for info in file_infos:
+        for info in gsm_file_infos + msm_file_infos:
             fname = info["local"]
             if "GSM_GPV_Rjp_L-pall" in fname:
                 gsm_l_pall_path = fname
