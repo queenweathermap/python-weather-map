@@ -11,6 +11,8 @@ from module.utils.slack_utils import send_slack_text
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
 from module.panel_definitions import get_panel_def_akita, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset  # 追加
+from module.gpv_download_utils import find_latest_available_files_for_model
+from module.core.gpv_downloader import MODEL_CONFIG, list_files_on_server, GPV_MIRROR_URLS
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
