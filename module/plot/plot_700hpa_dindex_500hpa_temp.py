@@ -9,8 +9,17 @@ import cartopy.feature as cfeature
 from scipy.ndimage import maximum_filter, minimum_filter
 from module.utils.var_utils import get_var
 
+
 from module.plot.plot_utils import set_japanese_font, plot_no_data_japan_map
 set_japanese_font()  # 日本語フォントを全描画で有効化
+
+from module.utils.var_utils import get_var_2d, get_lon_lat
+
+temp_700 = get_var_2d(ds, "TMP_700mb", level=700)
+rh_700   = get_var_2d(ds, "RH_700mb",  level=700)
+temp_500 = get_var_2d(ds, "TMP_500mb", level=500)
+lon2d, lat2d = get_lon_lat(ds)
+
 
 
 def get_lon_lat(ds):
