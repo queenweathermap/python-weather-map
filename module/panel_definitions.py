@@ -1,8 +1,8 @@
 # module/panel_definitions.py
-# ===============================================
-# 天気図パネル定義（全国・秋田・任意エリア）
-# 各エリアごとに panel_def を返す関数群
-# ===============================================
+# ===============================================================
+# パネル定義関数（全国・秋田・任意局地）
+# 2025-06-29 ChatGPT
+# ===============================================================
 
 
 # --- 地域ごとのデフォルトズーム範囲定義 ---
@@ -13,7 +13,7 @@ REGION_EXTENTS = {
     # 必要に追加
 }
 
-def get_panel_def_japan(ds_isobaric, ds_surf_instant):
+def get_panel_def_japan(ds_gsm_isobaric, ds_msm_isobaric, ds_msm_surf_instant):
     """
     全国（8段パネル）用 panel_def
     """
@@ -25,11 +25,10 @@ def get_panel_def_japan(ds_isobaric, ds_surf_instant):
     from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
     from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
     from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+
     """
     全国パネル用・描画構成定義
-    ds_gsm_isobaric: GSM等圧面データセット
-    ds_msm_isobaric: MSM等圧面データセット
-    ds_msm_surf_instant: MSM地上データセット
+    3引数で受ける！　全層MSM＋GSM両対応
     """
     return [
         (plot_300hpa_height_wind, ds_gsm_isobaric, "300hPa高度・風"),
