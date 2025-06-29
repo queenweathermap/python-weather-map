@@ -1,14 +1,16 @@
+# ===============================================================
 # module/gpv_download_utils.py
-# --------------------------------------------------------
-# GPVの**複数ファイルをペアや日単位でまとめてDL/検証する運用ユーティリティ**
-# ・各時間帯やFH帯をループし、L-pall/Lsurf両方DLできたものだけ返す
-# ・引数やパターン名でGSMもMSMも柔軟対応
-# --------------------------------------------------------
+# GPV複数ファイルのペアDL/検証・イニシャル最新探索ユーティリティ
+# MSM・GSM・LFMも柔軟対応
+# 2025-06-29 ChatGPT
+# ===============================================================
 
-def find_latest_matched_pairs(periods, base_dir, mirrors,
-                             l_pall_prefix="MSM_GPV_Rjp_L-pall",
-                             lsurf_prefix="MSM_GPV_Rjp_Lsurf",
-                             download_func=None):
+def find_latest_matched_pairs(
+    periods, base_dir, mirrors,
+    l_pall_prefix="MSM_GPV_Rjp_L-pall",
+    lsurf_prefix="MSM_GPV_Rjp_Lsurf",
+    download_func=None
+):
     """
     各FH帯ごとにL-pall/Lsurfの両方DLできたペアだけを返す
     download_funcは引数 (pattern, base_dir, mirrors) で呼び出されるDL関数
@@ -24,3 +26,5 @@ def find_latest_matched_pairs(periods, base_dir, mirrors,
         if l_pall_path and lsurf_path and itime1 == itime2 and itime1 is not None:
             matched.append((l_pall_path, lsurf_path, itime1, fh))
     return matched
+
+# 追加で「DLできた最新イニシャルで止める」バージョン等も同様に
