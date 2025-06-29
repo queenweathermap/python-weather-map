@@ -1,14 +1,13 @@
+# ===============================================================
 # module/utils/var_utils.py
-# ===============================================
-# 変数取得＋2D保証（標準名マッピング付き）完全最新版
-# ===============================================
+# 気象変数取得＋2D保証ユーティリティ（xarray.Dataset対応/標準名エイリアス付き）
+# 2025-06-29 ChatGPT
+# ===============================================================
 
 import numpy as np
 import re
-import xarray as xr
-import cfgrib
 
-# --- 標準名エイリアス辞書 ---
+# --- 変数名エイリアス辞書（標準名: よくあるキー名リスト） ---
 VAR_ALIASES = {
     "TMP_500mb":    ["t", "t@500", "t_500hPa", "temperature_500"],
     "TMP_700mb":    ["t", "t@700", "t_700hPa"],
@@ -22,55 +21,46 @@ VAR_ALIASES = {
     "latitude":     ["lat", "latitude"],
 }
 
-def open_all_subdatasets(file_path):
-    """cfgrib.open_datasetsで全サブセット取得"""
-    return cfgrib.open_datasets(file_path)
-
-def select_subdataset_by_var(datasets, var_name):
-    """複数サブセットから、指定変数を含むサブセットを返す"""
-    for ds in datasets:
-        if var_name in ds.data_vars:
-            return ds
-    # エイリアスも探索
-    for ds in datasets:
-        for aliases in VAR_ALIASES.get(var_name, []):
-            if aliases in ds.data_vars:
-                return ds
-    raise ValueError(f"{var_name} が見つかりません")
-
 def get_var(ds, key):
-    # 標準名・エイリアスに対応
+    """
+    xarray.Dataset から変数（DataArray）を取得（標準名・エイリアス対応）
+    - ds: xarray.Dataset
+    - key: 標準名 or よくある略号
+    """
     if key in ds.variables:
         return ds[key]
+    # エイリアス探索
     aliases = VAR_ALIASES.get(key, [])
     for alias in aliases:
         if alias in ds.variables:
             return ds[alias]
+    # 小文字変換でも試す
     if key.lower() in ds.variables:
         return ds[key.lower()]
     return None
 
-def get_var_2d_from_ds(ds, var_name, level=None, time_idx=None, step_idx=None):
+def get_var_2d(ds, var_name, level=None, time_idx=None, step_idx=None):
     """
-    ds: xarray.Dataset
-    var_name: 標準名（TMP_850mbなど）
-    level: 取得したい気圧面（例 850, 700）
-    time_idx, step_idx: スライス指定（必要に応じて）
+    xarray.Dataset から指定変数・レベルの2D配列を抽出
+    - ds: xarray.Dataset
+    - var_name: 標準名（例: "TMP_700mb" など）
+    - level: 気圧面hPa（例: 700）またはNone
+    - time_idx, step_idx: スライス指定（不要ならNone）
     """
-    da = get_var(ds, var_name)
-    if da is None:
+    arr = get_var(ds, var_name)
+    if arr is None:
         raise ValueError(f"{var_name} が ds.variables に見つかりません")
-    arr = da
-    # レベル抽出
+    # レベル自動抽出（"TMP_700mb"→700など）
     if level is None:
         m = re.match(r"[A-Z]+_(\d+)mb", var_name)
         if m:
             level = int(m.group(1))
     if level is not None:
+        # isobaricInhPa or level どちらかで抽出
         for lev_key in ["isobaricInhPa", "level"]:
             if lev_key in arr.dims or lev_key in arr.coords:
                 arr = arr.sel({lev_key: level}, method="nearest")
-    # 時間・ステップスライス
+    # 時間・ステップでスライス
     if (time_idx is not None) and ("time" in arr.dims):
         arr = arr.isel(time=time_idx)
     if (step_idx is not None) and ("step" in arr.dims):
@@ -78,21 +68,18 @@ def get_var_2d_from_ds(ds, var_name, level=None, time_idx=None, step_idx=None):
     arr2d = arr.squeeze()
     if arr2d.ndim != 2:
         raise ValueError(f"Output is not 2D: shape={arr2d.shape}, dims={arr.dims}")
-    return arr2d
-
-def get_var_2d(file_path, var_name, level=None, time_idx=None, step_idx=None):
-    """ファイルパス→自動サブセット抽出→2D"""
-    datasets = open_all_subdatasets(file_path)
-    ds = select_subdataset_by_var(datasets, var_name)
-    return get_var_2d_from_ds(ds, var_name, level, time_idx, step_idx)
+    return np.asarray(arr2d)
 
 def get_lon_lat(ds):
     """
-    xarray.Dataset/DataArrayから2D経度・緯度配列を取得
-    （1Dならmeshgrid化、2Dならそのまま）
+    xarray.Dataset/DataArray から2D緯度・経度配列取得（1Dならmeshgrid化）
+    - ds: xarray.Dataset or DataArray
     """
-    lon = ds["longitude"] if "longitude" in ds else ds.coords["longitude"]
-    lat = ds["latitude"] if "latitude" in ds else ds.coords["latitude"]
+    # よくあるケース両対応
+    lon = get_var(ds, "longitude")
+    lat = get_var(ds, "latitude")
+    if lon is None or lat is None:
+        raise ValueError("longitude/latitudeが取得できません")
     lon = np.asarray(lon)
     lat = np.asarray(lat)
     if lon.ndim == 1 and lat.ndim == 1:
@@ -103,5 +90,4 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の形状が不正")
     return lon2d, lat2d
 
-
-__all__ = ["get_var", "get_var_2d", "get_var_2d_from_ds"]
+__all__ = ["get_var", "get_var_2d", "get_lon_lat"]
