@@ -1,10 +1,11 @@
 # scripts/gpv_panel_daily_japan.py
 # ===============================================================
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 2025-06-28 改訂（panel_definitions準拠）
+# 2025-06-29 最新版（fail-fastスキップ禁止・panel_definitions準拠）
 # ===============================================================
 
 import os
+import sys
 import datetime
 import requests
 from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
@@ -12,10 +13,10 @@ from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
 
-BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
-CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM/実用運用用。GSMも00/06/12/18でOK
-
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
+
+BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
+CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]  # MSM/実用運用用
 
 def find_latest_available_files_japan(base_dir="./data", days_back=2):
     """index.htmlをパースしてGSM/MSMの最新ファイルを抽出する"""
@@ -88,18 +89,14 @@ def main():
         if not gsm_l_pall_path:
             msg = f":warning: GSMファイル未取得のため全国パネル（{ymd} UTC{hh}）は**中止**されました（強制終了）"
             print(msg)
-            from module.utils.slack_utils import send_slack_text
             send_slack_text(channel=slack_channel, message=msg)
-            import sys
-            sys.exit(1)  # スキップ禁止・確実に止める
+            sys.exit(1)
 
         if not (msm_l_pall_path and msm_lsurf_path):
             msg = (f":warning: 必要なMSM GPVファイルが不足: msm_l_pall={msm_l_pall_path}, "
                    f"msm_lsurf={msm_lsurf_path}\n全国パネル生成は**中止**します（強制終了）")
             print(msg)
-            from module.utils.slack_utils import send_slack_text
             send_slack_text(channel=slack_channel, message=msg)
-            import sys
             sys.exit(1)
 
         # --- データセットをモデル別に作成 ---
@@ -131,14 +128,12 @@ def main():
             f"{os.path.basename(zip_path)}\n"
             f"{drive_url if drive_url else '(Driveアップロード未設定)'}"
         )
-        from module.utils.slack_utils import send_slack_text
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
 
     except Exception as e:
         print(f"[ERROR] {e}")
         import traceback; traceback.print_exc()
-        import sys
         sys.exit(1)
 
 if __name__ == "__main__":
