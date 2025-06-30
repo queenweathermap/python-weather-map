@@ -67,24 +67,36 @@ def open_isobaric_dataset(fname, hPa=None):
 
 
 def open_surface_dataset(fname):
+    import cfgrib
+    import xarray as xr
     if isinstance(fname, xr.Dataset):
         return fname
     for ds in cfgrib.open_datasets(fname):
         try:
-            if ("stepType" in ds.variables and
-                hasattr(ds, "stepType") and
-                (getattr(ds, "stepType", None) == "instant" or
-                 (hasattr(ds.stepType, "values") and
-                  all(ds.stepType.values == "instant")))):
+            # stepTypeがinstant かつ heightAboveGround==10 だけ返す
+            if (
+                "stepType" in ds.variables
+                and hasattr(ds, "stepType")
+                and (getattr(ds, "stepType", None) == "instant"
+                     or (hasattr(ds.stepType, "values") and all(ds.stepType.values == "instant")))
+                and "heightAboveGround" in ds.variables
+                and np.all(ds["heightAboveGround"].values == 10.0)
+            ):
                 return ds
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[cfgrib skip] {e}")
+            continue
+    # fallback: cfgribフィルタで指定
     try:
-        ds = xr.open_dataset(fname, engine="cfgrib", filter_by_keys={"stepType": "instant"})
+        ds = xr.open_dataset(
+            fname,
+            engine="cfgrib",
+            filter_by_keys={"stepType": "instant", "typeOfLevel": "heightAboveGround", "heightAboveGround": 10}
+        )
         return ds
     except Exception:
         pass
-    raise RuntimeError(f"[ERROR] 地上instantデータが見つかりません: {fname}")
+    raise RuntimeError(f"[ERROR] 地上instant・10mデータが見つかりません: {fname}")
 
 
 
