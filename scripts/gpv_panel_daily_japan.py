@@ -9,11 +9,10 @@ import sys
 import datetime
 import requests
 
-from module.plotter.gpv_plotter_universal import generate_japan_panel_and_notify
 from module.panel_definitions import REGION_EXTENTS
-from module.panel_utils import open_isobaric_dataset, open_surface_dataset
+from module.plotter.gpv_plotter_universal import generate_japan_panel_and_notify
 from module.utils.slack_utils import send_slack_text
-from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS, MODEL_CONFIG
+from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 
 # --- ★現場に合わせた自動探索＋DLユーティリティ★ ---
 def find_and_download_gpv_files(
@@ -23,7 +22,9 @@ def find_and_download_gpv_files(
     fh_band_gsm="FD0000-0100",
     fh_band_msm="FH00-15"
 ):
-    """GSMとMSMの最新イニシャル時刻の必要ファイル3種をDL＆返却（パス3つ）"""
+    """
+    GSMとMSMの最新イニシャル時刻の必要ファイル3種をDL＆返却（パス3つ）
+    """
     base_url = GPV_MIRROR_URLS[0]
     now = datetime.datetime.utcnow()
     for day_delta in range(days_back):
@@ -32,16 +33,13 @@ def find_and_download_gpv_files(
             dt = day.replace(hour=h, minute=0, second=0, microsecond=0)
             y, m, d, hh = dt.strftime("%Y %m %d %H").split()
             data_url = f"{base_url}/{y}/{m}/{d}/"
-            # GSM (L-pallのみ)
             gsm_files = list_files_on_server(dt, "GSM_GPV_Rjp_Gll0p1deg_L-pall", fh_band_gsm)
             msm_l_pall_files = list_files_on_server(dt, "MSM_GPV_Rjp_L-pall", fh_band_msm)
             msm_lsurf_files  = list_files_on_server(dt, "MSM_GPV_Rjp_Lsurf", fh_band_msm)
             if gsm_files and msm_l_pall_files and msm_lsurf_files:
-                # 必要ファイル名
                 gsm_l_pall_fname = gsm_files[0]
                 msm_l_pall_fname = msm_l_pall_files[0]
                 msm_lsurf_fname  = msm_lsurf_files[0]
-                # DL
                 file_paths = []
                 for fname in [gsm_l_pall_fname, msm_l_pall_fname, msm_lsurf_fname]:
                     url = f"{data_url}{fname}"
@@ -57,7 +55,6 @@ def find_and_download_gpv_files(
                             print(f"[NG] DL: {url} (status={resp.status_code})")
                             break
                     file_paths.append(local)
-                # 3ファイル全てDLできた場合のみ返却
                 if len(file_paths) == 3:
                     return y+m+d, hh, file_paths
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
@@ -78,7 +75,7 @@ def main():
         send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
         sys.exit(1)
 
-    # --- パネル生成＆Slack通知
+    # --- パネル生成＆Slack/Drive通知まで一括処理 ---
     try:
         panel_imgs, zip_path, drive_url = generate_japan_panel_and_notify(
             ymd=ymd, hh=hh,
@@ -87,7 +84,7 @@ def main():
             msm_lsurf_path=msm_lsurf_path,
             output_dir=output_dir,
             drive_folder=drive_folder,
-            ncols=4, npages=4,
+            ncols=4, nrows=6, npages=3,  # ←ここを統一して下さい
         )
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
