@@ -104,57 +104,67 @@ def make_universal_weather_panel(
     save_dir,
     panel_def,
     times,
-    base_title,
+    init_time_str,
     city_name="japan",
-    ncols=4, nrows=6, npages=3,
+    ncols=8, nrows=6,   # ←8列6段
     extent=None,
-    dpi=200
+    dpi=300
 ):
     """
-    panel_def = [(plot_func, ds, title), ...]
-    横12コマ（4×3ページ）対応バージョン
+    8列×6段（合計48コマ）の1枚パネル画像を生成
+    ファイル右上にイニシャル時刻入りのファイル名
     """
     import cartopy.crs as ccrs
+    import matplotlib.pyplot as plt
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
 
-    # --- パネル行をnrowsに合わせて補完 ---
+    # 行数補完
     if len(panel_def) < nrows:
         for _ in range(nrows - len(panel_def)):
             panel_def.append((None, None, ""))
 
-    for page in range(npages):
-        fig, axes = plt.subplots(
-            nrows=nrows, ncols=ncols,
-            figsize=(ncols*3, nrows*3),
-            constrained_layout=True,
-            subplot_kw=dict(projection=ccrs.PlateCarree())
-        )
-        for row, (plot_func, ds, title) in enumerate(panel_def):
-            for col in range(ncols):
-                step = page * ncols + col
-                ax = axes[row, col]
-                if extent:
-                    ax.set_extent(extent, crs=ccrs.PlateCarree())
-                if plot_func is None or ds is None:
-                    ax.axis("off")
-                    ax.set_title("")
-                    continue
-                try:
-                    ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
-                    plot_func(ax, ds_step)
-                    ax.set_title(f"{title} (+{step*3}h)")
-                except Exception as e:
-                    print(f"[WARN] パネル描画失敗: {title} {e}")
-                    ax.axis("off")
-                    ax.set_title(f"{title} (error)")
-        fig.suptitle(f"{base_title}（{city_name}） page{page+1}", fontsize=18)
-        out_name = f"panel_{city_name}_{base_title}_p{page+1}.jpg"
-        out_path = os.path.join(save_dir, out_name)
-        fig.savefig(out_path, dpi=dpi)
-        plt.close(fig)
-        panel_imgs.append(out_path)
+    # --- パネル描画 ---
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=ncols,
+        figsize=(ncols*3, nrows*3),
+        constrained_layout=True,
+        subplot_kw=dict(projection=ccrs.PlateCarree())
+    )
+
+    for row, (plot_func, ds, title) in enumerate(panel_def):
+        for col in range(ncols):
+            step = col
+            ax = axes[row, col]
+            if extent:
+                ax.set_extent(extent, crs=ccrs.PlateCarree())
+            if plot_func is None or ds is None:
+                ax.axis("off")
+                ax.set_title("")
+                continue
+            try:
+                ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
+                plot_func(ax, ds_step)
+                # 各コマのタイトル（不要なら空文字で）
+                ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
+            except Exception as e:
+                print(f"[WARN] パネル描画失敗: {title} {e}")
+                ax.axis("off")
+                ax.set_title(f"{title} (error)", fontsize=7)
+
+    # ヘッダ・タイトルなし（要件どおり）
+    # 右上にイニシャル時刻付きファイル名
+    fig.text(0.99, 0.99, f"{city_name}_{init_time_str}", fontsize=10,
+             ha="right", va="top", alpha=0.8, color="gray")
+
+    # ファイル名例: panel_japan_20240701_00UTC.jpg
+    out_name = f"panel_{city_name}_{init_time_str}.jpg"
+    out_path = os.path.join(save_dir, out_name)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    panel_imgs.append(out_path)
     return panel_imgs
+
 
 
 __all__ = [
