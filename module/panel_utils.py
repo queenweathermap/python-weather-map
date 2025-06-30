@@ -117,6 +117,12 @@ def make_universal_weather_panel(
     import cartopy.crs as ccrs
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
+
+    # --- パネル行をnrowsに合わせて補完 ---
+    if len(panel_def) < nrows:
+        for _ in range(nrows - len(panel_def)):
+            panel_def.append((None, None, ""))
+
     for page in range(npages):
         fig, axes = plt.subplots(
             nrows=nrows, ncols=ncols,
@@ -125,8 +131,6 @@ def make_universal_weather_panel(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
-            if ds is not None and not isinstance(ds, xr.Dataset):
-                raise TypeError(f"panel_defのdsは必ずDatasetで: {title}, type={type(ds)}")
             for col in range(ncols):
                 step = page * ncols + col
                 ax = axes[row, col]
@@ -141,6 +145,7 @@ def make_universal_weather_panel(
                     plot_func(ax, ds_step)
                     ax.set_title(f"{title} (+{step*3}h)")
                 except Exception as e:
+                    print(f"[WARN] パネル描画失敗: {title} {e}")
                     ax.axis("off")
                     ax.set_title(f"{title} (error)")
         fig.suptitle(f"{base_title}（{city_name}） page{page+1}", fontsize=18)
@@ -150,6 +155,7 @@ def make_universal_weather_panel(
         plt.close(fig)
         panel_imgs.append(out_path)
     return panel_imgs
+
 
 __all__ = [
     "make_nodata_weather_panel",
