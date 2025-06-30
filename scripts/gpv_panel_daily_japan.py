@@ -94,35 +94,40 @@ def main():
         sys.exit(1)
 
     try:
-        # --- ここが一番大事: 必要な変数・層だけ個別読み出し ---
+        # ここで必ず先に open_dataset する！
+        import xarray as xr
+        ds_gsm_isobaric     = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
+        ds_msm_isobaric     = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
+        ds_msm_surf_instant = xr.open_dataset(msm_lsurf_path, engine="cfgrib")
+
+        # 必要な変数・層だけdictでまとめる
         panel_datasets = {
-            # GSM高層
-            "300hpa_h": open_grib2_var(gsm_l_pall_path, "h", "isobaricInhPa", 300),
-            "300hpa_u": open_grib2_var(gsm_l_pall_path, "u", "isobaricInhPa", 300),
-            "300hpa_v": open_grib2_var(gsm_l_pall_path, "v", "isobaricInhPa", 300),
-            "500hpa_vo": open_grib2_var(gsm_l_pall_path, "vo", "isobaricInhPa", 500),
-            "700hpa_t": open_grib2_var(gsm_l_pall_path, "t", "isobaricInhPa", 700),
-            "700hpa_r": open_grib2_var(gsm_l_pall_path, "r", "isobaricInhPa", 700),
-            "500hpa_t": open_grib2_var(gsm_l_pall_path, "t", "isobaricInhPa", 500),
-            # MSM高層
-            "850hpa_t": open_grib2_var(msm_l_pall_path, "t", "isobaricInhPa", 850),
-            "850hpa_u": open_grib2_var(msm_l_pall_path, "u", "isobaricInhPa", 850),
-            "850hpa_v": open_grib2_var(msm_l_pall_path, "v", "isobaricInhPa", 850),
-            "700hpa_w": open_grib2_var(msm_l_pall_path, "w", "isobaricInhPa", 700),
-            "850hpa_r": open_grib2_var(msm_l_pall_path, "r", "isobaricInhPa", 850),
-            # MSM地上
-            "prmsl": open_grib2_var_surface(msm_lsurf_path, "prmsl"),
-            "10u": open_grib2_var_surface(msm_lsurf_path, "10u"),
-            "10v": open_grib2_var_surface(msm_lsurf_path, "10v"),
-            "apcp": open_grib2_var_surface(msm_lsurf_path, "apcp"),
+            "gh_300": ds_gsm_isobaric["gh"].sel(isobaricInhPa=300),
+            "u_300":  ds_gsm_isobaric["u"].sel(isobaricInhPa=300),
+            "v_300":  ds_gsm_isobaric["v"].sel(isobaricInhPa=300),
+            "gh_500": ds_gsm_isobaric["gh"].sel(isobaricInhPa=500),
+            "u_500":  ds_gsm_isobaric["u"].sel(isobaricInhPa=500),
+            "v_500":  ds_gsm_isobaric["v"].sel(isobaricInhPa=500),
+            "t_700":  ds_gsm_isobaric["t"].sel(isobaricInhPa=700),
+            "r_700":  ds_gsm_isobaric["r"].sel(isobaricInhPa=700) if "r" in ds_gsm_isobaric else None,
+            "t_500":  ds_gsm_isobaric["t"].sel(isobaricInhPa=500),
+
+            "t_850":  ds_msm_isobaric["t"].sel(isobaricInhPa=850),
+            "u_850":  ds_msm_isobaric["u"].sel(isobaricInhPa=850),
+            "v_850":  ds_msm_isobaric["v"].sel(isobaricInhPa=850),
+            "w_700":  ds_msm_isobaric["w"].sel(isobaricInhPa=700),
+            "r_850":  ds_msm_isobaric["r"].sel(isobaricInhPa=850) if "r" in ds_msm_isobaric else None,
+
+            "prmsl": ds_msm_surf_instant["prmsl"] if "prmsl" in ds_msm_surf_instant else None,
+            "u10":   ds_msm_surf_instant["u10"]   if "u10"   in ds_msm_surf_instant else None,
+            "v10":   ds_msm_surf_instant["v10"]   if "v10"   in ds_msm_surf_instant else None,
+            "apcp":  ds_msm_surf_instant["apcp"]  if "apcp"  in ds_msm_surf_instant else None,
         }
 
-        # panel_defを「全部のdsまとめたdict」で渡す
         panel_def = get_panel_def_japan(panel_datasets)
         times = []
         init_time_str = f"{ymd}_{hh}UTC"
 
-        # --- パネル画像を「6段×8列×1枚」で出力 ---
         from module.panel_utils import make_universal_weather_panel
         panel_imgs = make_universal_weather_panel(
             save_dir=output_dir,
@@ -136,7 +141,6 @@ def main():
             dpi=300
         )
 
-        # --- Google Driveアップロード＆Slack通知 ---
         drive_url = upload_to_drive(drive_folder, panel_imgs[0])
 
         msg = (
@@ -147,11 +151,6 @@ def main():
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
 
-    except Exception as e:
-        send_slack_text(channel=slack_channel, message=f":x: パネル生成失敗: {e}")
-        print(f"[ERROR] {e}")
-        import traceback; traceback.print_exc()
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()
