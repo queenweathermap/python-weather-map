@@ -1,6 +1,6 @@
 # module/plot/plot_300hpa_height_wind.py
 # ===============================================
-# 300hPa Geopotential Height, Wind Speed, and Wind Vector Panel
+# 300hPa高度・風・等温線（dict＋step方式）
 # 2025-06-30 ChatGPT改訂：NO DATA時は変数名print＋日本地図のみ描画
 # ===============================================
 
@@ -35,35 +35,34 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の形状が不正")
     return lon2d, lat2d
 
-def plot_300hpa_height_wind(ax, ds):
+def plot_300hpa_height_wind(ax, ds_dict, step=0):
     """
-    300hPa等高度・風パネル
-    ・NO DATA時は変数名print＋地図のみ描画
+    300hPa等高度・風パネル（dict＋step方式！）
+    ds_dict: {"h":ds_h, "u":ds_u, "v":ds_v, "t":ds_t, ...}
+    step: 時系列インデックス
     """
-    print("ds.variables:", list(ds.variables))
-    print("isobaricInhPa:", ds["isobaricInhPa"].values)
-    # 300hPa層の変数を抽出（cfgrib→短名＋層指定対応）
-    hgt  = get_plevel_var(ds, "gh", 300)
-    u    = get_plevel_var(ds, "u", 300)
-    v    = get_plevel_var(ds, "v", 300)
-    temp = get_plevel_var(ds, "t", 300)  # 任意
+    # NO DATA時チェック
+    for k in ["h", "u", "v"]:
+        if ds_dict.get(k) is None:
+            print(f"[NO DATA] 300hPa {k} 欠損")
+            ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
+            ax.coastlines(resolution="50m")
+            ax.add_feature(cfeature.BORDERS, linestyle=":")
+            ax.text(0.5, 0.5, f"NO DATA\n({k})", fontsize=14, color="gray",
+                    ha="center", va="center", transform=ax.transAxes)
+            return
 
-    # 欠損チェック
-    missing = []
-    if hgt is None: missing.append("gh@300")
-    if u   is None: missing.append("u@300")
-    if v   is None: missing.append("v@300")
-    if missing:
-        print(f"[NO DATA] 300hPa: {', '.join(missing)} がありません")
-        ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
-        ax.coastlines(resolution="50m")
-        ax.add_feature(cfeature.BORDERS, linestyle=":")
-        ax.text(0.5, 0.5, f"NO DATA\n({', '.join(missing)})", fontsize=14, color="gray",
-                ha="center", va="center", transform=ax.transAxes)
-        return
+    hgt = ds_dict["h"].isel(step=step)
+    u   = ds_dict["u"].isel(step=step)
+    v   = ds_dict["v"].isel(step=step)
+    temp = ds_dict.get("t")
+    if temp is not None:
+        temp = temp.isel(step=step)
 
-    # 緯度経度
-    lon2d, lat2d = get_lon_lat(ds)
+    lon2d = hgt["longitude"].values
+    lat2d = hgt["latitude"].values
+    if lon2d.ndim == 1 and lat2d.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
 
     # 風速
     wspd = np.sqrt(u**2 + v**2) * 1.94384  # m/s→kt
