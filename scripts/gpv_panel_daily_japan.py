@@ -80,31 +80,36 @@ def open_grib2_var_surface(path, short_name):
 
 # --- メインバッチ処理 ---
 def main():
-    base_dir = "./data"
-    output_dir = "./output"
-    drive_folder = os.environ.get("DRIVE_FOLDER_ID")
-    slack_channel = os.environ.get("SLACK_CHANNEL_ID")
-    days_back = 2
-
+    ...
     try:
-        ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
-            base_dir=base_dir, days_back=days_back
-        )
-    except FileNotFoundError:
-        send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
-        sys.exit(1)
-
-    try:
-        # ここで必ず先に open_dataset する！
+        # ここで必ず先に open_dataset する！（高層：GSM/ MSM、地上：Lsurf）
         ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
         ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
-        # サーフェス変数はそれぞれstepTypeやレベルごとにopen！
-        prmsl = open_grib2_var(msm_lsurf_path, "prmsl", "surface", stepType="instant")["prmsl"]
-        u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")["u10"]
-        v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, stepType="instant")["v10"]
-        apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")["apcp"]
+        # --- prmslは高層L-pallから、地上風・降水量はLsurfから ---
+        prmsl = None
+        try:
+            prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")["prmsl"]
+        except Exception as e:
+            print("[WARN] prmsl（海面更正気圧）が取得できません:", e)
 
+        u10 = None
+        v10 = None
+        apcp = None
+        try:
+            u10 = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")["u10"]
+        except Exception as e:
+            print("[WARN] u10（10m風）が取得できません:", e)
+        try:
+            v10 = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, stepType="instant")["v10"]
+        except Exception as e:
+            print("[WARN] v10（10m風）が取得できません:", e)
+        try:
+            apcp = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")["apcp"]
+        except Exception as e:
+            print("[WARN] apcp（降水量）が取得できません:", e)
+
+        # --- panel_datasets に詰める ---
         panel_datasets = {
             "gh_300": ds_gsm_isobaric["gh"].sel(isobaricInhPa=300),
             "u_300":  ds_gsm_isobaric["u"].sel(isobaricInhPa=300),
@@ -115,17 +120,15 @@ def main():
             "t_700":  ds_gsm_isobaric["t"].sel(isobaricInhPa=700),
             "r_700":  ds_gsm_isobaric["r"].sel(isobaricInhPa=700) if "r" in ds_gsm_isobaric else None,
             "t_500":  ds_gsm_isobaric["t"].sel(isobaricInhPa=500),
-    
             "t_850":  ds_msm_isobaric["t"].sel(isobaricInhPa=850),
             "u_850":  ds_msm_isobaric["u"].sel(isobaricInhPa=850),
             "v_850":  ds_msm_isobaric["v"].sel(isobaricInhPa=850),
             "w_700":  ds_msm_isobaric["w"].sel(isobaricInhPa=700),
             "r_850":  ds_msm_isobaric["r"].sel(isobaricInhPa=850) if "r" in ds_msm_isobaric else None,
-    
-            "prmsl": prmsl,
-            "u10":   u10,
-            "v10":   v10,
-            "apcp":  apcp,
+            "prmsl": prmsl,    # ←高層L-pallから
+            "u10":   u10,      # ←Lsurfから
+            "v10":   v10,      # ←Lsurfから
+            "apcp":  apcp,     # ←Lsurfから
         }
 
         panel_def = get_panel_def_japan(panel_datasets)
