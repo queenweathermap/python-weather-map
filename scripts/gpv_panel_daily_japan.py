@@ -11,8 +11,9 @@ import requests
 import xarray as xr
 
 from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
-from module.panel_utils import make_universal_weather_panel
+from module.panel_utils import make_universal_weather_panel, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
+from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 
 # --- GPVファイルの自動探索＆ダウンロード ---
@@ -76,17 +77,13 @@ def main():
         send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
         sys.exit(1)
 
-    # --- データセットをxarrayで開く ---
     try:
         ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
         ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
-        ds_msm_surf_instant = xr.open_dataset(msm_lsurf_path, engine="cfgrib")
+        ds_msm_surf_instant = open_surface_dataset(msm_lsurf_path)
 
-        # --- パネル定義（6段）---
         panel_def = get_panel_def_japan(ds_gsm_isobaric, ds_msm_isobaric, ds_msm_surf_instant)
-        times = []  # 時系列が不要なら空リストでOK
-
-        # --- イニシャル時刻をファイル名に利用 ---
+        times = []
         init_time_str = f"{ymd}_{hh}UTC"
 
         # --- パネル画像を「6段×8列×1枚」で出力 ---
@@ -94,19 +91,21 @@ def main():
             save_dir=output_dir,
             panel_def=panel_def,
             times=times,
-            init_time_str=init_time_str,          # ← ヘッダ（右上）に記載
+            init_time_str=init_time_str,      # ヘッダ・右上
             city_name="japan",
-            ncols=8,                              # 8列
-            nrows=6,                              # 6段
-            extent=REGION_EXTENTS["japan"],       # 描画範囲
-            dpi=300                               # 高解像度・iPad最適
+            ncols=8,
+            nrows=6,
+            extent=REGION_EXTENTS["japan"],
+            dpi=300
         )
 
-        # --- Slack通知（必要に応じてGoogle Drive連携も）---
+        # --- Google Driveアップロード＆Slack通知 ---
+        drive_url = upload_to_drive(drive_folder, panel_imgs[0])
+
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
-            f"{'(Driveアップロード未設定)'}"  # Drive運用する場合はURLをここに入れる
+            f"{drive_url if drive_url else '(Driveアップロード失敗)'}"
         )
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
