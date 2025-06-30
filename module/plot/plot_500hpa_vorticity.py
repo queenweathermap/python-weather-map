@@ -26,6 +26,7 @@ def get_lon_lat(ds):
 
 # module/plot/plot_500hpa_vorticity.py
 def plot_500hpa_vorticity(ds, ax, step=None, **kwargs):
+    print("[DEBUG] plot_500hpa_vorticity: ds type:", type(ds))
     """500hPa等高度・正渦度（オレンジ）"""
     import metpy.calc as mpcalc
     from metpy.units import units
