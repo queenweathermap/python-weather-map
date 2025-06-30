@@ -15,14 +15,18 @@ from module.utils.slack_utils import send_slack_text
 from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 
-# --- GRIB2ファイルから特定変数・層だけ抽出 ---
-def open_grib2_var(path, short_name, level_type, level_val=None, stepType=None):
-    filter_keys = {"shortName": short_name, "typeOfLevel": level_type}
-    if level_val is not None:
-        filter_keys[level_type] = level_val
-    if stepType is not None:
-        filter_keys["stepType"] = stepType
-    return xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
+# --- 一括openはやめ、filter_by_keysで1変数ずつ明示的にopenする ---
+def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=None):
+    filter_keys = {}
+    if type_of_level:
+        filter_keys['typeOfLevel'] = type_of_level
+    if level_val:
+        filter_keys['level'] = level_val
+    if stepType:
+        filter_keys['stepType'] = stepType
+    ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
+    return ds[varname] if varname in ds else None
+
 
 
 # --- GPVファイルの自動探索＆ダウンロード ---
