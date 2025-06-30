@@ -21,12 +21,15 @@ def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=N
     if type_of_level:
         filter_keys['typeOfLevel'] = type_of_level
     if level_val:
-        filter_keys['level'] = level_val
+        filter_keys['isobaricInhPa' if type_of_level=='isobaric' else 'level'] = level_val
     if stepType:
         filter_keys['stepType'] = stepType
-    ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
-    return ds[varname] if varname in ds else None
-
+    try:
+        ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
+        return ds[varname] if varname in ds else None
+    except Exception as e:
+        print(f"[WARN] open_grib2_var failed for {varname}: {e}")
+        return None
 
 
 # --- GPVファイルの自動探索＆ダウンロード ---
