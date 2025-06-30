@@ -15,6 +15,15 @@ from module.utils.slack_utils import send_slack_text
 from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 
+def open_grib2_var(path, short_name, level_type, level_val=None, stepType=None):
+    filter_keys = {"shortName": short_name, "typeOfLevel": level_type}
+    if level_val is not None:
+        filter_keys[level_type] = level_val
+    if stepType is not None:
+        filter_keys["stepType"] = stepType
+    return xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
+
+
 # --- GPVファイルの自動探索＆ダウンロード ---
 def find_and_download_gpv_files(
     base_dir="./data",
@@ -99,11 +108,11 @@ def main():
         ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
         # サーフェス変数はそれぞれstepTypeやレベルごとにopen！
-        prmsl = open_grib2_var(msm_lsurf_path, "prmsl", "surface", step_type="instant")["prmsl"]
-        u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, step_type="instant")["u10"]
-        v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, step_type="instant")["v10"]
-        apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", step_type="accum")["apcp"]
-    
+        prmsl = open_grib2_var(msm_lsurf_path, "prmsl", "surface", stepType="instant")["prmsl"]
+        u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")["u10"]
+        v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, stepType="instant")["v10"]
+        apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")["apcp"]
+
         panel_datasets = {
             "gh_300": ds_gsm_isobaric["gh"].sel(isobaricInhPa=300),
             "u_300":  ds_gsm_isobaric["u"].sel(isobaricInhPa=300),
