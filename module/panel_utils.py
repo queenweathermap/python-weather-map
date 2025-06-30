@@ -141,14 +141,19 @@ def make_universal_weather_panel(
                 ax.set_title("")
                 continue
             try:
-                ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
-                plot_func(ax, ds_step)
-                # 各コマのタイトル（不要なら空文字で）
+                # dictならサイズ確認スキップ（直接プロット関数にstep渡す）
+                if isinstance(ds, dict):
+                    plot_func(ax, ds, step=step)
+                else:
+                    # 従来どおりDatasetならstepでスライス
+                    ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
+                    plot_func(ax, ds_step)
                 ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
             except Exception as e:
                 print(f"[WARN] パネル描画失敗: {title} {e}")
                 ax.axis("off")
                 ax.set_title(f"{title} (error)", fontsize=7)
+
 
     # ヘッダ・タイトルなし（要件どおり）
     # 右上にイニシャル時刻付きファイル名
