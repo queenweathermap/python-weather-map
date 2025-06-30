@@ -93,8 +93,6 @@ def main():
         ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
         # 3. 地上変数はfilter_by_keysで個別にopen
-        # デバッグ用（本番運用では不要）
-        print("[DEBUG] MSM_Lsurf 変数一覧:", list(xr.open_dataset(msm_lsurf_path, engine="cfgrib").variables))
         prmsl = None
         u10   = None
         v10   = None
@@ -104,32 +102,36 @@ def main():
         except Exception as e:
             print("[WARN] prmsl（海面更正気圧）が取得できません:", e)
             prmsl = None
-    
+
         try:
             u10 = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")["u10"]
         except Exception as e:
             print("[WARN] u10（10m風）が取得できません:", e)
             u10 = None
-    
+
         try:
             v10 = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, stepType="instant")["v10"]
         except Exception as e:
             print("[WARN] v10（10m風）が取得できません:", e)
             v10 = None
-    
+
         try:
             apcp = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")["apcp"]
         except Exception as e:
             print("[WARN] apcp（降水量）が取得できません:", e)
-            print("[DEBUG] MSM_Lsurf apcp error:", e)
             apcp = None
 
-        # デバッグ用（旧コードは一括openのためNG、以下のように個別openだけでOK）
-        try:
-            print("[DEBUG] MSM_Lsurf 変数 apcp（降水量）:", 
-                  open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum").variables)
-        except Exception as e:
-            print("[DEBUG] MSM_Lsurf apcp error:", e)
+        # 変数一覧を見たい場合も個別open
+        for var, stype in [("u10", "instant"), ("v10", "instant"), ("apcp", "accum")]:
+            try:
+                ds = xr.open_dataset(
+                    msm_lsurf_path,
+                    engine="cfgrib",
+                    filter_by_keys={"shortName": var, "stepType": stype}
+                )
+                print(f"[DEBUG] MSM_Lsurf {var} ({stype}): {list(ds.variables)}")
+            except Exception as e:
+                print(f"[DEBUG] MSM_Lsurf {var} ({stype}) error:", e)
 
         # 4. パネル用データ辞書作成
         panel_datasets = {
