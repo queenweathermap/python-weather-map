@@ -22,7 +22,7 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_850hpa_thetae_stream(ax, ds):
+def plot_850hpa_thetae_stream(ds, ax, step=None, **kwargs):
     """
     850hPa相当温位・流線
     ax: PlateCarree axes, ds: xarray.Dataset（stepでスライス済み）
