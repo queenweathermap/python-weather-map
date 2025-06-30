@@ -84,7 +84,7 @@ def main():
             msm_lsurf_path=msm_lsurf_path,
             output_dir=output_dir,
             drive_folder=drive_folder,
-            ncols=4, nrows=6, npages=3,  # ←ここを統一して下さい
+            ncols=4, npages=3,  # ←nrowsは渡さない
         )
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
