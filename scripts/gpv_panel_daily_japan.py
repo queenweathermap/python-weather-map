@@ -1,7 +1,7 @@
 # ===============================================================
 # scripts/gpv_panel_daily_japan.py
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 2025-06-30 現場運用・1枚8列6段パネル・イニシャル時刻ファイル名右上表示
+# 2025-06-30 isobaricInhPaエラー対策「変数・層ごと個別open」完全対応版
 # ===============================================================
 
 import os
@@ -11,7 +11,6 @@ import requests
 import xarray as xr
 
 from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
-from module.panel_utils import make_universal_weather_panel, open_surface_dataset
 from module.utils.slack_utils import send_slack_text
 from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
@@ -61,6 +60,23 @@ def find_and_download_gpv_files(
                     return y+m+d, hh, file_paths
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
+# --- GRIB2ファイルから必要な層・変数のみ抽出するヘルパー ---
+def open_grib2_var(path, short_name, level_type, level_val):
+    """指定shortName, typeOfLevel, levelでxarray.Datasetを返す"""
+    return xr.open_dataset(
+        path,
+        engine="cfgrib",
+        filter_by_keys={f"typeOfLevel": level_type, level_type: level_val, "shortName": short_name}
+    )
+
+def open_grib2_var_surface(path, short_name):
+    """地上変数用（typeOfLevel=surface, shortName）"""
+    return xr.open_dataset(
+        path,
+        engine="cfgrib",
+        filter_by_keys={"typeOfLevel": "surface", "shortName": short_name}
+    )
+
 # --- メインバッチ処理 ---
 def main():
     base_dir = "./data"
@@ -78,15 +94,36 @@ def main():
         sys.exit(1)
 
     try:
-        ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
-        ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
-        ds_msm_surf_instant = open_surface_dataset(msm_lsurf_path)
+        # --- ここが一番大事: 必要な変数・層だけ個別読み出し ---
+        panel_datasets = {
+            # GSM高層
+            "300hpa_h": open_grib2_var(gsm_l_pall_path, "h", "isobaricInhPa", 300),
+            "300hpa_u": open_grib2_var(gsm_l_pall_path, "u", "isobaricInhPa", 300),
+            "300hpa_v": open_grib2_var(gsm_l_pall_path, "v", "isobaricInhPa", 300),
+            "500hpa_vo": open_grib2_var(gsm_l_pall_path, "vo", "isobaricInhPa", 500),
+            "700hpa_t": open_grib2_var(gsm_l_pall_path, "t", "isobaricInhPa", 700),
+            "700hpa_r": open_grib2_var(gsm_l_pall_path, "r", "isobaricInhPa", 700),
+            "500hpa_t": open_grib2_var(gsm_l_pall_path, "t", "isobaricInhPa", 500),
+            # MSM高層
+            "850hpa_t": open_grib2_var(msm_l_pall_path, "t", "isobaricInhPa", 850),
+            "850hpa_u": open_grib2_var(msm_l_pall_path, "u", "isobaricInhPa", 850),
+            "850hpa_v": open_grib2_var(msm_l_pall_path, "v", "isobaricInhPa", 850),
+            "700hpa_w": open_grib2_var(msm_l_pall_path, "w", "isobaricInhPa", 700),
+            "850hpa_r": open_grib2_var(msm_l_pall_path, "r", "isobaricInhPa", 850),
+            # MSM地上
+            "prmsl": open_grib2_var_surface(msm_lsurf_path, "prmsl"),
+            "10u": open_grib2_var_surface(msm_lsurf_path, "10u"),
+            "10v": open_grib2_var_surface(msm_lsurf_path, "10v"),
+            "apcp": open_grib2_var_surface(msm_lsurf_path, "apcp"),
+        }
 
-        panel_def = get_panel_def_japan(ds_gsm_isobaric, ds_msm_isobaric, ds_msm_surf_instant)
+        # panel_defを「全部のdsまとめたdict」で渡す
+        panel_def = get_panel_def_japan(panel_datasets)
         times = []
         init_time_str = f"{ymd}_{hh}UTC"
 
         # --- パネル画像を「6段×8列×1枚」で出力 ---
+        from module.panel_utils import make_universal_weather_panel
         panel_imgs = make_universal_weather_panel(
             save_dir=output_dir,
             panel_def=panel_def,
