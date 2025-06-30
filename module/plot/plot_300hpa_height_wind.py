@@ -23,6 +23,7 @@ def get_lon_lat(ds):
 def plot_300hpa_height_wind(ax, ds):
     """300hPa等高度・風（NO DATA時は変数名print＋地図のみ描画）"""
     print("ds.variables:", list(ds.variables))
+    print("isobaricInhPa:", ds["isobaricInhPa"].values)
     # --- データ取得 ---
     lon2d, lat2d = get_lon_lat(ds)
     hgt  = get_var(ds, "HGT_300mb")
