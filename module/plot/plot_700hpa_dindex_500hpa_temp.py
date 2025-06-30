@@ -29,7 +29,7 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の次元不正")
     return lon2d, lat2d
 
-def plot_700hpa_dindex_500hpa_temp(ax, ds):
+def plot_700hpa_dindex_500hpa_temp(ds, ax, step=None, **kwargs):
     """700hPa湿数・500hPa気温（stepで時系列指定、呼び出し元でスライス済み）"""
     try:
         temp_700 = get_var_2d(ds, "TMP_700mb", level=700)
