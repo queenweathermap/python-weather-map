@@ -12,6 +12,8 @@ from scipy.ndimage import maximum_filter, minimum_filter
 from module.utils.var_utils import get_var
 # 必要なら set_japanese_font() も有効化
 
+print("ds.variables:", list(ds.variables))
+
 def get_lon_lat(ds):
     lon2d = np.asarray(ds["longitude"])
     lat2d = np.asarray(ds["latitude"])
