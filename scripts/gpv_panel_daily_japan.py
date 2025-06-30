@@ -32,9 +32,6 @@ def find_and_download_gpv_files(
     fh_band_gsm="FD0000-0100",
     fh_band_msm="FH00-15"
 ):
-    # デバッグ用（本番運用では不要）
-    print("[DEBUG] MSM_Lsurf 変数一覧:", list(xr.open_dataset(msm_lsurf_path, engine="cfgrib").variables))
-
     """
     GSMとMSMの最新イニシャル時刻の必要ファイル3種をDL＆返却（パス3つ）
     """
@@ -95,6 +92,8 @@ def main():
         ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
         # 3. 地上変数はfilter_by_keysで個別にopen
+        # デバッグ用（本番運用では不要）
+        print("[DEBUG] MSM_Lsurf 変数一覧:", list(xr.open_dataset(msm_lsurf_path, engine="cfgrib").variables))
         prmsl = None
         u10   = None
         v10   = None
