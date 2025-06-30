@@ -1,20 +1,21 @@
 # ===============================================================
 # scripts/gpv_panel_daily_japan.py
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 2025-06-29 完全ファイルパス渡し版（現場運用向け・fail-fast）
+# 2025-06-30 現場運用・1枚8列6段パネル・イニシャル時刻ファイル名右上表示
 # ===============================================================
 
 import os
 import sys
 import datetime
 import requests
+import xarray as xr
 
-from module.panel_definitions import REGION_EXTENTS
-from module.plotter.gpv_plotter_universal import generate_japan_panel_and_notify
+from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
+from module.panel_utils import make_universal_weather_panel
 from module.utils.slack_utils import send_slack_text
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 
-# --- ★現場に合わせた自動探索＋DLユーティリティ★ ---
+# --- GPVファイルの自動探索＆ダウンロード ---
 def find_and_download_gpv_files(
     base_dir="./data",
     days_back=2,
@@ -59,10 +60,10 @@ def find_and_download_gpv_files(
                     return y+m+d, hh, file_paths
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
-# --- メインバッチ ---
+# --- メインバッチ処理 ---
 def main():
     base_dir = "./data"
-    output_dir = "./data"
+    output_dir = "./output"
     drive_folder = os.environ.get("DRIVE_FOLDER_ID")
     slack_channel = os.environ.get("SLACK_CHANNEL_ID")
     days_back = 2
@@ -75,25 +76,41 @@ def main():
         send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
         sys.exit(1)
 
-    # --- パネル生成＆Slack/Drive通知まで一括処理 ---
+    # --- データセットをxarrayで開く ---
     try:
-        panel_imgs, zip_path, drive_url = generate_japan_panel_and_notify(
-            ymd=ymd, hh=hh,
-            gsm_l_pall_path=gsm_l_pall_path,
-            msm_l_pall_path=msm_l_pall_path,
-            msm_lsurf_path=msm_lsurf_path,
-            output_dir=output_dir,
-            drive_folder=drive_folder,
-            ncols=4, npages=3,  # ←nrowsは渡さない
+        ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
+        ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
+        ds_msm_surf_instant = xr.open_dataset(msm_lsurf_path, engine="cfgrib")
+
+        # --- パネル定義（6段）---
+        panel_def = get_panel_def_japan(ds_gsm_isobaric, ds_msm_isobaric, ds_msm_surf_instant)
+        times = []  # 時系列が不要なら空リストでOK
+
+        # --- イニシャル時刻をファイル名に利用 ---
+        init_time_str = f"{ymd}_{hh}UTC"
+
+        # --- パネル画像を「6段×8列×1枚」で出力 ---
+        panel_imgs = make_universal_weather_panel(
+            save_dir=output_dir,
+            panel_def=panel_def,
+            times=times,
+            init_time_str=init_time_str,          # ← ヘッダ（右上）に記載
+            city_name="japan",
+            ncols=8,                              # 8列
+            nrows=6,                              # 6段
+            extent=REGION_EXTENTS["japan"],       # 描画範囲
+            dpi=300                               # 高解像度・iPad最適
         )
+
+        # --- Slack通知（必要に応じてGoogle Drive連携も）---
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
-            f"{os.path.basename(zip_path)}\n"
-            f"{drive_url if drive_url else '(Driveアップロード未設定)'}"
+            f"{'(Driveアップロード未設定)'}"  # Drive運用する場合はURLをここに入れる
         )
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
+
     except Exception as e:
         send_slack_text(channel=slack_channel, message=f":x: パネル生成失敗: {e}")
         print(f"[ERROR] {e}")
