@@ -118,12 +118,18 @@ def main():
             v10 = None
     
         try:
-            print("[DEBUG] MSM_Lsurf 変数 apcp（降水量）:", 
             apcp = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")["apcp"]
         except Exception as e:
             print("[WARN] apcp（降水量）が取得できません:", e)
             print("[DEBUG] MSM_Lsurf apcp error:", e)
             apcp = None
+
+        # デバッグ用（旧コードは一括openのためNG、以下のように個別openだけでOK）
+        try:
+            print("[DEBUG] MSM_Lsurf 変数 apcp（降水量）:", 
+                  open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum").variables)
+        except Exception as e:
+            print("[DEBUG] MSM_Lsurf apcp error:", e)
 
         # 4. パネル用データ辞書作成
         panel_datasets = {
