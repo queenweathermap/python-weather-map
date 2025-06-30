@@ -29,7 +29,7 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の形状が不正")
     return lon2d, lat2d
 
-def plot_850hpa_temp_wind_700hpa_w(ax, ds):
+def plot_850hpa_temp_wind_700hpa_w(ds, ax, step=None, **kwargs):
     """
     850hPa気温・風・700hPa鉛直流
     ax: PlateCarree axes, ds: xarray.Dataset（stepで既にスライス済み！）
