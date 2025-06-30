@@ -29,8 +29,11 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_surface_pressure_and_wind_msm(ax, ds):
-    """
+def plot_surface_pressure_and_wind_msm(ds, ax, step=None, **kwargs):
+    # デバッグ用（本番運用では不要）
+    print("[DEBUG] MSM_Lsurf 変数一覧:", list(xr.open_dataset(msm_lsurf_path, engine="cfgrib").variables))
+
+   """
     地上海面更正気圧・風・降水量（MSM）描画
     Parameters
     ----------
