@@ -26,11 +26,12 @@ def get_lon_lat(ds):
     lon2d = get_var(ds, "longitude")
     lat2d = get_var(ds, "latitude")
     if lon2d is not None and lat2d is not None and lon2d.ndim == 1 and lat2d.ndim == 1:
-        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)   # ←インデントを深く！
     return lon2d, lat2d
 
+
 def plot_surface_pressure_and_wind_msm(ds, ax, step=None, **kwargs):
-   """
+    """
     地上海面更正気圧・風・降水量（MSM）描画
     Parameters
     ----------
@@ -50,6 +51,7 @@ def plot_surface_pressure_and_wind_msm(ds, ax, step=None, **kwargs):
     skip = 5  # 風ベクトルの間引き間隔
 
     # ...以降は既存通り（描画処理）
+
 
 
     # 地図範囲・装飾
