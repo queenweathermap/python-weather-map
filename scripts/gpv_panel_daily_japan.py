@@ -15,6 +15,7 @@ from module.utils.slack_utils import send_slack_text
 from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 
+# --- GRIB2ファイルから特定変数・層だけ抽出 ---
 def open_grib2_var(path, short_name, level_type, level_val=None, stepType=None):
     filter_keys = {"shortName": short_name, "typeOfLevel": level_type}
     if level_val is not None:
@@ -22,7 +23,6 @@ def open_grib2_var(path, short_name, level_type, level_val=None, stepType=None):
     if stepType is not None:
         filter_keys["stepType"] = stepType
     return xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
-
 
 # --- GPVファイルの自動探索＆ダウンロード ---
 def find_and_download_gpv_files(
@@ -69,33 +69,37 @@ def find_and_download_gpv_files(
                     return y+m+d, hh, file_paths
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
-# --- GRIB2ファイルから必要な層・変数のみ抽出するヘルパー ---
-def open_grib2_var_surface(path, short_name):
-    """地上変数用（typeOfLevel=surface, shortName）"""
-    return xr.open_dataset(
-        path,
-        engine="cfgrib",
-        filter_by_keys={"typeOfLevel": "surface", "shortName": short_name}
-    )
-
 # --- メインバッチ処理 ---
 def main():
-    ...
+    base_dir = "./data"
+    output_dir = "./output"
+    drive_folder = os.environ.get("DRIVE_FOLDER_ID")
+    slack_channel = os.environ.get("SLACK_CHANNEL_ID")
+    days_back = 2
+
+    gsm_l_pall_path = None
+    msm_l_pall_path = None
+    msm_lsurf_path  = None
+
     try:
-        # ここで必ず先に open_dataset する！（高層：GSM/ MSM、地上：Lsurf）
+        # 1. 必要ファイルDL＆パス取得
+        ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
+            base_dir=base_dir, days_back=days_back
+        )
+
+        # 2. 上層データ（GSM/ MSM）をopen
         ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
         ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
-        # --- prmslは高層L-pallから、地上風・降水量はLsurfから ---
+        # 3. 地上変数はfilter_by_keysで個別にopen
         prmsl = None
+        u10   = None
+        v10   = None
+        apcp  = None
         try:
             prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")["prmsl"]
         except Exception as e:
             print("[WARN] prmsl（海面更正気圧）が取得できません:", e)
-
-        u10 = None
-        v10 = None
-        apcp = None
         try:
             u10 = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")["u10"]
         except Exception as e:
@@ -109,7 +113,7 @@ def main():
         except Exception as e:
             print("[WARN] apcp（降水量）が取得できません:", e)
 
-        # --- panel_datasets に詰める ---
+        # 4. パネル用データ辞書作成
         panel_datasets = {
             "gh_300": ds_gsm_isobaric["gh"].sel(isobaricInhPa=300),
             "u_300":  ds_gsm_isobaric["u"].sel(isobaricInhPa=300),
@@ -125,12 +129,13 @@ def main():
             "v_850":  ds_msm_isobaric["v"].sel(isobaricInhPa=850),
             "w_700":  ds_msm_isobaric["w"].sel(isobaricInhPa=700),
             "r_850":  ds_msm_isobaric["r"].sel(isobaricInhPa=850) if "r" in ds_msm_isobaric else None,
-            "prmsl": prmsl,    # ←高層L-pallから
-            "u10":   u10,      # ←Lsurfから
-            "v10":   v10,      # ←Lsurfから
-            "apcp":  apcp,     # ←Lsurfから
+            "prmsl": prmsl,
+            "u10":   u10,
+            "v10":   v10,
+            "apcp":  apcp,
         }
 
+        # 5. パネル定義取得→描画
         panel_def = get_panel_def_japan(panel_datasets)
         times = []
         init_time_str = f"{ymd}_{hh}UTC"
@@ -148,8 +153,8 @@ def main():
             dpi=300
         )
 
+        # 6. Driveアップロード→Slack通知
         drive_url = upload_to_drive(drive_folder, panel_imgs[0])
-
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
@@ -158,6 +163,9 @@ def main():
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
 
+    except FileNotFoundError:
+        send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
+        sys.exit(1)
     except Exception as e:
         send_slack_text(channel=slack_channel, message=f":x: パネル生成失敗: {e}")
         print(f"[ERROR] {e}")
