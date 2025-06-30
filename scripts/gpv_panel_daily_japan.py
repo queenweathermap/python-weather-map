@@ -70,14 +70,6 @@ def find_and_download_gpv_files(
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
 # --- GRIB2ファイルから必要な層・変数のみ抽出するヘルパー ---
-def open_grib2_var(path, short_name, level_type, level_val):
-    """指定shortName, typeOfLevel, levelでxarray.Datasetを返す"""
-    return xr.open_dataset(
-        path,
-        engine="cfgrib",
-        filter_by_keys={f"typeOfLevel": level_type, level_type: level_val, "shortName": short_name}
-    )
-
 def open_grib2_var_surface(path, short_name):
     """地上変数用（typeOfLevel=surface, shortName）"""
     return xr.open_dataset(
