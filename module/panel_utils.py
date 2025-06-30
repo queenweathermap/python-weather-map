@@ -94,12 +94,13 @@ def make_universal_weather_panel(
     times,
     base_title,
     city_name="japan",
-    ncols=4, nrows=7, npages=4,
+    ncols=4, nrows=6, npages=3,
     extent=None,
     dpi=200
 ):
     """
-    panel_def = [(plot_func, ds, title), ...] のdsは必ずxarray.Dataset
+    panel_def = [(plot_func, ds, title), ...]
+    横12コマ（4×3ページ）対応バージョン
     """
     import cartopy.crs as ccrs
     os.makedirs(save_dir, exist_ok=True)
