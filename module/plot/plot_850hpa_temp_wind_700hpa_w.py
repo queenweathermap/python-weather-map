@@ -34,10 +34,10 @@ def plot_850hpa_temp_wind_700hpa_w(ax, ds):
     850hPa気温・風・700hPa鉛直流
     ax: PlateCarree axes, ds: xarray.Dataset（stepで既にスライス済み！）
     """
-    temp_850 = get_var_2d(ds, "TMP_850mb", level=850)
-    u_850    = get_var_2d(ds, "UGRD_850mb", level=850)
-    v_850    = get_var_2d(ds, "VGRD_850mb", level=850)
-    w_700    = get_var_2d(ds, "VVEL_700mb", level=700)
+    t850 = ds_dict["t850"].isel(step=step)
+    u850 = ds_dict["u850"].isel(step=step)
+    v850 = ds_dict["v850"].isel(step=step)
+    w700 = ds_dict["w700"].isel(step=step)
 
     if temp_850 is None or u_850 is None or v_850 is None or w_700 is None:
         ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
