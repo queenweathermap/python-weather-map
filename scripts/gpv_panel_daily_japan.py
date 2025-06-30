@@ -95,12 +95,10 @@ def main():
 
     try:
         # ここで必ず先に open_dataset する！
-        import xarray as xr
         ds_gsm_isobaric     = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
         ds_msm_isobaric     = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
         ds_msm_surf_instant = xr.open_dataset(msm_lsurf_path, engine="cfgrib")
 
-        # 必要な変数・層だけdictでまとめる
         panel_datasets = {
             "gh_300": ds_gsm_isobaric["gh"].sel(isobaricInhPa=300),
             "u_300":  ds_gsm_isobaric["u"].sel(isobaricInhPa=300),
@@ -151,6 +149,11 @@ def main():
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
 
+    except Exception as e:
+        send_slack_text(channel=slack_channel, message=f":x: パネル生成失敗: {e}")
+        print(f"[ERROR] {e}")
+        import traceback; traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
