@@ -95,10 +95,15 @@ def main():
 
     try:
         # ここで必ず先に open_dataset する！
-        ds_gsm_isobaric     = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
-        ds_msm_isobaric     = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
-        ds_msm_surf_instant = xr.open_dataset(msm_lsurf_path, engine="cfgrib")
+        ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
+        ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
+        # サーフェス変数はそれぞれstepTypeやレベルごとにopen！
+        prmsl = open_grib2_var(msm_lsurf_path, "prmsl", "surface", step_type="instant")["prmsl"]
+        u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, step_type="instant")["u10"]
+        v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, step_type="instant")["v10"]
+        apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", step_type="accum")["apcp"]
+    
         panel_datasets = {
             "gh_300": ds_gsm_isobaric["gh"].sel(isobaricInhPa=300),
             "u_300":  ds_gsm_isobaric["u"].sel(isobaricInhPa=300),
@@ -109,17 +114,17 @@ def main():
             "t_700":  ds_gsm_isobaric["t"].sel(isobaricInhPa=700),
             "r_700":  ds_gsm_isobaric["r"].sel(isobaricInhPa=700) if "r" in ds_gsm_isobaric else None,
             "t_500":  ds_gsm_isobaric["t"].sel(isobaricInhPa=500),
-
+    
             "t_850":  ds_msm_isobaric["t"].sel(isobaricInhPa=850),
             "u_850":  ds_msm_isobaric["u"].sel(isobaricInhPa=850),
             "v_850":  ds_msm_isobaric["v"].sel(isobaricInhPa=850),
             "w_700":  ds_msm_isobaric["w"].sel(isobaricInhPa=700),
             "r_850":  ds_msm_isobaric["r"].sel(isobaricInhPa=850) if "r" in ds_msm_isobaric else None,
-
-            "prmsl": ds_msm_surf_instant["prmsl"] if "prmsl" in ds_msm_surf_instant else None,
-            "u10":   ds_msm_surf_instant["u10"]   if "u10"   in ds_msm_surf_instant else None,
-            "v10":   ds_msm_surf_instant["v10"]   if "v10"   in ds_msm_surf_instant else None,
-            "apcp":  ds_msm_surf_instant["apcp"]  if "apcp"  in ds_msm_surf_instant else None,
+    
+            "prmsl": prmsl,
+            "u10":   u10,
+            "v10":   v10,
+            "apcp":  apcp,
         }
 
         panel_def = get_panel_def_japan(panel_datasets)
