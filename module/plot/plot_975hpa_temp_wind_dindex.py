@@ -23,7 +23,7 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_975hpa_temp_wind_dindex(ax, ds):
+def plot_975hpa_temp_wind_dindex(ds, ax, step=None, **kwargs):
     """
     975hPa気温・風・湿数
     ax: PlateCarree axes
