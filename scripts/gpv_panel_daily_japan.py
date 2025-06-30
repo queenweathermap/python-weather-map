@@ -24,6 +24,7 @@ def open_grib2_var(path, short_name, level_type, level_val=None, stepType=None):
         filter_keys["stepType"] = stepType
     return xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
 
+
 # --- GPVファイルの自動探索＆ダウンロード ---
 def find_and_download_gpv_files(
     base_dir="./data",
@@ -102,18 +103,25 @@ def main():
             prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")["prmsl"]
         except Exception as e:
             print("[WARN] prmsl（海面更正気圧）が取得できません:", e)
+            prmsl = None
+    
         try:
             u10 = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")["u10"]
         except Exception as e:
             print("[WARN] u10（10m風）が取得できません:", e)
+            u10 = None
+    
         try:
             v10 = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, stepType="instant")["v10"]
         except Exception as e:
             print("[WARN] v10（10m風）が取得できません:", e)
+            v10 = None
+    
         try:
             apcp = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")["apcp"]
         except Exception as e:
             print("[WARN] apcp（降水量）が取得できません:", e)
+            apcp = None
 
         # 4. パネル用データ辞書作成
         panel_datasets = {
