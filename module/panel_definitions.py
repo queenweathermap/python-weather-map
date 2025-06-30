@@ -4,8 +4,6 @@
 # 2025-06-29 ChatGPT
 # ===============================================================
 
-
-# --- 地域ごとのデフォルトズーム範囲定義 ---
 REGION_EXTENTS = {
     "japan": [122, 153, 20, 46],
     "akita": [139.5, 141.0, 38.8, 40.5],
@@ -15,29 +13,21 @@ REGION_EXTENTS = {
 
 def get_panel_def_japan(ds_gsm_isobaric, ds_msm_isobaric, ds_msm_surf_instant):
     """
-    全国（8段パネル）用 panel_def
+    日本全域6段パネル定義（GSM3段＋MSM3段）for 3ページ横12
     """
     from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
     from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
     from module.plot.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp
     from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
     from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
-    from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
-    from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
     from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
 
-    """
-    全国パネル用・描画構成定義
-    3引数で受ける！　全層MSM＋GSM両対応
-    """
     return [
         (plot_300hpa_height_wind, ds_gsm_isobaric, "300hPa高度・風"),
         (plot_500hpa_vorticity, ds_gsm_isobaric, "500hPa渦度"),
         (plot_700hpa_dindex_500hpa_temp, ds_gsm_isobaric, "700hPa湿数+500hPa気温"),
         (plot_850hpa_temp_wind_700hpa_w, ds_msm_isobaric, "850hPa温度・風+700hPa鉛直流"),
         (plot_850hpa_thetae_stream, ds_msm_isobaric, "850hPa θe流線"),
-        (plot_975hpa_temp_wind_dindex, ds_msm_isobaric, "975hPa温度・風・湿数"),
-        (plot_925hpa_temp_wind_dindex, ds_msm_isobaric, "925hPa温度・風・湿数"),
         (plot_surface_pressure_and_wind_msm, ds_msm_surf_instant, "地上気圧・風・降水量"),
     ]
 
