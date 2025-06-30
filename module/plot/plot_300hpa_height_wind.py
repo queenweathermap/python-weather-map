@@ -12,7 +12,6 @@ from scipy.ndimage import maximum_filter, minimum_filter
 from module.utils.var_utils import get_var
 # 必要なら set_japanese_font() も有効化
 
-print("ds.variables:", list(ds.variables))
 
 def get_lon_lat(ds):
     lon2d = np.asarray(ds["longitude"])
@@ -23,6 +22,7 @@ def get_lon_lat(ds):
 
 def plot_300hpa_height_wind(ax, ds):
     """300hPa等高度・風（NO DATA時は変数名print＋地図のみ描画）"""
+    print("ds.variables:", list(ds.variables))
     # --- データ取得 ---
     lon2d, lat2d = get_lon_lat(ds)
     hgt  = get_var(ds, "HGT_300mb")
