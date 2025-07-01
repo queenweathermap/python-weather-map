@@ -179,6 +179,8 @@ def generate_universal_panel_and_notify(
     city_name="japan",
     extent=None,
     log_callback=None,
+    rh_fallback_func=None,    # ←追加
+    apcp_3hr_func=None        # ←追加
 ):
     """
     全国・秋田・任意パネル生成＋Zip＋Driveアップ一括
