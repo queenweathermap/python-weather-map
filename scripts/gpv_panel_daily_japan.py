@@ -74,21 +74,30 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
         return ds[varname] if varname in ds else None
     except Exception as e:
         msg = str(e)
-        # multiple values for unique key
+        # cfgribのunique key例外か？
         if "multiple values for unique key" in msg:
+            # 例: filter_by_keys={'stepType': 'instant'} 等を全て拾う
             import re, ast
             candidates = re.findall(r"filter_by_keys=({.*?})", msg)
+            tried = []
             for cand in candidates:
                 try:
                     cand_dict = ast.literal_eval(cand)
+                    tried.append(str(cand_dict))
                     ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=cand_dict)
                     if varname in ds:
                         print(f"[OK] {varname} found with {cand_dict}")
                         return ds[varname]
-                except Exception:
+                except Exception as sub_e:
+                    # 各サブトライのエラーも軽く出すと後で追いやすい
+                    print(f"[DEBUG] {varname} with {cand_dict} failed: {sub_e}")
                     continue
-        print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): {e}")
-        return None
+            print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): tried {tried} but all failed. {e}")
+            return None
+        else:
+            print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): {e}")
+            return None
+
 
 
 # --- GPVファイルの自動探索＆ダウンロード（あなたの最新実装そのまま）
