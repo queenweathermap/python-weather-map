@@ -11,6 +11,13 @@ REGION_EXTENTS = {
 }
 
 def get_panel_def_japan(var_dict):
+    print(f"\n[DEBUG] get_panel_def_japan: called with var_dict keys: {list(var_dict.keys())}")
+    for k, v in var_dict.items():
+        if v is None:
+            print(f"[WARN] get_panel_def_japan: var_dict['{k}'] is None!")
+        else:
+            print(f"[OK] get_panel_def_japan: var_dict['{k}'] shape={getattr(v, 'shape', 'N/A')} dims={getattr(v, 'dims', 'N/A')}")
+
     """
     全国8列6段パネル定義
     var_dict: すべての必要変数をkey指定で格納したdict
@@ -115,6 +122,7 @@ def get_panel_def_local(var_items, total_rows=8):
     result = list(var_items)
     while len(result) < total_rows:
         result.append(def_item)
+    print(f"[DEBUG] get_panel_def_japan: returning {len(var_dict)} variables as panel_def")
     return result[:total_rows]
 
 # --- 公開関数 ---
