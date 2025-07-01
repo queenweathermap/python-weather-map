@@ -113,16 +113,12 @@ def main():
             base_dir=base_dir, days_back=days_back
         )
 
-        # 2. 上層データ（GSM/ MSM）をopen
-        # ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
-        # ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
-        # 3. 地上変数はfilter_by_keysで個別にopen
-        # 地上変数は "stepType" を明示
+        # 3.地上変数取得部分（例）
         prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")
-        apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")
         u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", 10, stepType="instant")
         v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", 10, stepType="instant")
+        apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")
 
         if prmsl is None:
             print("[WARN] prmsl（海面更正気圧）が取得できません")
