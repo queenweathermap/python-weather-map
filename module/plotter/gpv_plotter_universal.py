@@ -15,81 +15,34 @@ from module.utils.drive_utils import upload_to_drive, delete_old_files_from_driv
 from module.utils.zip_utils import zip_files
 
 # --- 各変数を個別openするユーティリティ ---
-def open_grib2_var_auto(
-    varname,
-    level=None,
-    gsm_path=None,
-    msm_pall_path=None,
-    msm_lsurf_path=None,
-    type_of_level=None,
-    stepType=None
-):
+
+def open_grib2_var_auto(file_path, varname, type_of_level=None, level_val=None, step_type=None):
     """
-    変数・層から自動的にファイルを選び、cfgrib/xarrayでstepType/typeOfLevel/level総当たりopen
+    cfgrib/xarrayでstepType/typeOfLevel/levelを総当たりで順次open
+    必ず DataArray or None を返す
     """
-    # ファイル選択
-    def select_file_for_var(var, level):
-        if var in ["gh", "u", "v", "t", "r"] and level in [300, 500, 700]:
-            return gsm_path
-        if var in ["t", "u", "v", "r"] and level == 850:
-            return msm_pall_path
-        if var == "w" and level == 700:
-            return msm_pall_path
-        if var in ["u10", "v10", "apcp", "prmsl"]:
-            return msm_lsurf_path
-        return msm_pall_path
+    import xarray as xr
+    step_types = [step_type] if step_type else ['instant', 'accum', 'avg']
+    type_of_levels = [type_of_level] if type_of_level else [
+        'isobaricInhPa', 'heightAboveGround', 'surface', 'meanSea'
+    ]
+    level_vals = [level_val] if level_val else [None, 1000, 925, 900, 850, 700, 500, 400, 300, 10, 2, 1.5]
 
-    file_path = select_file_for_var(varname, level)
-    filter_keys = {}
-    if type_of_level:
-        filter_keys['typeOfLevel'] = type_of_level
-    if level is not None:
-        if type_of_level == 'isobaric':
-            filter_keys['isobaricInhPa'] = level
-        elif type_of_level == 'heightAboveGround':
-            filter_keys['level'] = level
-    if stepType:
-        filter_keys['stepType'] = stepType
-
-    # apcpだけはstepType=accum優先で順トライ
-    if varname == "apcp":
-        for try_step in ["accum", "avg", "instant"]:
-            filter_keys_mod = filter_keys.copy()
-            filter_keys_mod['stepType'] = try_step
-            try:
-                ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys_mod)
-                if varname in ds:
-                    print(f"[OK] {varname} found with {filter_keys_mod}")
-                    return ds[varname]
-            except Exception:
-                continue
-        print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): 全stepTypeトライ失敗")
-        return None
-
-    # 通常：他変数
-    try:
-        ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
-        return ds[varname] if varname in ds else None
-    except Exception as e:
-        msg = str(e)
-        # unique key例外に自動対応
-        if "multiple values for unique key" in msg:
-            import re, ast
-            candidates = re.findall(r"filter_by_keys=({.*?})", msg)
-            for cand in candidates:
+    for st in step_types:
+        for tl in type_of_levels:
+            for lv in level_vals:
                 try:
-                    cand_dict = ast.literal_eval(cand)
-                    ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=cand_dict)
+                    filter_keys = {'shortName': varname, 'stepType': st, 'typeOfLevel': tl}
+                    if lv is not None:
+                        filter_keys['level'] = lv
+                    ds = xr.open_dataset(file_path, engine='cfgrib', filter_by_keys=filter_keys)
                     if varname in ds:
-                        print(f"[OK] {varname} found with {cand_dict}")
                         return ds[varname]
-                except Exception:
+                except Exception as e:
                     continue
-            print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): 全unique keyパターン失敗")
-            return None
-        else:
-            print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): {e}")
-            return None
+    print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): 全stepType/typeOfLevel/levelトライ失敗")
+    return None
+
 
 # --- デバッグ用: 変数一覧ダンプ ---
 def dump_grib_vars_auto(file_path, verbose=True):
