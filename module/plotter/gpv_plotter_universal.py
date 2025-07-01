@@ -33,49 +33,62 @@ def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=N
 # --- デバッグ用: 変数一覧ダンプ ---
 def dump_grib_vars_auto(file_path, verbose=True):
     """
-    GRIB2ファイルで取得可能な全変数・階層情報をできるだけ詳しく列挙
-    pygrib → xarray(cfgrib) の順でトライ
+    GRIB2ファイルで取得可能な全変数・階層・stepType/typeOfLevel組み合わせを列挙
+    - まずpygribで全変数ダンプ
+    - pygrib未導入なら、cfgribでstepTypeを全部順にサーチ
     """
-    print(f"==== ダンプ開始: {file_path} ====")
-
-    # --- 1. pygribでのダンプ ---
+    # --- pygribで全スキャン ---
     try:
         import pygrib
         grbs = pygrib.open(file_path)
-        vars_info = []
-        for i, grb in enumerate(grbs):
-            if verbose:
-                print(f"[pygrib] #{i+1:3d}: name={grb.name} shortName={grb.shortName} typeOfLevel={grb.typeOfLevel} level={grb.level} stepType={getattr(grb, 'stepType', '?')} paramId={grb.paramId}")
-            vars_info.append({
-                "name": grb.name,
-                "shortName": grb.shortName,
-                "typeOfLevel": getattr(grb, "typeOfLevel", None),
-                "level": getattr(grb, "level", None),
-                "stepType": getattr(grb, "stepType", None),
-                "paramId": getattr(grb, "paramId", None),
-            })
-        grbs.close()
-        if not vars_info:
-            print("[pygrib] 変数情報が取得できませんでした。")
-        return vars_info
-
+        if verbose: print(f"==== pygrib dump: {file_path} ====")
+        info = []
+        for g in grbs:
+            rec = dict(
+                name=g.name,
+                shortName=g.shortName,
+                paramId=g.parameterNumber,
+                level=g.level,
+                typeOfLevel=g.typeOfLevel,
+                stepType=g.stepType if hasattr(g, 'stepType') else None,
+            )
+            info.append(rec)
+            if verbose: print(rec)
+        return info
+    except ImportError:
+        print("[WARN] pygribでのダンプ失敗: No module named 'pygrib'")
     except Exception as e:
         print(f"[WARN] pygribでのダンプ失敗: {e}")
 
-    # --- 2. xarray(cfgrib)でのダンプ ---
-    try:
-        import xarray as xr
-        ds = xr.open_dataset(file_path, engine="cfgrib")
-        if verbose:
-            print(f"[xarray/cfgrib] variables in {file_path}:")
-            for v in ds.variables:
-                print(f"  {v}: dims={ds[v].dims}, attrs={ds[v].attrs}")
-        return list(ds.variables)
-    except Exception as e:
-        print(f"[WARN] xarray(cfgrib)でのダンプ失敗: {e}")
+    # --- cfgrib(xarray)でstepTypeを列挙して全種サーチ ---
+    step_types = ['instant', 'accum', 'avg']
+    all_vars = []
+    import xarray as xr
+    for stepType in step_types:
+        try:
+            ds = xr.open_dataset(
+                file_path, engine="cfgrib", filter_by_keys={"stepType": stepType}
+            )
+            for v in ds.data_vars:
+                da = ds[v]
+                rec = dict(
+                    name=str(getattr(da, 'long_name', v)),
+                    shortName=v,
+                    stepType=stepType,
+                    dims=str(da.dims),
+                    levels=list(da.coords) if hasattr(da, 'coords') else [],
+                )
+                all_vars.append(rec)
+                if verbose:
+                    print(f"{v} ({stepType}): dims={da.dims} levels={rec['levels']}")
+        except Exception as e:
+            if verbose:
+                print(f"[WARN] xarray(cfgrib)で stepType={stepType} 失敗: {e}")
 
-    print("[ERROR] どちらの方法でもGRIB2変数リスト取得に失敗しました。")
-    return []
+    if not all_vars:
+        print("Error:  どちらの方法でもGRIB2変数リスト取得に失敗しました。")
+    return all_vars
+
 
 
 # ----------------------------------------------------------------------
