@@ -179,8 +179,8 @@ def generate_universal_panel_and_notify(
     city_name="japan",
     extent=None,
     log_callback=None,
-    rh_fallback_func=None,    # ←追加
-    apcp_3hr_func=None        # ←追加
+    rh_fallback_func=None,    # 湿度fallback関数
+    apcp_3hr_func=None        # 降水量fallback関数
 ):
     """
     全国・秋田・任意パネル生成＋Zip＋Driveアップ一括
@@ -192,12 +192,16 @@ def generate_universal_panel_and_notify(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # パネル定義（panel_defは外部で組む運用でも可）
     from module.panel_definitions import get_panel_def_japan
-    # ※秋田や任意域ならget_panel_def_akita等に分岐も可能
 
     # データ収集時print
     print("\n[DEBUG] --- パネル用データ抽出開始 ---")
+    # --- Datasetは一度だけopenして使い回す ---
+    ds_gsm = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
+    ds_msm = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
+    ds_lsurf = xr.open_dataset(msm_lsurf_path, engine="cfgrib")
+
+    # --- まず通常取得 ---
     panel_datasets = {
         "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
         "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
@@ -213,11 +217,30 @@ def generate_universal_panel_and_notify(
         "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
         "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
         "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-        "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
-        "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
-        "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+        "prmsl":  open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+        "u10":    open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+        "v10":    open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+        "apcp":   open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
     }
+
+    # --- 湿度・降水量 fallback上書き（Noneだったら） ---
+    if panel_datasets["r_700"] is None and rh_fallback_func:
+        print("[INFO] r_700 fallback計算実行")
+        panel_datasets["r_700"] = rh_fallback_func(ds_gsm, level_hPa=700)
+    if panel_datasets["r_850"] is None and rh_fallback_func:
+        print("[INFO] r_850 fallback計算実行")
+        panel_datasets["r_850"] = rh_fallback_func(ds_msm, level_hPa=850)
+    if panel_datasets["apcp"] is None and apcp_3hr_func:
+        print("[INFO] apcp 3h差分fallback計算実行")
+        # MSMの降水量積算値から3h差分計算
+        try:
+            # Lsurfファイルでapcp取得（積算値）
+            apcp_accum = ds_lsurf["apcp"] if "apcp" in ds_lsurf.variables else None
+            panel_datasets["apcp"] = apcp_3hr_func(apcp_accum)
+        except Exception as e:
+            print(f"[WARN] apcp 3h差分計算失敗: {e}")
+            panel_datasets["apcp"] = None
+
     # 収集結果一覧
     print("\n[DEBUG] --- panel_datasets summary ---")
     for k, v in panel_datasets.items():
@@ -281,6 +304,7 @@ def generate_universal_panel_and_notify(
         log(f"[OK] Drive URL: {drive_url}")
 
     return panel_imgs, zip_path, drive_url
+
 
 # --- パネルグリッド描画汎用関数（panel_utils.py から移動） ---
 def make_universal_weather_panel(
