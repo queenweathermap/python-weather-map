@@ -93,9 +93,15 @@ def open_grib2_var_auto(
         file_path = msm_pall_path
 
     print(f"[DEBUG] open_grib2_var_auto: using file_path={file_path}")
-    filter_keys = {}
 
-    # --- 降水量（apcp）は stepType自動切替 ---
+    # --- filter_by_keysの構築 ---
+    filter_keys = {}
+    if stepType is not None:
+        filter_keys["stepType"] = stepType
+    if type_of_level is not None and level is not None:
+        filter_keys[type_of_level] = level
+
+    # --- apcpだけはstepType変動あり ---
     if varname == "apcp":
         for try_step in ["accum", "avg", "instant"]:
             try:
@@ -107,7 +113,7 @@ def open_grib2_var_auto(
             except Exception as e:
                 print(f"[WARN] apcp try_step={try_step} failed: {e}")
                 continue
-        # fallback: 3時間値計算
+        # fallback
         if apcp_3hr_func is not None:
             print(f"[WARN] apcp not found. → fallback: get_apcp_3hr()")
             try:
@@ -118,6 +124,30 @@ def open_grib2_var_auto(
                 print(f"[FAIL] apcp_3hr_func failed: {e}")
         print(f"[FAIL] apcp: 全stepType/fallback失敗")
         return None
+
+    # --- 通常変数 ---
+    try:
+        ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
+        print(f"[DEBUG] ds.variables: {list(ds.variables.keys())}")
+        if varname in ds:
+            print(f"[OK] {varname} shape={ds[varname].shape}")
+            return ds[varname]
+        else:
+            print(f"[WARN] {varname} not in ds.variables!")
+            # 湿度だけはfallback
+            if varname == "r" and rh_fallback_func is not None:
+                print(f"[WARN] {varname} fallback: get_rh_fallback()")
+                try:
+                    rh = rh_fallback_func(ds, level_hPa=level)
+                    print(f"[OK] r fallback shape={rh.shape}")
+                    return rh
+                except Exception as e:
+                    print(f"[FAIL] get_rh_fallback failed: {e}")
+            return None
+    except Exception as e:
+        print(f"[FAIL] open_grib2_var_auto: {e}")
+        return None
+
 
     # --- 通常変数（stepType自動サーチは不要） ---
     try:
