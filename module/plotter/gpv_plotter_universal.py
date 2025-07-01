@@ -31,18 +31,58 @@ def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=N
         return None
 
 # --- デバッグ用: 変数一覧ダンプ ---
-def dump_grib_vars(file_path):
-    print(f"\n==== ファイル: {file_path} ====")
-    for step in ["instant", "accum", "avg"]:
-        try:
-            ds = xr.open_dataset(
-                file_path,
-                engine="cfgrib",
-                backend_kwargs={'filter_by_keys': {'stepType': step}}
-            )
-            print(f"\n[{step}] 変数:", list(ds.data_vars))
-        except Exception as e:
-            print(f"[{step}] 読み込み不可: {e}")
+# module/plotter/gpv_plotter_universal.py などに追加
+
+def dump_grib_vars(file_path, verbose=True):
+    """
+    GRIB2ファイルで取得可能な全変数・階層・stepType/typeOfLevel組み合わせを列挙
+
+    Parameters:
+        file_path: GRIB2ファイルパス
+        verbose: Trueならprint出力（Falseなら変数リストのみ返す）
+    Returns:
+        変数情報リスト
+    """
+    import cfgrib
+    from collections import defaultdict
+
+    try:
+        idx = cfgrib.index_file(file_path)
+    except Exception as e:
+        print(f"[ERROR] cfgrib.index_file failed: {e}")
+        return []
+
+    # variableName, stepType, typeOfLevel, level
+    var_info = defaultdict(list)
+    for rec in idx:
+        vname = rec['shortName']
+        stype = rec.get('stepType', '')
+        level_type = rec.get('typeOfLevel', '')
+        level = rec.get('level', '')
+        key = (vname, stype, level_type, level)
+        var_info[vname].append({
+            "stepType": stype,
+            "typeOfLevel": level_type,
+            "level": level,
+            "paramId": rec.get('paramId'),
+            "name": rec.get('name', ''),
+        })
+
+    # 整形してprint
+    if verbose:
+        print(f"==== ファイル: {file_path} ====")
+        for vname, entries in var_info.items():
+            levels = set([e["level"] for e in entries])
+            step_types = set([e["stepType"] for e in entries])
+            type_of_levels = set([e["typeOfLevel"] for e in entries])
+            print(f"- {vname}:")
+            print(f"    stepType: {sorted(step_types)}")
+            print(f"    typeOfLevel: {sorted(type_of_levels)}")
+            print(f"    level: {sorted(levels)}")
+            print(f"    paramId: {[e['paramId'] for e in entries]}")
+            print(f"    name: {[e['name'] for e in entries if e['name']]}")
+    return var_info
+
 
 # ----------------------------------------------------------------------
 
