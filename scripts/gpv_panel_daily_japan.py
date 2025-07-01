@@ -76,6 +76,7 @@ def find_and_download_gpv_files(
                     return y+m+d, hh, file_paths
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
+# scripts/gpv_panel_daily_japan.py
 # --- メインバッチ処理 ---
 def main():
     base_dir = "./data"
@@ -125,27 +126,33 @@ def main():
             except Exception as e:
                 print(f"[DEBUG] MSM_Lsurf {var} ({stype}) error:", e)
 
-        # 4. パネル用データ辞書作成
+        # --- 4. パネル用データ辞書を「全部個別open」で作成 ---
         panel_datasets = {
-            "gh_300": ds_gsm_isobaric["gh"].sel(isobaricInhPa=300),
-            "u_300":  ds_gsm_isobaric["u"].sel(isobaricInhPa=300),
-            "v_300":  ds_gsm_isobaric["v"].sel(isobaricInhPa=300),
-            "gh_500": ds_gsm_isobaric["gh"].sel(isobaricInhPa=500),
-            "u_500":  ds_gsm_isobaric["u"].sel(isobaricInhPa=500),
-            "v_500":  ds_gsm_isobaric["v"].sel(isobaricInhPa=500),
-            "t_700":  ds_gsm_isobaric["t"].sel(isobaricInhPa=700),
-            "r_700":  ds_gsm_isobaric["r"].sel(isobaricInhPa=700) if "r" in ds_gsm_isobaric else None,
-            "t_500":  ds_gsm_isobaric["t"].sel(isobaricInhPa=500),
-            "t_850":  ds_msm_isobaric["t"].sel(isobaricInhPa=850),
-            "u_850":  ds_msm_isobaric["u"].sel(isobaricInhPa=850),
-            "v_850":  ds_msm_isobaric["v"].sel(isobaricInhPa=850),
-            "w_700":  ds_msm_isobaric["w"].sel(isobaricInhPa=700),
-            "r_850":  ds_msm_isobaric["r"].sel(isobaricInhPa=850) if "r" in ds_msm_isobaric else None,
+            # GSM（GSMファイル、主に高層）
+            "gh_300": open_grib2_var(gsm_l_pall_path, "gh", "isobaric", 300),
+            "u_300":  open_grib2_var(gsm_l_pall_path, "u", "isobaric", 300),
+            "v_300":  open_grib2_var(gsm_l_pall_path, "v", "isobaric", 300),
+            "gh_500": open_grib2_var(gsm_l_pall_path, "gh", "isobaric", 500),
+            "u_500":  open_grib2_var(gsm_l_pall_path, "u", "isobaric", 500),
+            "v_500":  open_grib2_var(gsm_l_pall_path, "v", "isobaric", 500),
+            "t_700":  open_grib2_var(gsm_l_pall_path, "t", "isobaric", 700),
+            "r_700":  open_grib2_var(gsm_l_pall_path, "r", "isobaric", 700),
+            "t_500":  open_grib2_var(gsm_l_pall_path, "t", "isobaric", 500),
+        
+            # MSM（主に850hPa以下、700鉛直流など）
+            "t_850":  open_grib2_var(msm_l_pall_path, "t", "isobaric", 850),
+            "u_850":  open_grib2_var(msm_l_pall_path, "u", "isobaric", 850),
+            "v_850":  open_grib2_var(msm_l_pall_path, "v", "isobaric", 850),
+            "w_700":  open_grib2_var(msm_l_pall_path, "w", "isobaric", 700),
+            "r_850":  open_grib2_var(msm_l_pall_path, "r", "isobaric", 850),
+        
+            # 地上（MSM Lsurfファイルが主）
             "prmsl": prmsl,
             "u10":   u10,
             "v10":   v10,
             "apcp":  apcp,
         }
+
 
         # 5. パネル定義取得→描画
         panel_def = get_panel_def_japan(panel_datasets)
