@@ -398,5 +398,7 @@ __all__ = [
     "open_grib2_var_auto",
     "dump_grib_vars_auto",
     "generate_universal_panel_and_notify",
-    "make_universal_weather_panel"
+    "make_universal_weather_panel",
+    "get_rh_fallback",
+    "get_apcp_3hr"
 ]
