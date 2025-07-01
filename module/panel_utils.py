@@ -156,7 +156,6 @@ def make_universal_weather_panel(
                 ax.axis("off")
                 ax.set_title(f"{title} (error)", fontsize=7)
 
-
     # ヘッダ・タイトルなし（要件どおり）
     # 右上にイニシャル時刻付きファイル名
     fig.text(0.99, 0.99, f"{city_name}_{init_time_str}", fontsize=10,
@@ -169,7 +168,6 @@ def make_universal_weather_panel(
     plt.close(fig)
     panel_imgs.append(out_path)
     return panel_imgs
-
 
 
 __all__ = [
