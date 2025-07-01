@@ -25,25 +25,34 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 # module/plot/plot_500hpa_vorticity.py
-def plot_500hpa_vorticity(ax, ds, step=None, **kwargs):
-    print("[DEBUG] plot_500hpa_vorticity: ds type:", type(ds))
-    """500hPa等高度・正渦度（オレンジ）"""
+def plot_500hpa_vorticity(ax, ds_dict, step=0):
+    """
+    500hPa等高度・正渦度（オレンジ）
+    ds_dict: {"h":..., "u":..., "v":...}
+    """
     import metpy.calc as mpcalc
     from metpy.units import units
 
-    hgt   = get_var(ds, "HGT_500mb")
-    ugrd  = get_var(ds, "UGRD_500mb")
-    vgrd  = get_var(ds, "VGRD_500mb")
+    # NO DATA時
+    for k in ["h", "u", "v"]:
+        if ds_dict.get(k) is None:
+            ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
+            ax.coastlines(resolution="50m")
+            ax.add_feature(cfeature.BORDERS, linestyle=":")
+            ax.text(0.5, 0.5, f"NO DATA\n({k})", fontsize=14, color="gray",
+                    ha="center", va="center", transform=ax.transAxes)
+            return
 
-    if hgt is None or ugrd is None or vgrd is None:
-        ax.text(0.5, 0.5, "NO DATA", fontsize=12, color="gray", ha="center", va="center", transform=ax.transAxes)
-        ax.set_axis_off()
-        return
-
+    hgt = ds_dict["h"].isel(step=step)
+    ugrd = ds_dict["u"].isel(step=step)
+    vgrd = ds_dict["v"].isel(step=step)
 
     ugrd = ugrd * units('m/s')
     vgrd = vgrd * units('m/s')
-    lon2d, lat2d = get_lon_lat(ds)
+    lon2d = hgt["longitude"].values
+    lat2d = hgt["latitude"].values
+    if lon2d.ndim == 1 and lat2d.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
 
     dy, dx = mpcalc.lat_lon_grid_deltas(lon2d, lat2d)
     dx_mean = np.mean(dx)
@@ -64,4 +73,4 @@ def plot_500hpa_vorticity(ax, ds, step=None, **kwargs):
     ax.contourf(lon2d, lat2d, vorticity_masked, levels=[0, 1e-5],
                 colors=["orange"], alpha=0.5, transform=ccrs.PlateCarree())
 
-    ax.set_title("500hPa Vorticity", fontsize=10, pad=10)
+    ax.set_title("500hPa渦度", fontsize=10, pad=10)
