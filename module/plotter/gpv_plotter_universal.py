@@ -16,50 +16,39 @@ from module.utils.zip_utils import zip_files
 
 # --- 各変数を個別openするユーティリティ ---
 def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, msm_lsurf_path=None, type_of_level=None, stepType=None):
-    """
-    変数・層・ファイルパス群から自動で最適ファイルを選び、xarray/cfgribで DataArray または None を返す
-    """
-    # --- どのファイルを使うか自動判定 ---
-    if varname in ["gh", "u", "v", "t", "r"] and level in [300, 500, 700]:
-        file_path = gsm_path
-    elif varname in ["t", "u", "v", "r"] and level == 850:
-        file_path = msm_pall_path
-    elif varname == "w" and level == 700:
-        file_path = msm_pall_path
-    elif varname in ["u10", "v10", "apcp", "prmsl"]:
-        file_path = msm_lsurf_path
-    else:
-        file_path = msm_pall_path  # 何も合致しない場合
-
+    print(f"\n[DEBUG] open_grib2_var_auto: varname={varname}, level={level}, type_of_level={type_of_level}, stepType={stepType}")
+    # ファイルパス決定ロジック
+    ...
+    print(f"[DEBUG] open_grib2_var_auto: using file_path={file_path}")
     filter_keys = {}
-    if type_of_level:
-        filter_keys["typeOfLevel"] = type_of_level
-    if level is not None:
-        if type_of_level == "isobaric":
-            filter_keys["isobaricInhPa"] = level
-        elif type_of_level == "heightAboveGround":
-            filter_keys["level"] = level
-    if stepType:
-        filter_keys["stepType"] = stepType
-
-    # apcpだけstepType全部トライ
+    ...
     if varname == "apcp":
         for try_step in ["accum", "avg", "instant"]:
-            filter_keys_mod = filter_keys.copy()
-            filter_keys_mod["stepType"] = try_step
+            ...
             try:
                 ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys_mod)
+                print(f"[DEBUG] Try stepType={try_step} → ds.variables: {list(ds.variables.keys())}, coords: {list(ds.coords.keys())}")
                 if varname in ds:
-                    print(f"[OK] {varname} found with {filter_keys_mod}")
+                    print(f"[OK] {varname} found with {filter_keys_mod} shape={ds[varname].shape}")
                     return ds[varname]
-            except Exception:
+            except Exception as e:
+                print(f"[WARN] {varname} try_step={try_step} failed: {e}")
                 continue
         print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): 全stepTypeトライ失敗")
         return None
 
     try:
         ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
-        return ds[varname] if varname in ds else None
+        print(f"[DEBUG] ds.variables: {list(ds.variables.keys())}")
+        print(f"[DEBUG] ds.coords: {list(ds.coords.keys())}")
+        if varname in ds:
+            print(f"[OK] {varname} shape={ds[varname].shape}, dims={ds[varname].dims}, coords={list(ds[varname].coords)}")
+            if "isobaricInhPa" in ds[varname].coords:
+                print(f"  levels: {ds[varname]['isobaricInhPa'].values}")
+            return ds[varname]
+        else:
+            print(f"[WARN] {varname} not in ds.variables!")
+            return None
     except Exception as e:
         print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): {e}")
         return None
@@ -146,7 +135,8 @@ def generate_universal_panel_and_notify(
     from module.panel_definitions import get_panel_def_japan
     # ※秋田や任意域ならget_panel_def_akita等に分岐も可能
 
-    # ここでは全国汎用で取得
+    # データ収集時print
+    print("\n[DEBUG] --- パネル用データ抽出開始 ---")
     panel_datasets = {
         "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
         "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
@@ -167,7 +157,18 @@ def generate_universal_panel_and_notify(
         "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
         "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
     }
+    # 収集結果一覧
+    print("\n[DEBUG] --- panel_datasets summary ---")
+    for k, v in panel_datasets.items():
+        if v is None:
+            print(f"[WARN] panel_datasets[{k}] = None")
+        else:
+            print(f"[OK] panel_datasets[{k}] shape={getattr(v, 'shape', 'N/A')} dims={getattr(v, 'dims', 'N/A')}")
+
+    print("\n[DEBUG] --- パネル定義呼び出し ---")
     panel_def = get_panel_def_japan(panel_datasets)
+    for i, (func, ds, title) in enumerate(panel_def):
+        print(f"[panel_def row {i+1}] {title}  ds: {type(ds)} keys={list(ds.keys()) if isinstance(ds, dict) else ''}")
     nrows = len(panel_def)
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
