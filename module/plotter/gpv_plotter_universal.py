@@ -17,8 +17,18 @@ from module.utils.zip_utils import zip_files
 # --- 各変数を個別openするユーティリティ ---
 def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, msm_lsurf_path=None, type_of_level=None, stepType=None):
     print(f"\n[DEBUG] open_grib2_var_auto: varname={varname}, level={level}, type_of_level={type_of_level}, stepType={stepType}")
-    # ファイルパス決定ロジック
-    ...
+    # --- どのファイルを使うか自動判定 ---
+    if varname in ["gh", "u", "v", "t", "r"] and level in [300, 500, 700]:
+        file_path = gsm_path
+    elif varname in ["t", "u", "v", "r"] and level == 850:
+        file_path = msm_pall_path
+    elif varname == "w" and level == 700:
+        file_path = msm_pall_path
+    elif varname in ["u10", "v10", "apcp", "prmsl"]:
+        file_path = msm_lsurf_path
+    else:
+        file_path = msm_pall_path  # 何も合致しない場合
+
     print(f"[DEBUG] open_grib2_var_auto: using file_path={file_path}")
     filter_keys = {}
     ...
