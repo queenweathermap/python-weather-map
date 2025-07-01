@@ -32,23 +32,33 @@ def get_lon_lat(ds):
 def plot_850hpa_temp_wind_700hpa_w(ax, ds, step=None, **kwargs):
     """
     850hPa気温・風・700hPa鉛直流
-    ax: PlateCarree axes, ds: xarray.Dataset（stepで既にスライス済み！）
+    ax: PlateCarree axes, ds: dict（stepで時系列スライス）
     """
-    t850 = ds_dict["t850"].isel(step=step)
-    u850 = ds_dict["u850"].isel(step=step)
-    v850 = ds_dict["v850"].isel(step=step)
-    w700 = ds_dict["w700"].isel(step=step)
+    # 必ず引数dsからアクセス
+    temp_850 = ds["t_850"]
+    u_850 = ds["u_850"]
+    v_850 = ds["v_850"]
+    w_700 = ds["w_700"]
+    
+    # step次元があればスライス
+    if "step" in temp_850.dims:
+        temp_850 = temp_850.isel(step=step)
+    if "step" in u_850.dims:
+        u_850 = u_850.isel(step=step)
+    if "step" in v_850.dims:
+        v_850 = v_850.isel(step=step)
+    if "step" in w_700.dims:
+        w_700 = w_700.isel(step=step)
 
     if temp_850 is None or u_850 is None or v_850 is None or w_700 is None:
         ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
         ax.set_axis_off()
         return
-    # ...以降は描画処理（そのまま継続）
 
     temp = temp_850 - 273.15 if np.nanmax(temp_850) > 100 else temp_850
     w700 = w_700 * 3600   # 700hPa vertical velocity [hPa/h]
 
-    lon2d, lat2d = get_lon_lat(ds)
+    lon2d, lat2d = get_lon_lat(temp_850)  # temp_850から緯度経度を抽出
     skip = 5
 
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
