@@ -1,7 +1,7 @@
 # ===============================================================
 # scripts/gpv_panel_daily_japan.py
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 2025-06-30 isobaricInhPaエラー対策「変数・層ごと個別open」完全対応版
+# 2025-06-30 ファイル自動判定・変数/層ごと動的抽出対応
 # ===============================================================
 
 import os
@@ -14,42 +14,63 @@ from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
 from module.utils.slack_utils import send_slack_text
 from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
+from module.plotter.gpv_plotter_universal import dump_grib_vars
 
+# ---- 変数・層ごと自動で最適なファイルを選ぶ関数
+def select_file_for_var(var, level, gsm_path, msm_pall_path, msm_lsurf_path):
+    """
+    変数名とレベルに応じて最適なファイルパスを返す
+    """
+    # 高層（300,500,700）のgh/u/v/t/r: GSM優先
+    if var in ["gh", "u", "v", "t", "r"] and level in [300, 500, 700]:
+        return gsm_path
+    # 850/w_700/r_850はMSM
+    if var in ["t", "u", "v", "r"] and level == 850:
+        return msm_pall_path
+    if var == "w" and level == 700:
+        return msm_pall_path
+    # 地上（10m）やprmsl, apcpはMSM_Lsurf
+    if var in ["u10", "v10", "apcp", "prmsl"]:
+        return msm_lsurf_path
+    # 万が一のため
+    return msm_pall_path
 
-def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=None):
+def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, msm_lsurf_path=None, type_of_level=None, stepType=None):
+    """
+    変数・層から自動的にファイルを選びopen_grib2_varを呼ぶ
+    """
+    file_path = select_file_for_var(varname, level, gsm_path, msm_pall_path, msm_lsurf_path)
     filter_keys = {}
     if type_of_level:
         filter_keys['typeOfLevel'] = type_of_level
-    if level_val is not None:
-        filter_keys['isobaricInhPa' if type_of_level == 'isobaric' else 'level'] = level_val
+    if level is not None and type_of_level == 'isobaric':
+        filter_keys['isobaricInhPa'] = level
+    if level is not None and type_of_level == 'heightAboveGround':
+        filter_keys['level'] = level
     if stepType:
         filter_keys['stepType'] = stepType
 
-    # まず一発で絞れるかtry
     try:
-        ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
+        ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
         return ds[varname] if varname in ds else None
     except Exception as e:
         msg = str(e)
-        # 候補リスト例を自動パース
         if "multiple values for unique key" in msg:
-            import re
+            import re, ast
             candidates = re.findall(r"filter_by_keys=({.*?})", msg)
             for cand in candidates:
-                import ast
                 try:
                     cand_dict = ast.literal_eval(cand)
-                    ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=cand_dict)
+                    ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=cand_dict)
                     if varname in ds:
                         print(f"[OK] {varname} found with {cand_dict}")
                         return ds[varname]
-                except Exception as e2:
+                except Exception:
                     continue
-        print(f"[WARN] open_grib2_var failed for {varname}: {e}")
+        print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): {e}")
         return None
 
-
-# --- GPVファイルの自動探索＆ダウンロード ---
+# --- GPVファイルの自動探索＆ダウンロード（あなたの最新実装そのまま）
 def find_and_download_gpv_files(
     base_dir="./data",
     days_back=2,
@@ -57,9 +78,6 @@ def find_and_download_gpv_files(
     fh_band_gsm="FD0000-0100",
     fh_band_msm="FH00-15"
 ):
-    """
-    GSMとMSMの最新イニシャル時刻の必要ファイル3種をDL＆返却（パス3つ）
-    """
     base_url = GPV_MIRROR_URLS[0]
     now = datetime.datetime.utcnow()
     for day_delta in range(days_back):
@@ -94,7 +112,6 @@ def find_and_download_gpv_files(
                     return y+m+d, hh, file_paths
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
-# scripts/gpv_panel_daily_japan.py
 # --- メインバッチ処理 ---
 def main():
     base_dir = "./data"
@@ -103,74 +120,38 @@ def main():
     slack_channel = os.environ.get("SLACK_CHANNEL_ID")
     days_back = 2
 
-    gsm_l_pall_path = None
-    msm_l_pall_path = None
-    msm_lsurf_path  = None
-
     try:
         # 1. 必要ファイルDL＆パス取得
         ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
             base_dir=base_dir, days_back=days_back
         )
 
-
-        # 3.地上変数取得部分（例）
-        prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")
-        u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", 10, stepType="instant")
-        v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", 10, stepType="instant")
-        apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")
-
-        if prmsl is None:
-            print("[WARN] prmsl（海面更正気圧）が取得できません")
-        if u10 is None:
-            print("[WARN] u10（10m風）が取得できません")
-        if v10 is None:
-            print("[WARN] v10（10m風）が取得できません")
-        if apcp is None:
-            print("[WARN] apcp（降水量）が取得できません")
-
-        # 変数一覧を見たい場合も個別open
-        for var, stype in [("u10", "instant"), ("v10", "instant"), ("apcp", "accum")]:
-            try:
-                ds = xr.open_dataset(
-                    msm_lsurf_path,
-                    engine="cfgrib",
-                    filter_by_keys={"shortName": var, "stepType": stype}
-                )
-                print(f"[DEBUG] MSM_Lsurf {var} ({stype}): {list(ds.variables)}")
-            except Exception as e:
-                print(f"[DEBUG] MSM_Lsurf {var} ({stype}) error:", e)
-
-        # --- 4. パネル用データ辞書を「全部個別open」で作成 ---
+        # 2. パネル用データ辞書を自動openで作成
         panel_datasets = {
             # GSM（高層）
-            "gh_300": open_grib2_var(gsm_l_pall_path, "gh", "isobaric", 300),
-            "u_300":  open_grib2_var(gsm_l_pall_path, "u", "isobaric", 300),
-            "v_300":  open_grib2_var(gsm_l_pall_path, "v", "isobaric", 300),
-            "gh_500": open_grib2_var(gsm_l_pall_path, "gh", "isobaric", 500),
-            "u_500":  open_grib2_var(gsm_l_pall_path, "u", "isobaric", 500),
-            "v_500":  open_grib2_var(gsm_l_pall_path, "v", "isobaric", 500),
-            "t_700":  open_grib2_var(gsm_l_pall_path, "t", "isobaric", 700),
-            "r_700":  open_grib2_var(gsm_l_pall_path, "r", "isobaric", 700),
-            "t_500":  open_grib2_var(gsm_l_pall_path, "t", "isobaric", 500),
-        
+            "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_300":  open_grib2_var_auto("v", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "gh_500": open_grib2_var_auto("gh", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_500":  open_grib2_var_auto("u", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_500":  open_grib2_var_auto("v", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "t_700":  open_grib2_var_auto("t", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "r_700":  open_grib2_var_auto("r", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "t_500":  open_grib2_var_auto("t", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
             # MSM（下層）
-            "t_850":  open_grib2_var(msm_l_pall_path, "t", "isobaric", 850),
-            "u_850":  open_grib2_var(msm_l_pall_path, "u", "isobaric", 850),
-            "v_850":  open_grib2_var(msm_l_pall_path, "v", "isobaric", 850),
-            "w_700":  open_grib2_var(msm_l_pall_path, "w", "isobaric", 700),
-            "r_850":  open_grib2_var(msm_l_pall_path, "r", "isobaric", 850),
-        
-            # 地上（MSM Lsurfファイル）
-            "prmsl": open_grib2_var(msm_lsurf_path, "prmsl", "surface"),
-            "u10":   open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", 10),
-            "v10":   open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", 10),
-            "apcp":  open_grib2_var(msm_lsurf_path, "apcp", "surface"),
+            "t_850":  open_grib2_var_auto("t", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_850":  open_grib2_var_auto("u", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            # 地上
+            "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+            "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+            "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+            "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
         }
 
-
-
-        # 5. パネル定義取得→描画
+        # 3. パネル定義取得→描画
         panel_def = get_panel_def_japan(panel_datasets)
         times = []
         init_time_str = f"{ymd}_{hh}UTC"
@@ -188,7 +169,7 @@ def main():
             dpi=300
         )
 
-        # 6. Driveアップロード→Slack通知
+        # 4. Driveアップロード→Slack通知
         drive_url = upload_to_drive(drive_folder, panel_imgs[0])
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
