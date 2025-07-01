@@ -97,3 +97,15 @@ def main():
         )
         send_slack_text(channel=slack_channel, message=msg)
         print("[OK] 全国パネル自動化 完了")
+
+    except FileNotFoundError:
+        send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
+        sys.exit(1)
+    except Exception as e:
+        send_slack_text(channel=slack_channel, message=f":x: パネル生成失敗: {e}")
+        print(f"[ERROR] {e}")
+        import traceback; traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
