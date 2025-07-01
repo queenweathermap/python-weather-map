@@ -74,12 +74,12 @@ def main():
         )
 
         # ダンプ（デバッグ用/本番不要ならコメント可）
-        print("==== GSM L-pall dump ====")
-        dump_grib_vars_auto(gsm_l_pall_path)
-        print("==== MSM L-pall dump ====")
-        dump_grib_vars_auto(msm_l_pall_path)
-        print("==== MSM Lsurf dump ====")
-        dump_grib_vars_auto(msm_lsurf_path)
+        # print("==== GSM L-pall dump ====")
+        # dump_grib_vars_auto(gsm_l_pall_path)
+        # print("==== MSM L-pall dump ====")
+        # dump_grib_vars_auto(msm_l_pall_path)
+        # print("==== MSM Lsurf dump ====")
+        # dump_grib_vars_auto(msm_lsurf_path)
 
         # 2. パネル生成・Driveアップ・Slack通知まで一括
         panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
