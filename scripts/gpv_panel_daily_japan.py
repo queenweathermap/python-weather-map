@@ -31,7 +31,6 @@ def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=N
         print(f"[WARN] open_grib2_var failed for {varname}: {e}")
         return None
 
-
 # --- GPVファイルの自動探索＆ダウンロード ---
 def find_and_download_gpv_files(
     base_dir="./data",
@@ -100,33 +99,19 @@ def main():
         ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
         # 3. 地上変数はfilter_by_keysで個別にopen
-        prmsl = None
-        u10   = None
-        v10   = None
-        apcp  = None
-        try:
-            prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")["prmsl"]
-        except Exception as e:
-            print("[WARN] prmsl（海面更正気圧）が取得できません:", e)
-            prmsl = None
+        prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")
+        u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")
+        v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, stepType="instant")
+        apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")
 
-        try:
-            u10 = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")["u10"]
-        except Exception as e:
-            print("[WARN] u10（10m風）が取得できません:", e)
-            u10 = None
-
-        try:
-            v10 = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, stepType="instant")["v10"]
-        except Exception as e:
-            print("[WARN] v10（10m風）が取得できません:", e)
-            v10 = None
-
-        try:
-            apcp = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")["apcp"]
-        except Exception as e:
-            print("[WARN] apcp（降水量）が取得できません:", e)
-            apcp = None
+        if prmsl is None:
+            print("[WARN] prmsl（海面更正気圧）が取得できません")
+        if u10 is None:
+            print("[WARN] u10（10m風）が取得できません")
+        if v10 is None:
+            print("[WARN] v10（10m風）が取得できません")
+        if apcp is None:
+            print("[WARN] apcp（降水量）が取得できません")
 
         # 変数一覧を見たい場合も個別open
         for var, stype in [("u10", "instant"), ("v10", "instant"), ("apcp", "accum")]:
