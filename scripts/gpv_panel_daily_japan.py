@@ -160,13 +160,13 @@ def main():
         ds = xr.open_dataset(gsm_l_pall_path, engine="cfgrib", filter_by_keys={"shortName": "gh"})
         print(ds['gh'].coords)
         print(ds['gh'].shape)
-        # ここでダンプ
+        # ここでダンプ（自動でpygrib→xarray両方トライ）
         print("==== GSM L-pall dump ====")
-        dump_grib_vars(gsm_l_pall_path)
+        dump_grib_vars_auto(gsm_l_pall_path)
         print("==== MSM L-pall dump ====")
-        dump_grib_vars(msm_l_pall_path)
+        dump_grib_vars_auto(msm_l_pall_path)
         print("==== MSM Lsurf dump ====")
-        dump_grib_vars(msm_lsurf_path)
+        dump_grib_vars_auto(msm_lsurf_path)
 
         # 2. パネル用データ辞書を自動openで作成
         panel_datasets = {
