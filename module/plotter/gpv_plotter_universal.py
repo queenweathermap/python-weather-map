@@ -19,8 +19,6 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
     """
     変数・層・ファイルパス群から自動で最適ファイルを選び、xarray/cfgribで DataArray または None を返す
     """
-    import xarray as xr
-
     # --- どのファイルを使うか自動判定 ---
     if varname in ["gh", "u", "v", "t", "r"] and level in [300, 500, 700]:
         file_path = gsm_path
@@ -54,7 +52,7 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
                 if varname in ds:
                     print(f"[OK] {varname} found with {filter_keys_mod}")
                     return ds[varname]
-            except Exception as e:
+            except Exception:
                 continue
         print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): 全stepTypeトライ失敗")
         return None
@@ -66,26 +64,60 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
         print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): {e}")
         return None
 
-
 # --- デバッグ用: 変数一覧ダンプ ---
-# module/plotter/gpv_plotter_universal.py
-# ===============================================================
-# 全国・秋田・任意局地ハイブリッド天気図パネル生成・通知コア
-# city_name・extentの柔軟指定対応（全国も局地もこれ1本でOK！）
-# 2025-07-01 ChatGPT
-# ===============================================================
+def dump_grib_vars_auto(file_path, verbose=True):
+    """
+    GRIB2ファイルで取得可能な全変数・階層・stepType/typeOfLevel組み合わせを列挙
+    - まずpygribで全変数ダンプ
+    - pygrib未導入なら、cfgribでstepTypeを全部順にサーチ
+    """
+    try:
+        import pygrib
+        grbs = pygrib.open(file_path)
+        if verbose: print(f"==== pygrib dump: {file_path} ====")
+        info = []
+        for g in grbs:
+            rec = dict(
+                name=g.name,
+                shortName=g.shortName,
+                paramId=g.parameterNumber,
+                level=g.level,
+                typeOfLevel=g.typeOfLevel,
+                stepType=g.stepType if hasattr(g, 'stepType') else None,
+            )
+            info.append(rec)
+            if verbose: print(rec)
+        return info
+    except ImportError:
+        print("[WARN] pygribでのダンプ失敗: No module named 'pygrib'")
+    except Exception as e:
+        print(f"[WARN] pygribでのダンプ失敗: {e}")
 
-import os
-import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-import xarray as xr
-
-from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
-from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
-from module.utils.zip_utils import zip_files
-
-# --- 各変数を個別openするユーティリティ（略） ---
-# ...[open_grib2_var_autoなどは省略。既存通りでOK]...
+    step_types = ['instant', 'accum', 'avg']
+    all_vars = []
+    for stepType in step_types:
+        try:
+            ds = xr.open_dataset(
+                file_path, engine="cfgrib", filter_by_keys={"stepType": stepType}
+            )
+            for v in ds.data_vars:
+                da = ds[v]
+                rec = dict(
+                    name=str(getattr(da, 'long_name', v)),
+                    shortName=v,
+                    stepType=stepType,
+                    dims=str(da.dims),
+                    levels=list(da.coords) if hasattr(da, 'coords') else [],
+                )
+                all_vars.append(rec)
+                if verbose:
+                    print(f"{v} ({stepType}): dims={da.dims} levels={rec['levels']}")
+        except Exception as e:
+            if verbose:
+                print(f"[WARN] xarray(cfgrib)で stepType={stepType} 失敗: {e}")
+    if not all_vars:
+        print("Error:  どちらの方法でもGRIB2変数リスト取得に失敗しました。")
+    return all_vars
 
 # --- パネル生成・通知コア ---
 def generate_universal_panel_and_notify(
@@ -188,7 +220,7 @@ def generate_universal_panel_and_notify(
 
     return panel_imgs, zip_path, drive_url
 
-# --- パネルグリッド描画汎用関数（panel_utils.py から削除） ---
+# --- パネルグリッド描画汎用関数（panel_utils.py から移動） ---
 def make_universal_weather_panel(
     save_dir,
     panel_def,
@@ -203,8 +235,6 @@ def make_universal_weather_panel(
     8列×6段（合計48コマ）の1枚パネル画像を生成
     ファイル右上にイニシャル時刻入りのファイル名
     """
-    import cartopy.crs as ccrs
-    import matplotlib.pyplot as plt
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
 
@@ -221,7 +251,6 @@ def make_universal_weather_panel(
     )
 
     for row, (plot_func, ds, title) in enumerate(panel_def):
-        # DataArray, Datasetでstep可
         n_steps = ds.sizes["step"] if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes) else 0
         for col in range(ncols):
             step = col
@@ -254,3 +283,10 @@ def make_universal_weather_panel(
     plt.close(fig)
     panel_imgs.append(out_path)
     return panel_imgs
+
+__all__ = [
+    "open_grib2_var_auto",
+    "dump_grib_vars_auto",
+    "generate_universal_panel_and_notify",
+    "make_universal_weather_panel"
+]
