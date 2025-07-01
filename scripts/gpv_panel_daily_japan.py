@@ -147,7 +147,10 @@ def main():
             base_dir=base_dir, days_back=days_back
         )
 
-        
+        # 本当にghの300hPaが入っているか確認
+        ds = xr.open_dataset(gsm_l_pall_path, engine="cfgrib", filter_by_keys={"shortName": "gh"})
+        print(ds['gh'].coords)
+        print(ds['gh'].shape)
         # ここでダンプ
         print("==== GSM L-pall dump ====")
         dump_grib_vars(gsm_l_pall_path)
