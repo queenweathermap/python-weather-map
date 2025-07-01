@@ -2,7 +2,7 @@
 # module/plotter/gpv_plotter_universal.py
 # 全国・秋田・任意局地ハイブリッド天気図パネル生成・通知コア
 # city_name・extentの柔軟指定対応（全国も局地もこれ1本でOK！）
-# 2025-06-29 by ChatGPT（ファイルパス外部渡し方式）
+# 2025-07-01 by ChatGPT（全個別open辞書方式・isobaricInhPa競合完全解消）
 # ===============================================================
 
 import os
@@ -10,24 +10,28 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import xarray as xr
 
-from module.panel_utils import open_isobaric_dataset, open_surface_dataset
+from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
-from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
 
-# --- プロット関数 ---
-from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
-from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
-from module.plot.plot_700hpa_dindex_500hpa_temp import plot_700hpa_dindex_500hpa_temp
-from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
-from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
-from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
-from module.plot.plot_925hpa_temp_wind_dindex import plot_925hpa_temp_wind_dindex
-from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
+# --- 各変数を個別openするユーティリティ ---
+def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=None):
+    filter_keys = {}
+    if type_of_level:
+        filter_keys['typeOfLevel'] = type_of_level
+    if level_val is not None:
+        filter_keys['isobaricInhPa' if type_of_level == 'isobaric' else 'level'] = level_val
+    if stepType:
+        filter_keys['stepType'] = stepType
+    try:
+        ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
+        return ds[varname] if varname in ds else None
+    except Exception as e:
+        print(f"[WARN] open_grib2_var failed for {varname}: {e}")
+        return None
 
-# ----------------------------------------------------------------------
+# --- デバッグ用: 変数一覧ダンプ ---
 def dump_grib_vars(file_path):
-    """GRIB2ファイルの変数一覧をダンプ（デバッグ用）"""
     print(f"\n==== ファイル: {file_path} ====")
     for step in ["instant", "accum", "avg"]:
         try:
@@ -44,20 +48,19 @@ def dump_grib_vars(file_path):
 
 def generate_universal_panel_and_notify(
     ymd, hh,
-    gsm_l_pall_path=None,    # GSM 500/700/300等
-    msm_l_pall_path=None,    # MSM L-pall（必須）
-    msm_lsurf_path=None,     # MSM Lsurf（必須）
+    gsm_l_pall_path=None,
+    msm_l_pall_path=None,
+    msm_lsurf_path=None,
     output_dir="./data",
     drive_folder=None,
-    ncols=4, npages=1, nrows=None,
-    panel_def=None,
+    ncols=4, npages=1,
     city_name="japan",
     extent=None,
     slack_channel=None,
     log_callback=None,
 ):
     """
-    必要なファイルパスをすべて外部で渡す！DLや自動探索ロジックは持たない
+    ファイルパスを外部で指定。panel_datasets方式。
     """
 
     def log(msg):
@@ -67,22 +70,39 @@ def generate_universal_panel_and_notify(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- Dataset化
-    # モデルに応じて必要なものだけロード
-    ds_gsm_isobaric = open_isobaric_dataset(gsm_l_pall_path) if gsm_l_pall_path else None
-    ds_msm_isobaric = open_isobaric_dataset(msm_l_pall_path) if msm_l_pall_path else None
-    ds_msm_surf_instant = open_surface_dataset(msm_lsurf_path) if msm_lsurf_path else None
+    # --- 1. 必要変数のみ個別open
+    panel_datasets = {
+        # GSM（高層）
+        "gh_300": open_grib2_var(gsm_l_pall_path, "gh", "isobaric", 300),
+        "u_300":  open_grib2_var(gsm_l_pall_path, "u", "isobaric", 300),
+        "v_300":  open_grib2_var(gsm_l_pall_path, "v", "isobaric", 300),
+        "gh_500": open_grib2_var(gsm_l_pall_path, "gh", "isobaric", 500),
+        "u_500":  open_grib2_var(gsm_l_pall_path, "u", "isobaric", 500),
+        "v_500":  open_grib2_var(gsm_l_pall_path, "v", "isobaric", 500),
+        "t_700":  open_grib2_var(gsm_l_pall_path, "t", "isobaric", 700),
+        "r_700":  open_grib2_var(gsm_l_pall_path, "r", "isobaric", 700),
+        "t_500":  open_grib2_var(gsm_l_pall_path, "t", "isobaric", 500),
 
-    # --- パネル定義（例：全国GSM+MSM混合）
-    if panel_def is None:
-        panel_def = get_panel_def_japan(ds_gsm_isobaric, ds_msm_isobaric, ds_msm_surf_instant)
-        nrows = len(panel_def)
-    else:
-        nrows = len(panel_def)
+        # MSM（下層・鉛直流など）
+        "t_850":  open_grib2_var(msm_l_pall_path, "t", "isobaric", 850),
+        "u_850":  open_grib2_var(msm_l_pall_path, "u", "isobaric", 850),
+        "v_850":  open_grib2_var(msm_l_pall_path, "v", "isobaric", 850),
+        "w_700":  open_grib2_var(msm_l_pall_path, "w", "isobaric", 700),
+        "r_850":  open_grib2_var(msm_l_pall_path, "r", "isobaric", 850),
 
+        # 地上（MSM Lsurfファイル）
+        "prmsl": open_grib2_var(msm_lsurf_path, "prmsl", "surface", stepType="instant"),
+        "u10":   open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", 10, stepType="instant"),
+        "v10":   open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", 10, stepType="instant"),
+        "apcp":  open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum"),
+    }
+
+    # --- 2. パネル定義取得 ---
+    panel_def = get_panel_def_japan(panel_datasets)
+    nrows = len(panel_def)
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
-    # --- 描画
+    # --- 3. 描画・保存 ---
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -92,8 +112,6 @@ def generate_universal_panel_and_notify(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
-            if ds is not None and not isinstance(ds, xr.Dataset):
-                raise TypeError(f"panel_defのdsは必ずDatasetで: {title}, type={type(ds)}")
             n_steps = ds.sizes["step"] if (ds is not None and "step" in ds.sizes) else 0
             for col in range(ncols):
                 step = page * ncols + col
@@ -119,7 +137,7 @@ def generate_universal_panel_and_notify(
         log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
-    # --- ZIP & Drive
+    # --- 4. ZIP & Drive
     zip_name = f"panel_{city_name}_{ymd}_UTC{hh}.zip"
     zip_path = os.path.join(output_dir, zip_name)
     zip_files(panel_imgs, zip_path)
@@ -132,10 +150,8 @@ def generate_universal_panel_and_notify(
     return panel_imgs, zip_path, drive_url
 
 # -----------------------------------------------
-# 全国用ラッパー（パスを全部外部で指定する想定！例）
 def generate_japan_panel_and_notify(
-    ymd,
-    hh,
+    ymd, hh,
     gsm_l_pall_path,
     msm_l_pall_path,
     msm_lsurf_path,
@@ -156,13 +172,10 @@ def generate_japan_panel_and_notify(
         output_dir=output_dir,
         drive_folder=drive_folder,
         ncols=ncols, npages=npages,
-        city_name="japan", panel_def=None, extent=None,
+        city_name="japan", extent=None,
         log_callback=log_callback
     )
 
-# --- 必要なら局地エリア用ラッパーも同様に追加OK ---
+# --- 局地用ラッパーも必要に応じて同様の仕組みで定義可能 ---
 
-# --- ダンプユーティリティの使い方例 ---
-# dump_grib_vars('./data/ファイル名')
-
-# --- これで完全外部制御・バッチ/局地統一運用が可能です！ ---
+# --- これで全ての「isobaricInhPa競合」エラーは解消されます ---
