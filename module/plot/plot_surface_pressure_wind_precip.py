@@ -30,7 +30,7 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 
-def plot_surface_pressure_and_wind_msm(ds, ax, step=None, **kwargs):
+def plot_surface_pressure_and_wind_msm(ax, ds, step=None, **kwargs):
     """
     地上海面更正気圧・風・降水量（MSM）描画
     Parameters
