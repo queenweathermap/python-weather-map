@@ -31,8 +31,6 @@ def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=N
         return None
 
 # --- デバッグ用: 変数一覧ダンプ ---
-# module/plotter/gpv_plotter_universal.py などに追加
-
 def dump_grib_vars(file_path, verbose=True):
     """
     GRIB2ファイルで取得可能な全変数・階層・stepType/typeOfLevel組み合わせを列挙
