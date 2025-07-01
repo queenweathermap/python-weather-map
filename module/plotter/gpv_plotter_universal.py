@@ -244,6 +244,10 @@ def generate_universal_panel_and_notify(
         "u10":    open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround", stepType="instant"),
         "v10":    open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround", stepType="instant"),
         "apcp":   open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level=None, stepType="accum", apcp_3hr_func=apcp_3hr_func),
+        "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level=None, stepType="instant"),
+        "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level="heightAboveGround", stepType="instant"),
+        "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level="heightAboveGround", stepType="instant"),
+        "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level=None, stepType=None, apcp_3hr_func=apcp_3hr_func),
     }
     # fallback（r_700, r_850, apcp）もopen_grib2_var_autoの引数で対応している
 
