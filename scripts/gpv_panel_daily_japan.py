@@ -15,21 +15,24 @@ from module.utils.slack_utils import send_slack_text
 from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 
-# --- 一括openはやめ、filter_by_keysで1変数ずつ明示的にopenする ---
-def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=None):
-    filter_keys = {}
-    if type_of_level:
-        filter_keys['typeOfLevel'] = type_of_level
-    if level_val:
-        filter_keys['isobaricInhPa' if type_of_level=='isobaric' else 'level'] = level_val
+
+def open_grib2_var(path, varname, level_val=None, stepType=None):
+    """
+    GRIB2ファイルから1変数・1気圧面だけをcfgribで安全に開く
+    """
+    filter_keys = {"typeOfLevel": "isobaricInhPa"}
+    if level_val is not None:
+        filter_keys["isobaricInhPa"] = level_val
     if stepType:
-        filter_keys['stepType'] = stepType
+        filter_keys["stepType"] = stepType
     try:
         ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
+        # GRIB shortNameそのままの場合が多いが、varnameが違うこともあるので要確認
         return ds[varname] if varname in ds else None
     except Exception as e:
-        print(f"[WARN] open_grib2_var failed for {varname}: {e}")
+        print(f"[WARN] open_grib2_var failed for {varname}({level_val}): {e}")
         return None
+
 
 # --- GPVファイルの自動探索＆ダウンロード ---
 def find_and_download_gpv_files(
