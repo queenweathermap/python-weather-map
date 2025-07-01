@@ -141,59 +141,81 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
         return None
 
 # --- デバッグ用: 変数一覧ダンプ ---
-def dump_grib_vars_auto(file_path, verbose=True):
-    """
-    GRIB2ファイルで取得可能な全変数・階層・stepType/typeOfLevel組み合わせを列挙
-    - まずpygribで全変数ダンプ
-    - pygrib未導入なら、cfgribでstepTypeを全部順にサーチ
-    """
-    try:
-        import pygrib
-        grbs = pygrib.open(file_path)
-        if verbose: print(f"==== pygrib dump: {file_path} ====")
-        info = []
-        for g in grbs:
-            rec = dict(
-                name=g.name,
-                shortName=g.shortName,
-                paramId=g.parameterNumber,
-                level=g.level,
-                typeOfLevel=g.typeOfLevel,
-                stepType=g.stepType if hasattr(g, 'stepType') else None,
-            )
-            info.append(rec)
-            if verbose: print(rec)
-        return info
-    except ImportError:
-        print("[WARN] pygribでのダンプ失敗: No module named 'pygrib'")
-    except Exception as e:
-        print(f"[WARN] pygribでのダンプ失敗: {e}")
+# ===============================================================
+# module/plotter/gpv_plotter_universal.py
+# 汎用GRIB2変数取得 with fallback & print
+# ===============================================================
 
-    step_types = ['instant', 'accum', 'avg']
-    all_vars = []
-    for stepType in step_types:
-        try:
-            ds = xr.open_dataset(
-                file_path, engine="cfgrib", filter_by_keys={"stepType": stepType}
-            )
-            for v in ds.data_vars:
-                da = ds[v]
-                rec = dict(
-                    name=str(getattr(da, 'long_name', v)),
-                    shortName=v,
-                    stepType=stepType,
-                    dims=str(da.dims),
-                    levels=list(da.coords) if hasattr(da, 'coords') else [],
-                )
-                all_vars.append(rec)
-                if verbose:
-                    print(f"{v} ({stepType}): dims={da.dims} levels={rec['levels']}")
-        except Exception as e:
-            if verbose:
-                print(f"[WARN] xarray(cfgrib)で stepType={stepType} 失敗: {e}")
-    if not all_vars:
-        print("Error:  どちらの方法でもGRIB2変数リスト取得に失敗しました。")
-    return all_vars
+def open_grib2_var_auto(
+    varname, level=None,
+    gsm_path=None, msm_pall_path=None, msm_lsurf_path=None,
+    type_of_level=None, stepType=None,
+    rh_fallback_func=None, apcp_3hr_func=None,
+):
+    print(f"\n[DEBUG] open_grib2_var_auto: varname={varname}, level={level}, type_of_level={type_of_level}, stepType={stepType}")
+
+    # --- ファイル自動判定 ---
+    if varname in ["gh", "u", "v", "t", "r"] and level in [300, 500, 700]:
+        file_path = gsm_path
+    elif varname in ["t", "u", "v", "r"] and level == 850:
+        file_path = msm_pall_path
+    elif varname == "w" and level == 700:
+        file_path = msm_pall_path
+    elif varname in ["u10", "v10", "apcp", "prmsl"]:
+        file_path = msm_lsurf_path
+    else:
+        file_path = msm_pall_path
+
+    print(f"[DEBUG] open_grib2_var_auto: using file_path={file_path}")
+    filter_keys = {}
+
+    # --- 降水量（apcp）は stepType自動切替 ---
+    if varname == "apcp":
+        for try_step in ["accum", "avg", "instant"]:
+            try:
+                print(f"[DEBUG] apcp: try stepType={try_step}")
+                ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys={"stepType": try_step})
+                if varname in ds:
+                    print(f"[OK] apcp found with stepType={try_step} shape={ds[varname].shape}")
+                    return ds[varname]
+            except Exception as e:
+                print(f"[WARN] apcp try_step={try_step} failed: {e}")
+                continue
+        # fallback: 3時間値計算
+        if apcp_3hr_func is not None:
+            print(f"[WARN] apcp not found. → fallback: get_apcp_3hr()")
+            try:
+                apcp_3hr = apcp_3hr_func(file_path)
+                print(f"[OK] apcp_3hr fallback shape={apcp_3hr.shape}")
+                return apcp_3hr
+            except Exception as e:
+                print(f"[FAIL] apcp_3hr_func failed: {e}")
+        print(f"[FAIL] apcp: 全stepType/fallback失敗")
+        return None
+
+    # --- 通常変数（stepType自動サーチは不要） ---
+    try:
+        ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
+        print(f"[DEBUG] ds.variables: {list(ds.variables.keys())}")
+        if varname in ds:
+            print(f"[OK] {varname} shape={ds[varname].shape}")
+            return ds[varname]
+        else:
+            print(f"[WARN] {varname} not in ds.variables!")
+            # 湿度だけはfallback
+            if varname == "r" and rh_fallback_func is not None:
+                print(f"[WARN] {varname} fallback: get_rh_fallback()")
+                try:
+                    rh = rh_fallback_func(ds, level_hPa=level)
+                    print(f"[OK] r fallback shape={rh.shape}")
+                    return rh
+                except Exception as e:
+                    print(f"[FAIL] get_rh_fallback failed: {e}")
+            return None
+    except Exception as e:
+        print(f"[FAIL] open_grib2_var_auto: {e}")
+        return None
+
 
 # --- パネル生成・通知コア ---
 def generate_universal_panel_and_notify(
