@@ -23,34 +23,31 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_925hpa_temp_wind_dindex(ax, ds):
+# module/plot/plot_925hpa_temp_wind_dindex.py
+def plot_925hpa_temp_wind_dindex(ax, ds_dict, step=0):
     """
-    925hPa気温・風・湿数（GSM/MSM両対応）
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-    ds : xarray.Dataset（stepで既にスライス済み！）
+    925hPa気温・風・湿数（dict＋step方式）
+    ds_dict: {"t_925":..., "u_925":..., "v_925":..., "r_925":...}
     """
-    lon2d, lat2d = get_lon_lat(ds)
-
-    try:
-        temp = ds["t"].sel(isobaricInhPa=925).squeeze()
-        u = ds["u"].sel(isobaricInhPa=925).squeeze()
-        v = ds["v"].sel(isobaricInhPa=925).squeeze()
-        rh = ds["r"].sel(isobaricInhPa=925).squeeze()
-    except Exception:
-        temp = get_var(ds, "TMP_925mb")
-        u = get_var(ds, "UGRD_925mb")
-        v = get_var(ds, "VGRD_925mb")
-        rh = get_var(ds, "RH_925mb")
-        if temp is None or u is None or v is None or rh is None:
-            ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
-            ax.set_axis_off()
+    for k in ["t_925", "u_925", "v_925", "r_925"]:
+        if ds_dict.get(k) is None:
+            ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
+            ax.coastlines(resolution="50m")
+            ax.add_feature(cfeature.BORDERS, linestyle=":")
+            ax.text(0.5, 0.5, f"NO DATA\n({k})", fontsize=14, color="gray",
+                    ha="center", va="center", transform=ax.transAxes)
             return
-            
-    # ... 以降はそのままプロット処理
 
-    temp_c = temp - 273.15  # K→℃
+    temp = ds_dict["t_925"].isel(step=step)
+    u = ds_dict["u_925"].isel(step=step)
+    v = ds_dict["v_925"].isel(step=step)
+    rh = ds_dict["r_925"].isel(step=step)
+    lon2d = temp["longitude"].values
+    lat2d = temp["latitude"].values
+    if lon2d.ndim == 1 and lat2d.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
+
+    temp_c = temp - 273.15
     dewpoint = temp_c - (100 - rh) / 5
     dindex = temp_c - dewpoint
 
