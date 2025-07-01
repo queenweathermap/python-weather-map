@@ -2,6 +2,7 @@
 # module/plotter/gpv_plotter_universal.py
 # 全国・秋田・任意局地ハイブリッド天気図パネル生成・通知コア
 # city_name・extentの柔軟指定対応（全国も局地もこれ1本でOK！）
+# 湿度fallback（r→q,t派生）・降水量3h差分に対応
 # 2025-07-01 ChatGPT
 # ===============================================================
 
@@ -9,18 +10,74 @@ import os
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import xarray as xr
+import numpy as np
 
 from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 from module.utils.zip_utils import zip_files
 
+# --- 湿度fallbackユーティリティ ---
+def get_rh_fallback(ds, level_hPa=None):
+    """
+    ds: xarray.Dataset (cfgrib)
+    level_hPa: レベル指定（int, 700/850 など）
+    ・rがあればそのまま
+    ・なければq,tから計算して返す
+    """
+    if "r" in ds.variables:
+        if level_hPa:
+            return ds["r"].sel(isobaricInhPa=level_hPa)
+        return ds["r"]
+    elif ("q" in ds.variables) and ("t" in ds.variables) and ("isobaricInhPa" in ds.coords):
+        try:
+            import metpy.calc as mpcalc
+            from metpy.units import units
+            q = ds["q"].sel(isobaricInhPa=level_hPa) * units("dimensionless")
+            t = ds["t"].sel(isobaricInhPa=level_hPa) * units.kelvin
+            p = (level_hPa or ds["isobaricInhPa"].values) * units.hectopascal
+            # shape揃える（通常: step, lat, lon）
+            rh = mpcalc.relative_humidity_from_specific_humidity(q.values, t.values, p)
+            rh_da = xr.DataArray(
+                rh.magnitude,
+                dims=q.dims,
+                coords=q.coords,
+                name="rh_calc"
+            )
+            return rh_da
+        except Exception as e:
+            print(f"[ERROR] RH fallback計算失敗: {e}")
+            return None
+    else:
+        print("[WARN] RH fallback不可")
+        return None
+
+
+
+# --- 降水量3h差分計算ユーティリティ ---
+def get_apcp_3hr(ds):
+    """
+    ds: xarray.DataArray (apcp, step次元あり)
+    MSM積算値しか無い場合は差分で3時間値生成
+    """
+    if ds is None or "step" not in ds.dims:
+        print("[WARN] apcpデータ無効 or step無し")
+        return ds
+    # shape: (step, lat, lon)
+    # 差分（3h前→現在, 0には0をセット）
+    apcp_3h = ds.copy()
+    apcp_3h.values[1:] = ds.values[1:] - ds.values[:-1]
+    apcp_3h.values[0] = np.nan  # 初期値はNaN（必要に応じて0も可）
+    apcp_3h.name = "apcp_3hr"
+    return apcp_3h
+    
+
 # --- 各変数を個別openするユーティリティ ---
 def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, msm_lsurf_path=None, type_of_level=None, stepType=None):
     print(f"\n[DEBUG] open_grib2_var_auto: varname={varname}, level={level}, type_of_level={type_of_level}, stepType={stepType}")
     # --- どのファイルを使うか自動判定 ---
-    if varname in ["gh", "u", "v", "t", "r"] and level in [300, 500, 700]:
+    if varname in ["gh", "u", "v", "t", "r", "q"] and level in [300, 500, 700]:
         file_path = gsm_path
-    elif varname in ["t", "u", "v", "r"] and level == 850:
+    elif varname in ["t", "u", "v", "r", "q"] and level == 850:
         file_path = msm_pall_path
     elif varname == "w" and level == 700:
         file_path = msm_pall_path
@@ -31,30 +88,50 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
 
     print(f"[DEBUG] open_grib2_var_auto: using file_path={file_path}")
     filter_keys = {}
-    ...
+    if type_of_level and level is not None:
+        filter_keys[type_of_level] = level
+    if stepType:
+        filter_keys["stepType"] = stepType
+
+    # 湿度: fallback対応
+    if varname == "r":
+        try:
+            ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
+            rh = get_rh_fallback(ds, level_hPa=level)
+            if rh is not None:
+                print(f"[OK] 湿度取得 {varname}({level}hPa): shape={rh.shape}")
+                return rh
+            else:
+                print(f"[WARN] 湿度fallback失敗: {varname}({level}hPa)")
+                return None
+        except Exception as e:
+            print(f"[WARN] 湿度取得例外: {e}")
+            return None
+
+    # 降水量: 3h値生成も含める
     if varname == "apcp":
         for try_step in ["accum", "avg", "instant"]:
-            ...
+            filter_keys_mod = filter_keys.copy()
+            filter_keys_mod["stepType"] = try_step
             try:
                 ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys_mod)
-                print(f"[DEBUG] Try stepType={try_step} → ds.variables: {list(ds.variables.keys())}, coords: {list(ds.coords.keys())}")
                 if varname in ds:
-                    print(f"[OK] {varname} found with {filter_keys_mod} shape={ds[varname].shape}")
-                    return ds[varname]
+                    print(f"[OK] apcp取得 (stepType={try_step}) shape={ds[varname].shape}")
+                    # 3時間値として返す
+                    apcp_3h = get_apcp_3hr(ds[varname])
+                    print(f"[OK] apcp_3hr shape={apcp_3h.shape}")
+                    return apcp_3h
             except Exception as e:
-                print(f"[WARN] {varname} try_step={try_step} failed: {e}")
+                print(f"[WARN] apcp try_step={try_step} failed: {e}")
                 continue
-        print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): 全stepTypeトライ失敗")
+        print(f"[WARN] apcp全stepTypeトライ失敗")
         return None
 
+    # 通常変数
     try:
         ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
-        print(f"[DEBUG] ds.variables: {list(ds.variables.keys())}")
-        print(f"[DEBUG] ds.coords: {list(ds.coords.keys())}")
         if varname in ds:
-            print(f"[OK] {varname} shape={ds[varname].shape}, dims={ds[varname].dims}, coords={list(ds[varname].coords)}")
-            if "isobaricInhPa" in ds[varname].coords:
-                print(f"  levels: {ds[varname]['isobaricInhPa'].values}")
+            print(f"[OK] {varname}取得 shape={ds[varname].shape}, dims={ds[varname].dims}")
             return ds[varname]
         else:
             print(f"[WARN] {varname} not in ds.variables!")
