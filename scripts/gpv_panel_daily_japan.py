@@ -15,6 +15,8 @@ from module.utils.slack_utils import send_slack_text
 from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 from module.plotter.gpv_plotter_universal import dump_grib_vars
+dump_grib_vars(gsm_l_pall_path)
+
 
 # ---- 変数・層ごと自動で最適なファイルを選ぶ関数
 def select_file_for_var(var, level, gsm_path, msm_pall_path, msm_lsurf_path):
@@ -41,20 +43,39 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
     """
     file_path = select_file_for_var(varname, level, gsm_path, msm_pall_path, msm_lsurf_path)
     filter_keys = {}
+    # --- 必要なフィルタ指定を強化 ---
     if type_of_level:
         filter_keys['typeOfLevel'] = type_of_level
-    if level is not None and type_of_level == 'isobaric':
-        filter_keys['isobaricInhPa'] = level
-    if level is not None and type_of_level == 'heightAboveGround':
-        filter_keys['level'] = level
+    if level is not None:
+        if type_of_level == 'isobaric':
+            filter_keys['isobaricInhPa'] = level
+        elif type_of_level == 'heightAboveGround':
+            filter_keys['level'] = level
     if stepType:
         filter_keys['stepType'] = stepType
 
+    # --- 特殊: apcpだけはstepType=accum優先でトライ ---
+    if varname == "apcp":
+        for try_step in ["accum", "avg", "instant"]:
+            filter_keys_mod = filter_keys.copy()
+            filter_keys_mod['stepType'] = try_step
+            try:
+                ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys_mod)
+                if varname in ds:
+                    print(f"[OK] {varname} found with {filter_keys_mod}")
+                    return ds[varname]
+            except Exception as e:
+                continue
+        print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): 全stepTypeトライ失敗")
+        return None
+
+    # --- 通常: 他変数 ---
     try:
         ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
         return ds[varname] if varname in ds else None
     except Exception as e:
         msg = str(e)
+        # multiple values for unique key
         if "multiple values for unique key" in msg:
             import re, ast
             candidates = re.findall(r"filter_by_keys=({.*?})", msg)
@@ -69,6 +90,7 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
                     continue
         print(f"[WARN] open_grib2_var_auto failed for {varname} (file={file_path}): {e}")
         return None
+
 
 # --- GPVファイルの自動探索＆ダウンロード（あなたの最新実装そのまま）
 def find_and_download_gpv_files(
