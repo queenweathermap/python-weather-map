@@ -66,36 +66,21 @@ def open_isobaric_dataset(fname, hPa=None):
 
 
 
-def open_surface_dataset(fname):
-    """
-    地上GPVデータ（stepType='instant' かつ 10m風）を確実に取得
-    cfgribのkey衝突をfilter_by_keysで回避
-    """
-    if isinstance(fname, xr.Dataset):
-        return fname
-    # 複数DSが混在する場合は順次全て試す
+def open_isobaric_dataset(fname, hPa=None):
+    print(f"[DEBUG] open_isobaric_dataset: fname={fname}, hPa={hPa}")
+    ...
     for ds in cfgrib.open_datasets(fname):
-        try:
-            if ("stepType" in ds.variables and
-                "heightAboveGround" in ds.variables and
-                np.all(ds["heightAboveGround"].values == 10.0)):
-                return ds
-        except Exception as e:
-            print(f"[cfgrib skip] {e}")
-    # 全部失敗時は明示的にfilter_by_keysで読む
-    try:
-        ds = xr.open_dataset(
-            fname,
-            engine="cfgrib",
-            filter_by_keys={"stepType": "instant", "typeOfLevel": "heightAboveGround", "heightAboveGround": 10}
-        )
-        return ds
-    except Exception as e:
-        print(f"[cfgrib fallback error] {e}")
-        pass
+        print(f"[DEBUG] isobaricInhPa levels: {ds['isobaricInhPa'].values if 'isobaricInhPa' in ds else 'N/A'}")
+        ...
+    raise RuntimeError(f"[ERROR] isobaricInhPa層データが見つかりません: {fname}")
+
+def open_surface_dataset(fname):
+    print(f"[DEBUG] open_surface_dataset: fname={fname}")
+    ...
+    for ds in cfgrib.open_datasets(fname):
+        print(f"[DEBUG] surface stepType: {ds['stepType'].values if 'stepType' in ds else 'N/A'}")
+        ...
     raise RuntimeError(f"[ERROR] 地上instant・10mデータが見つかりません: {fname}")
-
-
 
 
 def make_universal_weather_panel(
