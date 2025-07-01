@@ -22,34 +22,34 @@ def get_lon_lat(ds):
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     return lon2d, lat2d
 
-def plot_850hpa_thetae_stream(ds, ax, step=None, **kwargs):
+# module/plot/plot_850hpa_thetae_stream.py
+def plot_850hpa_thetae_stream(ax, ds_dict, step=0):
     """
-    850hPa相当温位・流線
-    ax: PlateCarree axes, ds: xarray.Dataset（stepでスライス済み）
+    850hPa相当温位・流線（dict＋step方式）
+    ds_dict: {"t_850":..., "r_850":..., "u_850":..., "v_850":...}
     """
-    # MSM優先、なければGSM
-    try:
-        temp = ds["t"].sel(isobaricInhPa=850).squeeze()
-        rh   = ds["r"].sel(isobaricInhPa=850).squeeze()
-        u    = ds["u"].sel(isobaricInhPa=850).squeeze()
-        v    = ds["v"].sel(isobaricInhPa=850).squeeze()
-    except Exception:
-        temp = get_var(ds, "TMP_850mb")
-        rh   = get_var(ds, "RH_850mb")
-        u    = get_var(ds, "UGRD_850mb")
-        v    = get_var(ds, "VGRD_850mb")
-        if temp is None or rh is None or u is None or v is None:
-            ax.text(0.5, 0.5, "No Data", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
-            ax.set_axis_off()
+    for k in ["t_850", "r_850", "u_850", "v_850"]:
+        if ds_dict.get(k) is None:
+            ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
+            ax.coastlines(resolution="50m")
+            ax.add_feature(cfeature.BORDERS, linestyle=":")
+            ax.text(0.5, 0.5, f"NO DATA\n({k})", fontsize=14, color="gray",
+                    ha="center", va="center", transform=ax.transAxes)
             return
 
-
+    temp = ds_dict["t_850"].isel(step=step)
+    rh   = ds_dict["r_850"].isel(step=step)
+    u    = ds_dict["u_850"].isel(step=step)
+    v    = ds_dict["v_850"].isel(step=step)
 
     # 簡易相当温位計算（RH→Td近似→thetae_like）
     Td = temp - (100 - rh) / 5
     thetae_like = temp + 0.2854 * Td
 
-    lon2d, lat2d = get_lon_lat(ds)
+    lon2d = temp["longitude"].values
+    lat2d = temp["latitude"].values
+    if lon2d.ndim == 1 and lat2d.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     min_thetae = int(np.nanmin(thetae_like) // 1 * 1)
     max_thetae = int(np.nanmax(thetae_like) // 1 * 1) + 1
     levels = np.arange(min_thetae, max_thetae + 1, 1)
