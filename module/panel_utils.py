@@ -131,14 +131,16 @@ def make_universal_weather_panel(
     )
 
     for row, (plot_func, ds, title) in enumerate(panel_def):
+        # dsがNoneなら空白
+        n_steps = ds.sizes["step"] if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes) else 0
         for col in range(ncols):
             step = col
             ax = axes[row, col]
             if extent:
                 ax.set_extent(extent, crs=ccrs.PlateCarree())
-            if plot_func is None or ds is None:
+            if plot_func is None or ds is None or step >= n_steps:
                 ax.axis("off")
-                ax.set_title("")
+                ax.set_title("" if plot_func is None else f"{title} (no data)")
                 continue
             try:
                 # dictならサイズ確認スキップ（直接プロット関数にstep渡す）
