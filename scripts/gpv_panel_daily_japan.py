@@ -24,13 +24,29 @@ def open_grib2_var(path, varname, type_of_level=None, level_val=None, stepType=N
         filter_keys['isobaricInhPa' if type_of_level == 'isobaric' else 'level'] = level_val
     if stepType:
         filter_keys['stepType'] = stepType
+
+    # まず一発で絞れるかtry
     try:
         ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_keys)
         return ds[varname] if varname in ds else None
     except Exception as e:
+        msg = str(e)
+        # 候補リスト例を自動パース
+        if "multiple values for unique key" in msg:
+            import re
+            candidates = re.findall(r"filter_by_keys=({.*?})", msg)
+            for cand in candidates:
+                import ast
+                try:
+                    cand_dict = ast.literal_eval(cand)
+                    ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=cand_dict)
+                    if varname in ds:
+                        print(f"[OK] {varname} found with {cand_dict}")
+                        return ds[varname]
+                except Exception as e2:
+                    continue
         print(f"[WARN] open_grib2_var failed for {varname}: {e}")
         return None
-
 
 
 # --- GPVファイルの自動探索＆ダウンロード ---
@@ -102,10 +118,11 @@ def main():
         # ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
         # 3. 地上変数はfilter_by_keysで個別にopen
+        # 地上変数は "stepType" を明示
         prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")
-        u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", level_val=10, stepType="instant")
-        v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", level_val=10, stepType="instant")
         apcp  = open_grib2_var(msm_lsurf_path, "apcp", "surface", stepType="accum")
+        u10   = open_grib2_var(msm_lsurf_path, "u10", "heightAboveGround", 10, stepType="instant")
+        v10   = open_grib2_var(msm_lsurf_path, "v10", "heightAboveGround", 10, stepType="instant")
 
         if prmsl is None:
             print("[WARN] prmsl（海面更正気圧）が取得できません")
