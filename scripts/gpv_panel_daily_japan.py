@@ -15,7 +15,6 @@ from module.utils.slack_utils import send_slack_text
 from module.utils.drive_utils import upload_to_drive
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 from module.plotter.gpv_plotter_universal import dump_grib_vars
-dump_grib_vars(gsm_l_pall_path)
 
 
 # ---- 変数・層ごと自動で最適なファイルを選ぶ関数
@@ -148,6 +147,15 @@ def main():
             base_dir=base_dir, days_back=days_back
         )
 
+        
+        # ここでダンプ
+        print("==== GSM L-pall dump ====")
+        dump_grib_vars(gsm_l_pall_path)
+        print("==== MSM L-pall dump ====")
+        dump_grib_vars(msm_l_pall_path)
+        print("==== MSM Lsurf dump ====")
+        dump_grib_vars(msm_lsurf_path)
+
         # 2. パネル用データ辞書を自動openで作成
         panel_datasets = {
             # GSM（高層）
@@ -204,11 +212,14 @@ def main():
     except FileNotFoundError:
         send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
         sys.exit(1)
+        pass
+
     except Exception as e:
         send_slack_text(channel=slack_channel, message=f":x: パネル生成失敗: {e}")
         print(f"[ERROR] {e}")
         import traceback; traceback.print_exc()
         sys.exit(1)
-
+        pass
+        
 if __name__ == "__main__":
     main()
