@@ -13,7 +13,6 @@ import xarray as xr
 from module.utils.slack_utils import send_slack_text
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 from module.plotter.gpv_plotter_universal import (
-    dump_grib_vars_auto,
     generate_universal_panel_and_notify,
     get_rh_fallback,
     get_apcp_3hr,
