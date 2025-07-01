@@ -29,29 +29,31 @@ def get_lon_lat(ds):
         raise ValueError("緯度経度配列の次元不正")
     return lon2d, lat2d
 
-def plot_700hpa_dindex_500hpa_temp(ax, ds, step=None, **kwargs):
-    """700hPa湿数・500hPa気温（stepで時系列指定、呼び出し元でスライス済み）"""
-    try:
-        temp_700 = get_var_2d(ds, "TMP_700mb", level=700)
-        rh_700   = get_var_2d(ds, "RH_700mb",  level=700)
-        temp_500 = get_var_2d(ds, "TMP_500mb", level=500)
-        lon2d, lat2d = get_lon_lat(ds)
+# module/plot/plot_700hpa_dindex_500hpa_temp.py
+def plot_700hpa_dindex_500hpa_temp(ax, ds_dict, step=0):
+    """
+    700hPa湿数・500hPa気温（dict＋step方式）
+    ds_dict: {"t_700":..., "r_700":..., "t_500":...}
+    """
+    for k in ["t_700", "r_700", "t_500"]:
+        if ds_dict.get(k) is None:
+            ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
+            ax.coastlines(resolution="50m")
+            ax.add_feature(cfeature.BORDERS, linestyle=":")
+            ax.text(0.5, 0.5, f"NO DATA\n({k})", fontsize=14, color="gray",
+                    ha="center", va="center", transform=ax.transAxes)
+            return
 
-    except Exception as e:
-        ax.text(0.5, 0.5, f"NO DATA ({str(e)})", fontsize=12, color="gray", ha="center", va="center", transform=ax.transAxes)
-        ax.set_axis_off()
-        return
-
-    if temp_700 is None or temp_500 is None or rh_700 is None:
-        ax.text(0.5, 0.5, "NO DATA", fontsize=14, color="gray", ha="center", va="center", transform=ax.transAxes)
-        ax.set_axis_off()
-        return
-        
-    # ...（以降はプロット処理）
+    temp_700 = ds_dict["t_700"].isel(step=step)
+    rh_700   = ds_dict["r_700"].isel(step=step)
+    temp_500 = ds_dict["t_500"].isel(step=step)
 
     temp_700_c = temp_700 - 273.15
     temp_500_c = temp_500 - 273.15
-    lon2d, lat2d = get_lon_lat(ds)
+    lon2d = temp_700["longitude"].values
+    lat2d = temp_700["latitude"].values
+    if lon2d.ndim == 1 and lat2d.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     dindex_700 = (100.0 - rh_700) / 5.0
 
     colors = [
