@@ -30,30 +30,33 @@ def get_lon_lat(ds):
     return lon2d, lat2d
 
 
-def plot_surface_pressure_and_wind_msm(ax, ds, step=None, **kwargs):
+# module/plot/plot_surface_pressure_wind_precip.py
+def plot_surface_pressure_and_wind_msm(ax, ds_dict, step=0):
     """
-    地上海面更正気圧・風・降水量（MSM）描画
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        描画先
-    ds : xarray.Dataset（stepでスライス済みを渡す）
-        GRIB2等から読み込んだxarrayデータセット
-    Returns
-    -------
-    None
+    地上海面更正気圧・風・降水量（dict＋step方式）
+    ds_dict: {"prmsl":..., "u10":..., "v10":..., "apcp":...}
     """
-    lon2d, lat2d = get_lon_lat(ds)
-    prmsl = get_var(ds, "PRMSL_meansealevel")
-    u10 = get_var(ds, "UGRD_10maboveground")
-    v10 = get_var(ds, "VGRD_10maboveground")
-    precip = get_var(ds, "APCP_surface")
-    skip = 5  # 風ベクトルの間引き間隔
+    for k in ["prmsl", "u10", "v10", "apcp"]:
+        if ds_dict.get(k) is None:
+            ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
+            ax.coastlines(resolution="50m")
+            ax.add_feature(cfeature.BORDERS, linestyle=":")
+            ax.text(0.5, 0.5, f"NO DATA\n({k})", fontsize=14, color="gray",
+                    ha="center", va="center", transform=ax.transAxes)
+            return
 
-    # ...以降は既存通り（描画処理）
+    prmsl = ds_dict["prmsl"].isel(step=step)
+    u10 = ds_dict["u10"].isel(step=step)
+    v10 = ds_dict["v10"].isel(step=step)
+    precip = ds_dict["apcp"].isel(step=step)
+    lon2d = prmsl["longitude"].values
+    lat2d = prmsl["latitude"].values
+    if lon2d.ndim == 1 and lat2d.ndim == 1:
+        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
+    skip = 5
 
-
-
+    
+    # --- 以降描画処理 ---
     # 地図範囲・装飾
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
