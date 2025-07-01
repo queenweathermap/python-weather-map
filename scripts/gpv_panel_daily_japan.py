@@ -98,8 +98,8 @@ def main():
         )
 
         # 2. 上層データ（GSM/ MSM）をopen
-        ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
-        ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
+        # ds_gsm_isobaric = xr.open_dataset(gsm_l_pall_path, engine="cfgrib")
+        # ds_msm_isobaric = xr.open_dataset(msm_l_pall_path, engine="cfgrib")
 
         # 3. 地上変数はfilter_by_keysで個別にopen
         prmsl = open_grib2_var(msm_l_pall_path, "prmsl", "surface", stepType="instant")
