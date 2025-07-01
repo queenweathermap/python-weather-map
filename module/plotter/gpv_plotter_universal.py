@@ -68,59 +68,24 @@ def open_grib2_var_auto(varname, level=None, gsm_path=None, msm_pall_path=None, 
 
 
 # --- デバッグ用: 変数一覧ダンプ ---
-def dump_grib_vars_auto(file_path, verbose=True):
-    """
-    GRIB2ファイルで取得可能な全変数・階層・stepType/typeOfLevel組み合わせを列挙
-    - まずpygribで全変数ダンプ
-    - pygrib未導入なら、cfgribでstepTypeを全部順にサーチ
-    """
-    try:
-        import pygrib
-        grbs = pygrib.open(file_path)
-        if verbose: print(f"==== pygrib dump: {file_path} ====")
-        info = []
-        for g in grbs:
-            rec = dict(
-                name=g.name,
-                shortName=g.shortName,
-                paramId=g.parameterNumber,
-                level=g.level,
-                typeOfLevel=g.typeOfLevel,
-                stepType=g.stepType if hasattr(g, 'stepType') else None,
-            )
-            info.append(rec)
-            if verbose: print(rec)
-        return info
-    except ImportError:
-        print("[WARN] pygribでのダンプ失敗: No module named 'pygrib'")
-    except Exception as e:
-        print(f"[WARN] pygribでのダンプ失敗: {e}")
+# module/plotter/gpv_plotter_universal.py
+# ===============================================================
+# 全国・秋田・任意局地ハイブリッド天気図パネル生成・通知コア
+# city_name・extentの柔軟指定対応（全国も局地もこれ1本でOK！）
+# 2025-07-01 ChatGPT
+# ===============================================================
 
-    step_types = ['instant', 'accum', 'avg']
-    all_vars = []
-    for stepType in step_types:
-        try:
-            ds = xr.open_dataset(
-                file_path, engine="cfgrib", filter_by_keys={"stepType": stepType}
-            )
-            for v in ds.data_vars:
-                da = ds[v]
-                rec = dict(
-                    name=str(getattr(da, 'long_name', v)),
-                    shortName=v,
-                    stepType=stepType,
-                    dims=str(da.dims),
-                    levels=list(da.coords) if hasattr(da, 'coords') else [],
-                )
-                all_vars.append(rec)
-                if verbose:
-                    print(f"{v} ({stepType}): dims={da.dims} levels={rec['levels']}")
-        except Exception as e:
-            if verbose:
-                print(f"[WARN] xarray(cfgrib)で stepType={stepType} 失敗: {e}")
-    if not all_vars:
-        print("Error:  どちらの方法でもGRIB2変数リスト取得に失敗しました。")
-    return all_vars
+import os
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import xarray as xr
+
+from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
+from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
+from module.utils.zip_utils import zip_files
+
+# --- 各変数を個別openするユーティリティ（略） ---
+# ...[open_grib2_var_autoなどは省略。既存通りでOK]...
 
 # --- パネル生成・通知コア ---
 def generate_universal_panel_and_notify(
@@ -183,7 +148,10 @@ def generate_universal_panel_and_notify(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
-            n_steps = ds.sizes["step"] if (ds is not None and "step" in ds.sizes) else 0
+            # --- DataArray, Datasetの場合だけ step取得 ---
+            n_steps = ds.sizes["step"] if (
+                ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes
+            ) else 0
             for col in range(ncols):
                 step = page * ncols + col
                 ax = axes[row, col]
@@ -208,7 +176,7 @@ def generate_universal_panel_and_notify(
         log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
-    # 4. ZIP & Drive
+    # ZIP & Google Drive
     zip_name = f"panel_{city_name}_{ymd}_UTC{hh}.zip"
     zip_path = os.path.join(output_dir, zip_name)
     zip_files(panel_imgs, zip_path)
@@ -219,3 +187,70 @@ def generate_universal_panel_and_notify(
         log(f"[OK] Drive URL: {drive_url}")
 
     return panel_imgs, zip_path, drive_url
+
+# --- パネルグリッド描画汎用関数（panel_utils.py から削除） ---
+def make_universal_weather_panel(
+    save_dir,
+    panel_def,
+    times,
+    init_time_str,
+    city_name="japan",
+    ncols=8, nrows=6,   # ←8列6段
+    extent=None,
+    dpi=300
+):
+    """
+    8列×6段（合計48コマ）の1枚パネル画像を生成
+    ファイル右上にイニシャル時刻入りのファイル名
+    """
+    import cartopy.crs as ccrs
+    import matplotlib.pyplot as plt
+    os.makedirs(save_dir, exist_ok=True)
+    panel_imgs = []
+
+    # 行数補完
+    if len(panel_def) < nrows:
+        for _ in range(nrows - len(panel_def)):
+            panel_def.append((None, None, ""))
+
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=ncols,
+        figsize=(ncols*3, nrows*3),
+        constrained_layout=True,
+        subplot_kw=dict(projection=ccrs.PlateCarree())
+    )
+
+    for row, (plot_func, ds, title) in enumerate(panel_def):
+        # DataArray, Datasetでstep可
+        n_steps = ds.sizes["step"] if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes) else 0
+        for col in range(ncols):
+            step = col
+            ax = axes[row, col]
+            if extent:
+                ax.set_extent(extent, crs=ccrs.PlateCarree())
+            if plot_func is None or ds is None or step >= n_steps:
+                ax.axis("off")
+                ax.set_title("" if plot_func is None else f"{title} (no data)")
+                continue
+            try:
+                # dictならサイズ確認スキップ（直接プロット関数にstep渡す）
+                if isinstance(ds, dict):
+                    plot_func(ax, ds, step=step)
+                else:
+                    ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
+                    plot_func(ax, ds_step)
+                ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
+            except Exception as e:
+                print(f"[WARN] パネル描画失敗: {title} {e}")
+                ax.axis("off")
+                ax.set_title(f"{title} (error)", fontsize=7)
+
+    fig.text(0.99, 0.99, f"{city_name}_{init_time_str}", fontsize=10,
+             ha="right", va="top", alpha=0.8, color="gray")
+
+    out_name = f"panel_{city_name}_{init_time_str}.jpg"
+    out_path = os.path.join(save_dir, out_name)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    panel_imgs.append(out_path)
+    return panel_imgs
