@@ -104,9 +104,9 @@ def main():
         panel_def = get_panel_def_japan(panel_datasets)
 
         # 3. 各step（列）ごとに6段1列パネル画像（複数）を生成
-        ncols = 1     # 1列出力
-        nrows = len(panel_def)   # =6
-        nsteps = 1    # ←【負荷軽減】まず1stepだけ生成する
+        ncols = 1              # 1列出力
+        nrows = len(panel_def) # 6段
+        nsteps = 2             # ←2ステップ分生成
         extent = REGION_EXTENTS["japan"]
         init_time_str = f"{ymd}_UTC{hh}"
         
@@ -116,20 +116,19 @@ def main():
             panel_imgs = make_universal_weather_panel(
                 save_dir=output_dir,
                 panel_def=panel_def,
-                times=None,
+                times=None,  # 必要なら stepごとに時刻リストを与える
                 init_time_str=f"{init_time_str}_p{step+1}",
                 city_name="japan",
                 ncols=ncols,
                 nrows=nrows,
                 extent=extent,
-                dpi=150   # ←【負荷軽減】dpiも仮に150程度で様子見
+                dpi=300
             )
-            # ファイル名を意図通りにリネーム/保存したい場合はここで調整
+            # ファイル名リネーム/保存
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
-
-
+        
         # 4. 横方向に画像を結合（full.jpgを生成）
         full_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
         if panel_img_paths:
