@@ -337,13 +337,9 @@ def make_universal_weather_panel(
     city_name="japan",
     ncols=16, nrows=6,
     extent=None,
-    dpi=300
+    dpi=300,
+    step=None   # ← 必要なら追加
 ):
-    """
-    全国・秋田・任意局地対応の汎用パネル生成（dict+step方式でプロット関数自動呼び出し）
-    - panel_def: [(plot_func, ds_dict, title), ...]
-    - 各行のstep数を自動判定、足りない列は空欄/NoData化
-    """
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
 
@@ -359,7 +355,6 @@ def make_universal_weather_panel(
         subplot_kw=dict(projection=ccrs.PlateCarree())
     )
 
-    # --- axes形状を必ず2次元化 ---
     if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
     elif nrows == 1:
@@ -367,9 +362,9 @@ def make_universal_weather_panel(
     elif ncols == 1:
         axes = axes[:, np.newaxis]
 
-    # --- 各コマ描画 ---
+    # --- コマ描画 ---
     for row, (plot_func, ds, title) in enumerate(panel_def):
-        # step数自動判定（dictなら最初の有効要素のstep数、DataArrayならそのstep数）
+        # step数判定
         n_steps = 0
         if isinstance(ds, dict):
             arr_sample = next((v for v in ds.values() if v is not None), None)
@@ -377,49 +372,52 @@ def make_universal_weather_panel(
                 n_steps = arr_sample.sizes["step"]
         elif hasattr(ds, "sizes") and "step" in ds.sizes:
             n_steps = ds.sizes["step"]
-        else:
-            n_steps = 0
 
-        for col in range(ncols):
-            step = col
-            ax = axes[row, col]
+        # 描画するcolインデックスのリスト
+        step_indices = [step] if step is not None else range(ncols)
+        for idx, col in enumerate(step_indices):
+            ax = axes[row, idx]
             ax.set_extent(extent, crs=ccrs.PlateCarree())
-            # --- データ無い時、またはstep over時は空欄 ---
-            if plot_func is None or ds is None or step >= n_steps:
+            if plot_func is None or ds is None or col >= n_steps:
                 ax.axis("off")
                 ax.set_title("" if plot_func is None else f"{title} (no data)")
                 continue
             try:
-                # dict型でstepを渡す形式
                 if isinstance(ds, dict):
-                    plot_func(ax, ds, step=step)
-                # DataArray型ならstepでスライス
+                    plot_func(ax, ds, step=col)
                 else:
-                    ds_step = ds.isel(step=step)
+                    ds_step = ds.isel(step=col)
                     plot_func(ax, ds_step)
-                ax.set_title(f"{title} (+{step*3}h)")
+                ax.set_title(f"{title} (+{col*3}h)")
             except Exception as e:
                 ax.axis("off")
                 ax.set_title(f"{title} (エラー)")
                 print(f"[ERROR] {title}: {e}")
 
-    # 列ごとにUTC時刻（日付＋時刻）を下端に表示
-    # init_time_str例: "20250701_UTC00"
-    # ymd: "20250701", hh: "00"
+    # --- 時刻ラベル ---
     ymd = init_time_str[:8]
     hh = init_time_str[-2:]
     base_dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
-    for col in range(ncols):
-        col_dt = base_dt + datetime.timedelta(hours=col * 3)
+    if step is not None:
+        # 1枚ごとなら、そのstepの時刻だけ
+        col_dt = base_dt + datetime.timedelta(hours=step * 3)
         label = col_dt.strftime("%Y%m%d %HUTC")
-        x = (col + 0.5) / ncols
         fig.text(
-            x, 0.01, label,
-            ha="center", va="bottom",
-            fontsize=11, color="gray", alpha=0.95
+            0.5, 0.01, label, ha="center", va="bottom", fontsize=11, color="gray", alpha=0.95
         )
+    else:
+        # ncols枚なら各col分
+        for col in range(ncols):
+            col_dt = base_dt + datetime.timedelta(hours=col * 3)
+            label = col_dt.strftime("%Y%m%d %HUTC")
+            x = (col + 0.5) / ncols
+            fig.text(
+                x, 0.01, label,
+                ha="center", va="bottom",
+                fontsize=11, color="gray", alpha=0.95
+            )
 
-    # --- 画像保存 ---
+    # --- 保存 ---
     out_path = os.path.join(
         save_dir,
         f"panel_{city_name}_{init_time_str}_p1.jpg"
