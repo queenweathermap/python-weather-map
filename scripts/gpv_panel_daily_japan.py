@@ -6,12 +6,12 @@
 
 import os
 import sys
+import glob
 import datetime
 import requests
 import xarray as xr
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
-
 
 from module.utils.slack_utils import send_slack_text
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
@@ -103,43 +103,48 @@ def main():
         }
         panel_def = get_panel_def_japan(panel_datasets)
 
-        # 3. 一枚パネル画像生成
-        # 予報時刻数
-        ncols = 10
+        # 3. 各step（列）ごとに6段1列パネル画像（複数）を生成
+        ncols = 1     # 1列出力
         nrows = len(panel_def)   # =6
+        nsteps = 9    # 必要な予報step数に応じて増減OK
         extent = REGION_EXTENTS["japan"]
         init_time_str = f"{ymd}_UTC{hh}"
 
-        panel_imgs = make_universal_weather_panel(
-            save_dir=output_dir,
-            panel_def=panel_def,
-            times=None,
-            init_time_str=init_time_str,
-            city_name="japan",
-            ncols=ncols,
-            nrows=nrows,
-            extent=extent,
-            dpi=300
-        )
-        panel_img_path = panel_imgs[0]
+        panel_img_paths = []
+        for step in range(nsteps):
+            img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_p{step+1}.jpg"
+            panel_imgs = make_universal_weather_panel(
+                save_dir=output_dir,
+                panel_def=panel_def,
+                times=None,
+                init_time_str=f"{init_time_str}_p{step+1}",
+                city_name="japan",
+                ncols=ncols,
+                nrows=nrows,
+                extent=extent,
+                dpi=300
+            )
+            # ファイル名を意図通りにリネーム/保存したい場合はここで調整
+            if panel_imgs and os.path.exists(panel_imgs[0]):
+                os.rename(panel_imgs[0], img_path)
+                panel_img_paths.append(img_path)
 
+        # 4. 横方向に画像を結合（full.jpgを生成）
+        full_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
+        if panel_img_paths:
+            concat_panel_images_horizontally(panel_img_paths, full_path)
+            panel_img_path = full_path
+        else:
+            raise RuntimeError("6段1列画像が1枚も生成されませんでした")
 
-                # 6段1列のjpg（例: 9step分）
-        img_paths = [f"./output/panel_japan_20250701_UTC00_p{i+1}.jpg" for i in range(9)]
-        img_paths = [p for p in img_paths if os.path.exists(p)]  # 存在チェック
-        if img_paths:
-            concat_panel_images_horizontally(img_paths, "./output/panel_japan_20250701_UTC00_full.jpg")
-
-        
-
-        # 4. Driveアップ（1枚だけ）
+        # 5. Driveアップ（full.jpgだけ）
         if drive_folder:
             delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
             drive_url = upload_to_drive(panel_img_path, folder_id=drive_folder)
         else:
             drive_url = "(未アップロード)"
 
-        # 5. Slack通知
+        # 6. Slack通知
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.path.basename(panel_img_path)}\n"
