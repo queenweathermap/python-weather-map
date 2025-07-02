@@ -103,7 +103,7 @@ def main():
         panel_def = get_panel_def_japan(panel_datasets)
 
         # 3. 一枚パネル画像生成
-        ncols = 16  # 列数（時刻ごとに並べる場合など）
+        ncols = 1  # 列数（時刻ごとに並べる場合など）
         nrows = len(panel_def)
         extent = REGION_EXTENTS["japan"]
         init_time_str = f"{ymd}_UTC{hh}"
@@ -114,8 +114,8 @@ def main():
             times=None,
             init_time_str=init_time_str,
             city_name="japan",
-            ncols=ncols,
-            nrows=nrows,
+            ncols=1,       # まずは1列（1画像だけ）に
+            nrows=len(panel_def),
             extent=extent,
             dpi=300
         )
