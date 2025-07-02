@@ -9,6 +9,9 @@ import sys
 import datetime
 import requests
 import xarray as xr
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 
 from module.utils.slack_utils import send_slack_text
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
