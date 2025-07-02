@@ -213,7 +213,7 @@ def generate_universal_panel_and_notify(
     msm_lsurf_path=None,
     output_dir="./data",
     drive_folder=None,
-    ncols=5, npages=2,
+    ncols=3, npages=3,
     city_name="japan",
     extent=None,
     log_callback=None,
