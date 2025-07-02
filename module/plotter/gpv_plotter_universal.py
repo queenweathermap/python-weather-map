@@ -402,6 +402,22 @@ def make_universal_weather_panel(
                 ax.set_title(f"{title} (エラー)")
                 print(f"[ERROR] {title}: {e}")
 
+    # 列ごとにUTC時刻（日付＋時刻）を下端に表示
+    # init_time_str例: "20250701_UTC00"
+    # ymd: "20250701", hh: "00"
+    ymd = init_time_str[:8]
+    hh = init_time_str[-2:]
+    base_dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
+    for col in range(ncols):
+        col_dt = base_dt + datetime.timedelta(hours=col * 3)
+        label = col_dt.strftime("%Y%m%d %HUTC")
+        x = (col + 0.5) / ncols
+        fig.text(
+            x, 0.01, label,
+            ha="center", va="bottom",
+            fontsize=11, color="gray", alpha=0.95
+        )
+
     # --- 画像保存 ---
     out_path = os.path.join(
         save_dir,
