@@ -364,18 +364,17 @@ def make_universal_weather_panel(
 
     # === 各コマ描画 ===
     for row, (plot_func, ds, title) in enumerate(panel_def):
-        # --- dsのstep次元をdictからでも自動取得 ---
-        n_steps = None
+        n_steps = 0
         if isinstance(ds, dict):
-            for v in ds.values():
-                if hasattr(v, "sizes") and "step" in v.sizes:
-                    n_steps = v.sizes["step"]
-                    break
-        elif ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes:
+            # ds中の1つを代表でstep数とする
+            arr_sample = next((v for v in ds.values() if v is not None), None)
+            if arr_sample is not None and hasattr(arr_sample, "sizes") and "step" in arr_sample.sizes:
+                n_steps = arr_sample.sizes["step"]
+        elif hasattr(ds, "sizes") and "step" in ds.sizes:
             n_steps = ds.sizes["step"]
-        if n_steps is None:
-            n_steps = ncols  # fallback: 全カラム分出力
-
+        else:
+            n_steps = 0
+    
         for col in range(ncols):
             step = col
             ax = axes[row, col]
@@ -385,7 +384,6 @@ def make_universal_weather_panel(
                 ax.set_title("" if plot_func is None else f"{title} (no data)")
                 continue
             try:
-                # dict+step形式対応：全プロット関数で step引数が使える前提
                 if isinstance(ds, dict):
                     plot_func(ax, ds, step=step)
                 else:
@@ -395,7 +393,8 @@ def make_universal_weather_panel(
             except Exception as e:
                 ax.axis("off")
                 ax.set_title(f"{title} (エラー)")
-                print(f"[ERROR] {title}: {e}")  # log()関数が未定義ならprintで
+                print(f"[ERROR] {title}: {e}")
+
 
     # --- 画像保存（省略可、必要に応じて追加） ---
     out_path = os.path.join(
