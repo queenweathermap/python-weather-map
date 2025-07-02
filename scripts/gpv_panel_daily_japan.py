@@ -1,7 +1,7 @@
-# ===============================================================
 # scripts/gpv_panel_daily_japan.py
+# ===============================================================
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 2025-07-01 ChatGPT（plotter_universal利用に統一）
+# 2025-07-01 ChatGPT（plotter_universal利用に統一／1枚出力版）
 # ===============================================================
 
 import os
@@ -13,11 +13,12 @@ import xarray as xr
 from module.utils.slack_utils import send_slack_text
 from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
 from module.plotter.gpv_plotter_universal import (
-    generate_universal_panel_and_notify,
+    make_universal_weather_panel,
     get_rh_fallback,
     get_apcp_3hr,
 )
-
+from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
+from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 
 def find_and_download_gpv_files(
     base_dir="./data",
@@ -73,33 +74,61 @@ def main():
             base_dir=base_dir, days_back=days_back
         )
 
-        # ダンプ（デバッグ用/本番不要ならコメント可）
-        # print("==== GSM L-pall dump ====")
-        # dump_grib_vars_auto(gsm_l_pall_path)
-        # print("==== MSM L-pall dump ====")
-        # dump_grib_vars_auto(msm_l_pall_path)
-        # print("==== MSM Lsurf dump ====")
-        # dump_grib_vars_auto(msm_lsurf_path)
+        # 2. データ抽出（パネル定義取得に必要なdictを構築）
+        from module.plotter.gpv_plotter_universal import open_grib2_var_auto
 
-        # 2. パネル生成・Driveアップ・Slack通知まで一括
-        panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
-            ymd=ymd, hh=hh,
-            gsm_l_pall_path=gsm_l_pall_path,
-            msm_l_pall_path=msm_l_pall_path,
-            msm_lsurf_path=msm_lsurf_path,
-            output_dir=output_dir,
-            drive_folder=drive_folder,
-            ncols=16,    # 必要に応じ調整
-            npages=1,   # 必要に応じ調整
-            city_name="japan",   # ← **ここにカンマ！**
-            rh_fallback_func=get_rh_fallback,
-            apcp_3hr_func=get_apcp_3hr,
+        panel_datasets = {
+            "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_300":  open_grib2_var_auto("v", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "gh_500": open_grib2_var_auto("gh", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_500":  open_grib2_var_auto("u", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_500":  open_grib2_var_auto("v", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "t_700":  open_grib2_var_auto("t", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "r_700":  open_grib2_var_auto("r", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "t_500":  open_grib2_var_auto("t", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "t_850":  open_grib2_var_auto("t", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_850":  open_grib2_var_auto("u", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+            "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+            "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+            "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+        }
+        panel_def = get_panel_def_japan(panel_datasets)
+
+        # 3. 一枚パネル画像生成
+        ncols = 16  # 列数（時刻ごとに並べる場合など）
+        nrows = len(panel_def)
+        extent = REGION_EXTENTS["japan"]
+        init_time_str = f"{ymd}_UTC{hh}"
+
+        panel_imgs = make_universal_weather_panel(
+            save_dir=output_dir,
+            panel_def=panel_def,
+            times=None,
+            init_time_str=init_time_str,
+            city_name="japan",
+            ncols=ncols,
+            nrows=nrows,
+            extent=extent,
+            dpi=300
         )
+        panel_img_path = panel_imgs[0]
 
-        # 通知
+        # 4. Driveアップ（1枚だけ）
+        if drive_folder:
+            delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
+            drive_url = upload_to_drive(panel_img_path, folder_id=drive_folder)
+        else:
+            drive_url = "(未アップロード)"
+
+        # 5. Slack通知
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
-            f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
+            f"{os.path.basename(panel_img_path)}\n"
             f"{drive_url if drive_url else '(Driveアップロード失敗)'}"
         )
         send_slack_text(channel=slack_channel, message=msg)
