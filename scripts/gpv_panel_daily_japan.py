@@ -103,48 +103,36 @@ def main():
         }
         panel_def = get_panel_def_japan(panel_datasets)
 
-        # 3. パネル描画用パラメータ
-        ncols = 1
+       # 3. 1枚で9列出力！
+        ncols = 9
         nrows = len(panel_def)
-        nsteps = 9  # (例: +0h, +3h, ..., +24h)
         extent = REGION_EXTENTS["japan"]
 
-        # 4. 各step（時刻）ごとにパネル画像を順次生成
-        panel_img_paths = []
-        for step in range(nsteps):
-            img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_p{step+1}.jpg"
-            panel_imgs = make_universal_weather_panel(
-                save_dir=output_dir,
-                panel_def=panel_def,
-                times=None,
-                init_time_str=f"{ymd}_UTC{hh}",
-                city_name="japan",
-                ncols=ncols,
-                nrows=nrows,
-                extent=extent,
-                dpi=300,
-                step=step   # stepごとの時刻で出力
-            )
-            if panel_imgs and os.path.exists(panel_imgs[0]):
-                os.rename(panel_imgs[0], img_path)
-                panel_img_paths.append(img_path)
+        panel_imgs = make_universal_weather_panel(
+            save_dir=output_dir,
+            panel_def=panel_def,
+            times=None,
+            init_time_str=f"{ymd}_UTC{hh}",
+            city_name="japan",
+            ncols=ncols,
+            nrows=nrows,
+            extent=extent,
+            dpi=300
+        )
 
-        # 5. 連結画像を作成
-        if panel_img_paths:
-            full_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
-            concat_panel_images_horizontally(panel_img_paths, full_path)
-            panel_img_path = full_path
+        if panel_imgs and os.path.exists(panel_imgs[0]):
+            panel_img_path = panel_imgs[0]
         else:
-            raise RuntimeError("6段1列画像が1枚も生成されませんでした")
+            raise RuntimeError("天気図パネル画像が生成されませんでした")
 
-        # 6. Driveアップ（full.jpgだけ）
+        # 4. Driveアップ
         if drive_folder:
             delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
             drive_url = upload_to_drive(panel_img_path, folder_id=drive_folder)
         else:
             drive_url = "(未アップロード)"
 
-        # 7. Slack通知
+        # 5. Slack通知
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.path.basename(panel_img_path)}\n"
