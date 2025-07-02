@@ -104,9 +104,9 @@ def main():
         panel_def = get_panel_def_japan(panel_datasets)
 
         # 3. 各step（列）ごとに6段1列パネル画像（複数）を生成
-        ncols = 3              # 1列出力
+        ncols = 1              # 1列出力
         nrows = len(panel_def) # 6段
-        nsteps = 2             # ←2ステップ分生成
+        nsteps = 3             # ←2ステップ分生成
         extent = REGION_EXTENTS["japan"]
         init_time_str = f"{ymd}_UTC{hh}"
         
