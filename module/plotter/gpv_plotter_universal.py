@@ -287,11 +287,15 @@ def generate_universal_panel_and_notify(
     if any(ncols > n for n in max_steps_per_row):
         log(f"[WARN] ncols={ncols} exceeds available step size for some rows: {max_steps_per_row}（一部の行は空欄やNoDataに）")
 
+    # -- 描画設定を調整 --
+    PANEL_FIGSIZE_UNIT = 2  # 1コマの一辺（インチ）
+    PANEL_DPI = 200         # 画質
+
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
             nrows=nrows, ncols=ncols,
-            figsize=(ncols*3, nrows*3),
+            figsize=(ncols*PANEL_FIGSIZE_UNIT, nrows*PANEL_FIGSIZE_UNIT),
             constrained_layout=True,
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
@@ -321,11 +325,11 @@ def generate_universal_panel_and_notify(
                     ax.axis("off")
                     ax.set_title(f"{title} (error)", fontsize=7)
 
-        fig.suptitle(f"{city_name}天気図パネル（{ymd} UTC{hh}）", fontsize=20)
+        fig.suptitle(f"{city_name}天気図パネル（{ymd} UTC{hh}）", fontsize=16)
         out_name = f"panel_{city_name}_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
-        plt.savefig(out_path, dpi=300)
-        plt.close()
+        fig.savefig(out_path, dpi=PANEL_DPI)
+        plt.close(fig)
         log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
