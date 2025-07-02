@@ -273,6 +273,20 @@ def generate_universal_panel_and_notify(
     nrows = len(panel_def)
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
+    # === step数チェック＆警告（ここを追加！） ===
+    max_steps_per_row = []
+    for plot_func, ds, title in panel_def:
+        n_steps = 0
+        if isinstance(ds, dict):
+            arr_sample = next((v for v in ds.values() if v is not None), None)
+            if arr_sample is not None and hasattr(arr_sample, "sizes") and "step" in arr_sample.sizes:
+                n_steps = arr_sample.sizes["step"]
+        elif hasattr(ds, "sizes") and "step" in ds.sizes:
+            n_steps = ds.sizes["step"]
+        max_steps_per_row.append(n_steps)
+    if any(ncols > n for n in max_steps_per_row):
+        log(f"[WARN] ncols={ncols} exceeds available step size for some rows: {max_steps_per_row}（一部の行は空欄やNoDataに）")
+
     panel_imgs = []
     for page in range(npages):
         fig, axes = plt.subplots(
@@ -283,7 +297,13 @@ def generate_universal_panel_and_notify(
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
             # dsがNoneでない＆step次元を持つ場合
-            n_steps = ds.sizes["step"] if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes) else 0
+            n_steps = 0
+            if isinstance(ds, dict):
+                arr_sample = next((v for v in ds.values() if v is not None), None)
+                if arr_sample is not None and hasattr(arr_sample, "sizes") and "step" in arr_sample.sizes:
+                    n_steps = arr_sample.sizes["step"]
+            elif hasattr(ds, "sizes") and "step" in ds.sizes:
+                n_steps = ds.sizes["step"]
             for col in range(ncols):
                 step = col
                 ax = axes[row, col]
