@@ -321,8 +321,8 @@ def generate_universal_panel_and_notify(
     return panel_imgs, zip_path, drive_url
 
 
-# module/plotter/gpv_plotter_universal.py
-# --- パネルグリッド描画汎用関数（完全dict+step対応・n_steps自動判定） ---
+
+# --- パネルグリッド描画汎用関数（dict+step方式・ncols/nrows柔軟） ---
 def make_universal_weather_panel(
     save_dir,
     panel_def,
@@ -333,28 +333,27 @@ def make_universal_weather_panel(
     extent=None,
     dpi=300
 ):
-    import matplotlib.pyplot as plt
-    import cartopy.crs as ccrs
-    import numpy as np
-    from datetime import datetime, timedelta
-    import os
-
+    """
+    全国・秋田・任意局地対応の汎用パネル生成（dict+step方式でプロット関数自動呼び出し）
+    - panel_def: [(plot_func, ds_dict, title), ...]
+    - 各行のstep数を自動判定、足りない列は空欄/NoData化
+    """
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
 
-    # 行数補完
+    # --- 行数補完 ---
     if len(panel_def) < nrows:
         for _ in range(nrows - len(panel_def)):
             panel_def.append((None, None, ""))
 
     fig, axes = plt.subplots(
         nrows=nrows, ncols=ncols,
-        figsize=(ncols*3, nrows*3),
+        figsize=(ncols * 3, nrows * 3),
         constrained_layout=True,
         subplot_kw=dict(projection=ccrs.PlateCarree())
     )
 
-    # --- axesの形状を必ず2次元化 ---
+    # --- axes形状を必ず2次元化 ---
     if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
     elif nrows == 1:
@@ -362,11 +361,11 @@ def make_universal_weather_panel(
     elif ncols == 1:
         axes = axes[:, np.newaxis]
 
-    # === 各コマ描画 ===
+    # --- 各コマ描画 ---
     for row, (plot_func, ds, title) in enumerate(panel_def):
+        # step数自動判定（dictなら最初の有効要素のstep数、DataArrayならそのstep数）
         n_steps = 0
         if isinstance(ds, dict):
-            # ds中の1つを代表でstep数とする
             arr_sample = next((v for v in ds.values() if v is not None), None)
             if arr_sample is not None and hasattr(arr_sample, "sizes") and "step" in arr_sample.sizes:
                 n_steps = arr_sample.sizes["step"]
@@ -374,18 +373,21 @@ def make_universal_weather_panel(
             n_steps = ds.sizes["step"]
         else:
             n_steps = 0
-    
+
         for col in range(ncols):
             step = col
             ax = axes[row, col]
             ax.set_extent(extent, crs=ccrs.PlateCarree())
+            # --- データ無い時、またはstep over時は空欄 ---
             if plot_func is None or ds is None or step >= n_steps:
                 ax.axis("off")
                 ax.set_title("" if plot_func is None else f"{title} (no data)")
                 continue
             try:
+                # dict型でstepを渡す形式
                 if isinstance(ds, dict):
                     plot_func(ax, ds, step=step)
+                # DataArray型ならstepでスライス
                 else:
                     ds_step = ds.isel(step=step)
                     plot_func(ax, ds_step)
@@ -395,17 +397,13 @@ def make_universal_weather_panel(
                 ax.set_title(f"{title} (エラー)")
                 print(f"[ERROR] {title}: {e}")
 
-
-    # --- 画像保存（省略可、必要に応じて追加） ---
+    # --- 画像保存 ---
     out_path = os.path.join(
         save_dir,
         f"panel_{city_name}_{init_time_str}_p1.jpg"
     )
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     panel_imgs.append(out_path)
-    plt.close(fig)
-    return panel_imgs
-
     plt.close(fig)
     return panel_imgs
 
