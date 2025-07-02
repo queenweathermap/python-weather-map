@@ -213,7 +213,7 @@ def generate_universal_panel_and_notify(
     msm_lsurf_path=None,
     output_dir="./data",
     drive_folder=None,
-    ncols=4, npages=1,
+    ncols=5, npages=2,
     city_name="japan",
     extent=None,
     log_callback=None,
@@ -222,7 +222,12 @@ def generate_universal_panel_and_notify(
 ):
     """
     全国・秋田・任意パネル生成＋Zip＋Driveアップ一括
+    5列×2ページ分割対応
     """
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    import os
+
     def log(msg):
         print(msg)
         if log_callback:
@@ -266,30 +271,13 @@ def generate_universal_panel_and_notify(
         else:
             print(f"[OK] panel_datasets[{k}] shape={getattr(v, 'shape', 'N/A')} dims={getattr(v, 'dims', 'N/A')}")
 
-    print("\n[DEBUG] --- パネル定義呼び出し ---")
+        print("\n[DEBUG] --- パネル定義呼び出し ---")
     panel_def = get_panel_def_japan(panel_datasets)
-    for i, (func, ds, title) in enumerate(panel_def):
-        print(f"[panel_def row {i+1}] {title}  ds: {type(ds)} keys={list(ds.keys()) if isinstance(ds, dict) else ''}")
     nrows = len(panel_def)
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
-    # === step数チェック＆警告（ここを追加！） ===
-    max_steps_per_row = []
-    for plot_func, ds, title in panel_def:
-        n_steps = 0
-        if isinstance(ds, dict):
-            arr_sample = next((v for v in ds.values() if v is not None), None)
-            if arr_sample is not None and hasattr(arr_sample, "sizes") and "step" in arr_sample.sizes:
-                n_steps = arr_sample.sizes["step"]
-        elif hasattr(ds, "sizes") and "step" in ds.sizes:
-            n_steps = ds.sizes["step"]
-        max_steps_per_row.append(n_steps)
-    if any(ncols > n for n in max_steps_per_row):
-        log(f"[WARN] ncols={ncols} exceeds available step size for some rows: {max_steps_per_row}（一部の行は空欄やNoDataに）")
-
-    # -- 描画設定を調整 --
-    PANEL_FIGSIZE_UNIT = 2  # 1コマの一辺（インチ）
-    PANEL_DPI = 200         # 画質
+    PANEL_FIGSIZE_UNIT = 2.0  # 1コマあたり2インチ
+    PANEL_DPI = 200
 
     panel_imgs = []
     for page in range(npages):
@@ -301,15 +289,10 @@ def generate_universal_panel_and_notify(
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
             # dsがNoneでない＆step次元を持つ場合
-            n_steps = 0
-            if isinstance(ds, dict):
-                arr_sample = next((v for v in ds.values() if v is not None), None)
-                if arr_sample is not None and hasattr(arr_sample, "sizes") and "step" in arr_sample.sizes:
-                    n_steps = arr_sample.sizes["step"]
-            elif hasattr(ds, "sizes") and "step" in ds.sizes:
-                n_steps = ds.sizes["step"]
+            n_steps = ds.sizes["step"] if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes) else 0
             for col in range(ncols):
-                step = col
+                # ページごとのstepオフセット
+                step = page * ncols + col
                 ax = axes[row, col]
                 if extent:
                     ax.set_extent(extent, crs=ccrs.PlateCarree())
@@ -325,7 +308,7 @@ def generate_universal_panel_and_notify(
                     ax.axis("off")
                     ax.set_title(f"{title} (error)", fontsize=7)
 
-        fig.suptitle(f"{city_name}天気図パネル（{ymd} UTC{hh}）", fontsize=16)
+        fig.suptitle(f"{city_name}天気図パネル（{ymd} UTC{hh}）p{page+1}", fontsize=18)
         out_name = f"panel_{city_name}_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
         fig.savefig(out_path, dpi=PANEL_DPI)
@@ -333,6 +316,7 @@ def generate_universal_panel_and_notify(
         log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
+    # --- Zip化/Driveアップロード/返却は従来どおり ---
     zip_name = f"panel_{city_name}_{ymd}_UTC{hh}.zip"
     zip_path = os.path.join(output_dir, zip_name)
     zip_files(panel_imgs, zip_path)
@@ -343,8 +327,6 @@ def generate_universal_panel_and_notify(
         log(f"[OK] Drive URL: {drive_url}")
 
     return panel_imgs, zip_path, drive_url
-
-
 
 # --- パネルグリッド描画汎用関数（dict+step方式・ncols/nrows柔軟） ---
 def make_universal_weather_panel(
