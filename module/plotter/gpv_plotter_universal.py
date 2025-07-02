@@ -375,8 +375,12 @@ def make_universal_weather_panel(
                 ax.axis("off")
                 ax.set_title(f"{title} (error)", fontsize=7)
 
-    fig.text(0.99, 0.99, f"{city_name}_{init_time_str}", fontsize=10,
-             ha="right", va="top", alpha=0.8, color="gray")
+    fig.text(
+        0.5, 0.01, 
+        f"{init_time_str} UTC",   # 例: 20250701_UTC00 UTC
+        fontsize=12, ha="center", va="bottom",
+        color="gray", alpha=0.9
+    )
 
     out_name = f"panel_{city_name}_{init_time_str}.jpg"
     out_path = os.path.join(save_dir, out_name)
