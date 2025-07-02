@@ -190,6 +190,6 @@ __all__ = [
     "align_datasets_common",
     "open_isobaric_dataset",
     "open_surface_dataset",
-    "make_universal_weather_panel"
-    "concat_panel_images_horizontally"　# 公開関数リストに追加
+    "make_universal_weather_panel",
+    "concat_panel_images_horizontally",　# 公開関数リストに追加
 ]
