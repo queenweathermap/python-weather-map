@@ -332,14 +332,9 @@ def make_universal_weather_panel(
     extent=None,
     dpi=300
 ):
-    """
-    16列×6段（合計96コマ）の1枚パネル画像を生成
-    列ごとにUTCラベルを付与
-    """
     import matplotlib.pyplot as plt
     import cartopy.crs as ccrs
-    import numpy as np
-    import os
+    from datetime import datetime, timedelta
 
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
@@ -356,56 +351,45 @@ def make_universal_weather_panel(
         subplot_kw=dict(projection=ccrs.PlateCarree())
     )
 
-    # 列ヘッダ用のUTCラベル（例: 20250701 00UTC, 03UTC, ...）
-    if times is not None and len(times) >= ncols:
-        utc_labels = [t.strftime("%Y%m%d %HUTC") for t in times[:ncols]]
-    else:
-        # 自動で0,3,6,...表示
-        utc_labels = []
-        from datetime import datetime, timedelta
-        base_time = datetime.strptime(init_time_str.split('_')[0] + hh, "%Y%m%d%H")
-        for col in range(ncols):
-            dt = base_time + timedelta(hours=col*3)
-            utc_labels.append(dt.strftime("%Y%m%d %HUTC"))
-
-    # 各パネル描画
+    # === 各コマ描画 ===
     for row, (plot_func, ds, title) in enumerate(panel_def):
-        # dsがdict型→step数は中の代表変数で判定
-        if isinstance(ds, dict):
-            # 最長stepの変数を代表とする
-            step_lens = [v.sizes["step"] for v in ds.values() if hasattr(v, "sizes") and "step" in v.sizes]
-            n_steps = max(step_lens) if step_lens else 0
-        elif ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes:
-            n_steps = ds.sizes["step"]
-        else:
-            n_steps = 0
+        n_steps = ds["h"].sizes["step"] if (ds is not None and "h" in ds and hasattr(ds["h"], "sizes") and "step" in ds["h"].sizes) else 0
         for col in range(ncols):
+            step = col
             ax = axes[row, col]
-            # 列ヘッダ（1行目の上部）だけUTCラベルをつける
-            if row == 0:
-                ax.set_title(utc_labels[col], fontsize=10, color="gray")
-            if col >= n_steps or plot_func is None or ds is None:
+            if extent:
+                ax.set_extent(extent, crs=ccrs.PlateCarree())
+            if plot_func is None or ds is None or step >= n_steps:
                 ax.axis("off")
+                ax.set_title("" if plot_func is None else f"{title} (no data)")
                 continue
             try:
-                if isinstance(ds, dict):
-                    plot_func(ax, ds, step=col)
-                else:
-                    ds_step = ds.isel(step=col) if "step" in ds.sizes else ds
-                    plot_func(ax, ds_step)
-                # パネルタイトルは左側のみ
-                if col == 0:
-                    ax.set_ylabel(title, fontsize=12)
+                plot_func(ax, ds, step=step)
+                ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
             except Exception as e:
-                print(f"[WARN] パネル描画失敗: {title} col={col} {e}")
+                print(f"[WARN] パネル描画失敗: {title} {e}")
                 ax.axis("off")
+                ax.set_title(f"{title} (error)", fontsize=7)
 
-    # 一番下にイニシャル時刻
+    # === 列ごとにUTCラベル ===
+    # init_time_str例: "20250701_UTC00"
+    base_ymd = init_time_str.split('_')[0]  # '20250701'
+    base_hh = init_time_str.split('_')[1][3:5]  # '00'
+    base_dt = datetime.strptime(base_ymd + base_hh, "%Y%m%d%H")
+    for col in range(ncols):
+        col_time = base_dt + timedelta(hours=col*3)
+        label = col_time.strftime("%Y%m%d %HUTC")
+        fig.text(
+            (col + 0.5) / ncols, 0.02, label,
+            ha='center', va='bottom', fontsize=10, color="dimgray"
+        )
+
+    # === フッタ ===
     fig.text(
         0.5, 0.01,
         f"{init_time_str} UTC",
-        fontsize=13, ha="center", va="bottom",
-        color="gray", alpha=0.95
+        fontsize=12, ha="center", va="bottom",
+        color="gray", alpha=0.9
     )
 
     out_name = f"panel_{city_name}_{init_time_str}.jpg"
@@ -414,6 +398,7 @@ def make_universal_weather_panel(
     plt.close(fig)
     panel_imgs.append(out_path)
     return panel_imgs
+
 
 
 __all__ = [
