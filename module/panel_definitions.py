@@ -11,15 +11,14 @@ REGION_EXTENTS = {
 }
 
 def get_panel_def_japan(var_dict):
-    print(f"\n[DEBUG] get_panel_def_japan: called with var_dict keys: {list(var_dict.keys())}")
+    print(f"[DEBUG] get_panel_def_japan: called with var_dict keys: {list(var_dict.keys())}")
     for k, v in var_dict.items():
         if v is None:
             print(f"[WARN] get_panel_def_japan: var_dict['{k}'] is None!")
         else:
             print(f"[OK] get_panel_def_japan: var_dict['{k}'] shape={getattr(v, 'shape', 'N/A')} dims={getattr(v, 'dims', 'N/A')}")
-
     """
-    全国8列6段パネル定義
+    全国16列6段パネル定義
     var_dict: すべての必要変数をkey指定で格納したdict
       例: {"gh_300": <DataArray>, "u_300": ...}
     """
@@ -89,6 +88,7 @@ def get_panel_def_japan(var_dict):
             "地上気圧・風・降水量"
         ),
     ]
+
 
 def get_panel_def_akita(var_dict):
     """
