@@ -253,11 +253,10 @@ def generate_universal_panel_and_notify(
         "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
         "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
         "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric", rh_fallback_func=rh_fallback_func),
-        "prmsl":  open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level=None, stepType="instant"),
         "u10":    open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround", stepType="instant"),
         "v10":    open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround", stepType="instant"),
         "apcp":   open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level=None, stepType="accum", apcp_3hr_func=apcp_3hr_func),
-        "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level=None, stepType="instant"),
+        "prmsl":  open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level=None, stepType="instant"),
         "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level="heightAboveGround", stepType="instant"),
         "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level="heightAboveGround", stepType="instant"),
         "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, type_of_level=None, stepType=None, apcp_3hr_func=apcp_3hr_func),
@@ -271,7 +270,7 @@ def generate_universal_panel_and_notify(
         else:
             print(f"[OK] panel_datasets[{k}] shape={getattr(v, 'shape', 'N/A')} dims={getattr(v, 'dims', 'N/A')}")
 
-        print("\n[DEBUG] --- パネル定義呼び出し ---")
+    print("\n[DEBUG] --- パネル定義呼び出し ---")
     panel_def = get_panel_def_japan(panel_datasets)
     nrows = len(panel_def)
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
