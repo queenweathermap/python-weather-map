@@ -368,7 +368,7 @@ def make_universal_weather_panel(
             ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes
         ) else 0
         for col in range(ncols):
-            step = page * ncols + col
+            step = col
             ax = axes[row, col]
             ax.set_extent(extent, crs=ccrs.PlateCarree())
             if plot_func is None or ds is None or step >= n_steps:
