@@ -32,10 +32,13 @@ def get_lon_lat(ds):
 # module/plot/plot_700hpa_dindex_500hpa_temp.py
 def plot_700hpa_dindex_500hpa_temp(ax, ds_dict, step=0):
     print(f"\n[DEBUG] plot_700hpa_dindex_500hpa_temp: step={step}")
+
+    # --- dictの中身を確認 ---
     for k in ["t_700", "r_700", "t_500"]:
         v = ds_dict.get(k)
         print(f"[DEBUG] ds_dict[{k}]:", "None" if v is None else f"shape={v.shape}, dims={v.dims}")
 
+    # --- どれかがNoneならNO DATA描画 ---
     for k in ["t_700", "r_700", "t_500"]:
         if ds_dict.get(k) is None:
             print(f"[WARN] NO DATA for {k}")
@@ -46,6 +49,7 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds_dict, step=0):
                     ha="center", va="center", transform=ax.transAxes)
             return
 
+    # --- step次元でisleした後もshape確認 ---
     temp_700 = ds_dict["t_700"].isel(step=step)
     print(f"[DEBUG] temp_700 isel done. shape={temp_700.shape}")
     rh_700   = ds_dict["r_700"].isel(step=step)
@@ -53,7 +57,7 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds_dict, step=0):
     temp_500 = ds_dict["t_500"].isel(step=step)
     print(f"[DEBUG] temp_500 isel done. shape={temp_500.shape}")
 
-
+    # --- （ここから下はそのままプロット本体） ---
     temp_700_c = temp_700 - 273.15
     temp_500_c = temp_500 - 273.15
     lon2d = temp_700["longitude"].values
@@ -61,6 +65,7 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds_dict, step=0):
     if lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
     dindex_700 = (100.0 - rh_700) / 5.0
+
 
     colors = [
         (0.00, "#296A32"),
