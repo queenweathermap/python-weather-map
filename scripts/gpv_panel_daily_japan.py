@@ -104,36 +104,39 @@ def main():
         panel_def = get_panel_def_japan(panel_datasets)
 
         # 3. 各step（列）ごとに6段1列パネル画像（複数）を生成
-        ncols = 1              # 1列出力
-        nrows = len(panel_def) # 6段
-        nsteps = 3             # ←2ステップ分生成
+        ncols = 1
+        nrows = len(panel_def)
+        nsteps = 3
         extent = REGION_EXTENTS["japan"]
         init_time_str = f"{ymd}_UTC{hh}"
         
         panel_img_paths = []
         for step in range(nsteps):
+            # ★ここで「画像ファイル名」だけに p1,p2 を付与
             img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_p{step+1}.jpg"
+            # ★init_time_strには「p1等を付与しない」
             panel_imgs = make_universal_weather_panel(
                 save_dir=output_dir,
                 panel_def=panel_def,
-                times=None,  # 必要なら stepごとに時刻リストを与える
-                init_time_str=f"{init_time_str}_p{step+1}",
+                times=None,  # 必要なら stepごとに時刻リストなど
+                init_time_str=init_time_str,   # ←ここは変えない！
                 city_name="japan",
                 ncols=ncols,
                 nrows=nrows,
                 extent=extent,
                 dpi=300
             )
-            # ファイル名リネーム/保存
+            # ファイル名だけリネームで管理
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
+
         
         # 4. 横方向に画像を結合（full.jpgを生成）
-        full_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
-        if panel_img_paths:
-            concat_panel_images_horizontally(panel_img_paths, full_path)
-            panel_img_path = full_path
+        if panel_imgs and os.path.exists(panel_imgs[0]):
+            img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_p{step+1}.jpg"  # ファイル名だけ工夫
+            os.rename(panel_imgs[0], img_path)
+            panel_img_paths.append(img_path)
         else:
             raise RuntimeError("6段1列画像が1枚も生成されませんでした")
 
