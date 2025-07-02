@@ -35,7 +35,8 @@ def plot_500hpa_vorticity(ax, ds_dict, step=0):
 
     # NO DATA時
     for k in ["h", "u", "v"]:
-        if ds_dict.get(k) is None:
+        arr = ds_dict.get(k)
+        if arr is None or "step" not in arr.dims or step >= arr.sizes["step"]:
             ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
             ax.coastlines(resolution="50m")
             ax.add_feature(cfeature.BORDERS, linestyle=":")
