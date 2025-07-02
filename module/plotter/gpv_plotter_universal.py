@@ -328,16 +328,18 @@ def make_universal_weather_panel(
     times,
     init_time_str,
     city_name="japan",
-    ncols=16, nrows=6,   # ←16列6段
+    ncols=16, nrows=6,
     extent=None,
     dpi=300
 ):
     """
     16列×6段（合計96コマ）の1枚パネル画像を生成
-    ファイル下端に各列のUTC時刻ラベルを記載
-    ファイル右上にイニシャル時刻入りのファイル名
+    列ごとにUTCラベルを付与
     """
-    import datetime
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    import numpy as np
+    import os
 
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
@@ -354,45 +356,57 @@ def make_universal_weather_panel(
         subplot_kw=dict(projection=ccrs.PlateCarree())
     )
 
-    for row, (plot_func, ds, title) in enumerate(panel_def):
-        n_steps = ds.sizes["step"] if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes) else 0
+    # 列ヘッダ用のUTCラベル（例: 20250701 00UTC, 03UTC, ...）
+    if times is not None and len(times) >= ncols:
+        utc_labels = [t.strftime("%Y%m%d %HUTC") for t in times[:ncols]]
+    else:
+        # 自動で0,3,6,...表示
+        utc_labels = []
+        from datetime import datetime, timedelta
+        base_time = datetime.strptime(init_time_str.split('_')[0] + hh, "%Y%m%d%H")
         for col in range(ncols):
-            step = col
+            dt = base_time + timedelta(hours=col*3)
+            utc_labels.append(dt.strftime("%Y%m%d %HUTC"))
+
+    # 各パネル描画
+    for row, (plot_func, ds, title) in enumerate(panel_def):
+        # dsがdict型→step数は中の代表変数で判定
+        if isinstance(ds, dict):
+            # 最長stepの変数を代表とする
+            step_lens = [v.sizes["step"] for v in ds.values() if hasattr(v, "sizes") and "step" in v.sizes]
+            n_steps = max(step_lens) if step_lens else 0
+        elif ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes:
+            n_steps = ds.sizes["step"]
+        else:
+            n_steps = 0
+        for col in range(ncols):
             ax = axes[row, col]
-            if extent:
-                ax.set_extent(extent, crs=ccrs.PlateCarree())
-            if plot_func is None or ds is None or step >= n_steps:
+            # 列ヘッダ（1行目の上部）だけUTCラベルをつける
+            if row == 0:
+                ax.set_title(utc_labels[col], fontsize=10, color="gray")
+            if col >= n_steps or plot_func is None or ds is None:
                 ax.axis("off")
-                ax.set_title("" if plot_func is None else f"{title} (no data)")
                 continue
             try:
-                # dictならサイズ確認スキップ（直接プロット関数にstep渡す）
                 if isinstance(ds, dict):
-                    plot_func(ax, ds, step=step)
+                    plot_func(ax, ds, step=col)
                 else:
-                    ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
+                    ds_step = ds.isel(step=col) if "step" in ds.sizes else ds
                     plot_func(ax, ds_step)
-                ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
+                # パネルタイトルは左側のみ
+                if col == 0:
+                    ax.set_ylabel(title, fontsize=12)
             except Exception as e:
-                print(f"[WARN] パネル描画失敗: {title} {e}")
+                print(f"[WARN] パネル描画失敗: {title} col={col} {e}")
                 ax.axis("off")
-                ax.set_title(f"{title} (error)", fontsize=7)
 
-    # 列ごとにUTC時刻（日付＋時刻）を下端に表示
-    # init_time_str例: "20250701_UTC00"
-    # ymd: "20250701", hh: "00"
-    ymd = init_time_str[:8]
-    hh = init_time_str[-2:]
-    base_dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
-    for col in range(ncols):
-        col_dt = base_dt + datetime.timedelta(hours=col * 3)
-        label = col_dt.strftime("%Y%m%d %HUTC")
-        x = (col + 0.5) / ncols
-        fig.text(
-            x, 0.01, label,
-            ha="center", va="bottom",
-            fontsize=11, color="gray", alpha=0.95
-        )
+    # 一番下にイニシャル時刻
+    fig.text(
+        0.5, 0.01,
+        f"{init_time_str} UTC",
+        fontsize=13, ha="center", va="bottom",
+        color="gray", alpha=0.95
+    )
 
     out_name = f"panel_{city_name}_{init_time_str}.jpg"
     out_path = os.path.join(save_dir, out_name)
@@ -400,6 +414,7 @@ def make_universal_weather_panel(
     plt.close(fig)
     panel_imgs.append(out_path)
     return panel_imgs
+
 
 __all__ = [
     "open_grib2_var_auto",
