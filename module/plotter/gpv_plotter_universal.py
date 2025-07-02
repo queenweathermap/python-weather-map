@@ -364,23 +364,30 @@ def make_universal_weather_panel(
 
     # === 各コマ描画 ===
     for row, (plot_func, ds, title) in enumerate(panel_def):
-        n_steps = ds["h"].sizes["step"] if (ds is not None and "h" in ds and hasattr(ds["h"], "sizes") and "step" in ds["h"].sizes) else 0
+        n_steps = ds.sizes["step"] if (
+            ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes
+        ) else 0
         for col in range(ncols):
-            step = col
+            step = page * ncols + col
             ax = axes[row, col]
-            if extent:
-                ax.set_extent(extent, crs=ccrs.PlateCarree())
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
             if plot_func is None or ds is None or step >= n_steps:
                 ax.axis("off")
                 ax.set_title("" if plot_func is None else f"{title} (no data)")
                 continue
             try:
-                plot_func(ax, ds, step=step)
-                ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
+                # --- 修正ポイント ---
+                if isinstance(ds, dict):
+                    plot_func(ax, ds, step=step)
+                else:
+                    ds_step = ds.isel(step=step)
+                    plot_func(ax, ds_step)
+                ax.set_title(f"{title} (+{step*3}h)")
             except Exception as e:
-                print(f"[WARN] パネル描画失敗: {title} {e}")
                 ax.axis("off")
-                ax.set_title(f"{title} (error)", fontsize=7)
+                ax.set_title(f"{title} (エラー)")
+                log(f"[ERROR] {title}: {e}")
+
 
     # === 列ごとにUTCラベル ===
     # init_time_str例: "20250701_UTC00"
