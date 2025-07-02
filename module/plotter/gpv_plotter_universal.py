@@ -328,14 +328,17 @@ def make_universal_weather_panel(
     times,
     init_time_str,
     city_name="japan",
-    ncols=8, nrows=6,   # ←8列6段
+    ncols=16, nrows=6,   # ←16列6段
     extent=None,
     dpi=300
 ):
     """
-    8列×6段（合計48コマ）の1枚パネル画像を生成
+    16列×6段（合計96コマ）の1枚パネル画像を生成
+    ファイル下端に各列のUTC時刻ラベルを記載
     ファイル右上にイニシャル時刻入りのファイル名
     """
+    import datetime
+
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
 
@@ -375,12 +378,21 @@ def make_universal_weather_panel(
                 ax.axis("off")
                 ax.set_title(f"{title} (error)", fontsize=7)
 
-    fig.text(
-        0.5, 0.01, 
-        f"{init_time_str} UTC",   # 例: 20250701_UTC00 UTC
-        fontsize=12, ha="center", va="bottom",
-        color="gray", alpha=0.9
-    )
+    # 列ごとにUTC時刻（日付＋時刻）を下端に表示
+    # init_time_str例: "20250701_UTC00"
+    # ymd: "20250701", hh: "00"
+    ymd = init_time_str[:8]
+    hh = init_time_str[-2:]
+    base_dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
+    for col in range(ncols):
+        col_dt = base_dt + datetime.timedelta(hours=col * 3)
+        label = col_dt.strftime("%Y%m%d %HUTC")
+        x = (col + 0.5) / ncols
+        fig.text(
+            x, 0.01, label,
+            ha="center", va="bottom",
+            fontsize=11, color="gray", alpha=0.95
+        )
 
     out_name = f"panel_{city_name}_{init_time_str}.jpg"
     out_path = os.path.join(save_dir, out_name)
