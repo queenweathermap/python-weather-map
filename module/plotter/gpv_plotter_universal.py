@@ -282,25 +282,25 @@ def generate_universal_panel_and_notify(
             subplot_kw=dict(projection=ccrs.PlateCarree())
         )
         for row, (plot_func, ds, title) in enumerate(panel_def):
-            n_steps = ds.sizes["step"] if (
-                ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes
-            ) else 0
+            # dsがNoneでない＆step次元を持つ場合
+            n_steps = ds.sizes["step"] if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes) else 0
             for col in range(ncols):
-                step = page * ncols + col
+                step = col
                 ax = axes[row, col]
-                ax.set_extent(extent, crs=ccrs.PlateCarree())
+                if extent:
+                    ax.set_extent(extent, crs=ccrs.PlateCarree())
                 if plot_func is None or ds is None or step >= n_steps:
                     ax.axis("off")
                     ax.set_title("" if plot_func is None else f"{title} (no data)")
                     continue
                 try:
-                    ds_step = ds.isel(step=step)
-                    plot_func(ax, ds_step)
-                    ax.set_title(f"{title} (+{step*3}h)")
+                    plot_func(ax, ds, step=step)
+                    ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
                 except Exception as e:
+                    print(f"[WARN] パネル描画失敗: {title} {e}")
                     ax.axis("off")
-                    ax.set_title(f"{title} (エラー)")
-                    log(f"[ERROR] {title}: {e}")
+                    ax.set_title(f"{title} (error)", fontsize=7)
+
         fig.suptitle(f"{city_name}天気図パネル（{ymd} UTC{hh}）", fontsize=20)
         out_name = f"panel_{city_name}_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
