@@ -398,8 +398,14 @@ def make_universal_weather_panel(
                 print(f"[ERROR] {title}: {e}")  # log()関数が未定義ならprintで
 
     # --- 画像保存（省略可、必要に応じて追加） ---
-    # ここにパネル画像保存・panel_imgs.append(…) など
-    # ...
+    out_path = os.path.join(
+        save_dir,
+        f"panel_{city_name}_{init_time_str}_p1.jpg"
+    )
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    panel_imgs.append(out_path)
+    plt.close(fig)
+    return panel_imgs
 
     plt.close(fig)
     return panel_imgs
