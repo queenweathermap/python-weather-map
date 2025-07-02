@@ -89,8 +89,8 @@ def main():
             msm_lsurf_path=msm_lsurf_path,
             output_dir=output_dir,
             drive_folder=drive_folder,
-            ncols=4,    # 必要に応じ調整
-            npages=4,   # 必要に応じ調整
+            ncols=16,    # 必要に応じ調整
+            npages=1,   # 必要に応じ調整
             city_name="japan",   # ← **ここにカンマ！**
             rh_fallback_func=get_rh_fallback,
             apcp_3hr_func=get_apcp_3hr,
