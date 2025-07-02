@@ -334,7 +334,9 @@ def make_universal_weather_panel(
 ):
     import matplotlib.pyplot as plt
     import cartopy.crs as ccrs
+    import numpy as np
     from datetime import datetime, timedelta
+    import os
 
     os.makedirs(save_dir, exist_ok=True)
     panel_imgs = []
@@ -350,6 +352,12 @@ def make_universal_weather_panel(
         constrained_layout=True,
         subplot_kw=dict(projection=ccrs.PlateCarree())
     )
+
+    # --- axesの形状を必ず2次元化（1枚・1行・1列対策） ---
+    if nrows * ncols == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1 or ncols == 1:
+        axes = np.atleast_2d(axes)
 
     # === 各コマ描画 ===
     for row, (plot_func, ds, title) in enumerate(panel_def):
