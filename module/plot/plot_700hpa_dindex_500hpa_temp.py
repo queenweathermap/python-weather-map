@@ -31,12 +31,14 @@ def get_lon_lat(ds):
 
 # module/plot/plot_700hpa_dindex_500hpa_temp.py
 def plot_700hpa_dindex_500hpa_temp(ax, ds_dict, step=0):
-    """
-    700hPa湿数・500hPa気温（dict＋step方式）
-    ds_dict: {"t_700":..., "r_700":..., "t_500":...}
-    """
+    print(f"\n[DEBUG] plot_700hpa_dindex_500hpa_temp: step={step}")
+    for k in ["t_700", "r_700", "t_500"]:
+        v = ds_dict.get(k)
+        print(f"[DEBUG] ds_dict[{k}]:", "None" if v is None else f"shape={v.shape}, dims={v.dims}")
+
     for k in ["t_700", "r_700", "t_500"]:
         if ds_dict.get(k) is None:
+            print(f"[WARN] NO DATA for {k}")
             ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
             ax.coastlines(resolution="50m")
             ax.add_feature(cfeature.BORDERS, linestyle=":")
@@ -45,8 +47,12 @@ def plot_700hpa_dindex_500hpa_temp(ax, ds_dict, step=0):
             return
 
     temp_700 = ds_dict["t_700"].isel(step=step)
+    print(f"[DEBUG] temp_700 isel done. shape={temp_700.shape}")
     rh_700   = ds_dict["r_700"].isel(step=step)
+    print(f"[DEBUG] rh_700 isel done. shape={rh_700.shape}")
     temp_500 = ds_dict["t_500"].isel(step=step)
+    print(f"[DEBUG] temp_500 isel done. shape={temp_500.shape}")
+
 
     temp_700_c = temp_700 - 273.15
     temp_500_c = temp_500 - 273.15
