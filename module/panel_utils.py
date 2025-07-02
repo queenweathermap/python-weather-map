@@ -154,6 +154,35 @@ def make_universal_weather_panel(
     panel_imgs.append(out_path)
     return panel_imgs
 
+# --- 複数パネル画像（縦長jpg）を横に並べて合成 ---
+from PIL import Image
+
+def concat_panel_images_horizontally(img_paths, out_path):
+    """
+    複数の「6段1列パネル画像」を横方向（step順に並べて）合成し、1枚の横長画像として保存
+    img_paths: ["panel_xxx_p1.jpg", ..., "panel_xxx_pN.jpg"]
+    out_path:  "panel_xxx_full.jpg"
+    - 画像サイズは全て同じ（高さ一致）前提
+    - 枚数・step数は何枚でもOK
+    """
+    if not img_paths:
+        print("[WARN] 画像リストが空です")
+        return None
+    imgs = [Image.open(p) for p in img_paths]
+    # 全画像の幅・高さ取得
+    widths, heights = zip(*(img.size for img in imgs))
+    total_width = sum(widths)
+    max_height = max(heights)
+    # 横長キャンバス生成
+    new_img = Image.new("RGB", (total_width, max_height))
+    x_offset = 0
+    for img in imgs:
+        new_img.paste(img, (x_offset, 0))
+        x_offset += img.width
+    new_img.save(out_path)
+    print(f"[OK] 横結合画像保存: {out_path}")
+    return out_path
+
 
 __all__ = [
     "make_nodata_weather_panel",
@@ -162,4 +191,5 @@ __all__ = [
     "open_isobaric_dataset",
     "open_surface_dataset",
     "make_universal_weather_panel"
+    "concat_panel_images_horizontally"　# 公開関数リストに追加
 ]
