@@ -353,11 +353,14 @@ def make_universal_weather_panel(
         subplot_kw=dict(projection=ccrs.PlateCarree())
     )
 
-    # --- axesの形状を必ず2次元化（1枚・1行・1列対策） ---
-    if nrows * ncols == 1:
+    # --- axesの形状を必ず2次元化 ---
+    import numpy as np
+    if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
-    elif nrows == 1 or ncols == 1:
-        axes = np.atleast_2d(axes)
+    elif nrows == 1:
+        axes = axes[np.newaxis, :]
+    elif ncols == 1:
+        axes = axes[:, np.newaxis]
 
     # === 各コマ描画 ===
     for row, (plot_func, ds, title) in enumerate(panel_def):
