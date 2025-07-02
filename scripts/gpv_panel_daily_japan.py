@@ -106,10 +106,10 @@ def main():
         # 3. 各step（列）ごとに6段1列パネル画像（複数）を生成
         ncols = 1     # 1列出力
         nrows = len(panel_def)   # =6
-        nsteps = 9    # 必要な予報step数に応じて増減OK
+        nsteps = 1    # ←【負荷軽減】まず1stepだけ生成する
         extent = REGION_EXTENTS["japan"]
         init_time_str = f"{ymd}_UTC{hh}"
-
+        
         panel_img_paths = []
         for step in range(nsteps):
             img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_p{step+1}.jpg"
@@ -122,12 +122,13 @@ def main():
                 ncols=ncols,
                 nrows=nrows,
                 extent=extent,
-                dpi=300
+                dpi=150   # ←【負荷軽減】dpiも仮に150程度で様子見
             )
             # ファイル名を意図通りにリネーム/保存したい場合はここで調整
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
+
 
         # 4. 横方向に画像を結合（full.jpgを生成）
         full_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
@@ -137,6 +138,8 @@ def main():
         else:
             raise RuntimeError("6段1列画像が1枚も生成されませんでした")
 
+
+        
         # 5. Driveアップ（full.jpgだけ）
         if drive_folder:
             delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
