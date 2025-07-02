@@ -105,28 +105,24 @@ def main():
 
         # 3. 各step（列）ごとに6段1列パネル画像（複数）を生成
         ncols = 1
-        nrows = len(panel_def)
-        nsteps = 3
-        extent = REGION_EXTENTS["japan"]
-        init_time_str = f"{ymd}_UTC{hh}"
+        nrows = len(panel_def)  # 6段
+        nsteps = 9  # 9ステップ（+0h, +3h, ..., +24h）
         
         panel_img_paths = []
         for step in range(nsteps):
-            # ★ここで「画像ファイル名」だけに p1,p2 を付与
             img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_p{step+1}.jpg"
-            # ★init_time_strには「p1等を付与しない」
             panel_imgs = make_universal_weather_panel(
                 save_dir=output_dir,
                 panel_def=panel_def,
-                times=None,  # 必要なら stepごとに時刻リストなど
-                init_time_str=init_time_str,   # ←ここは変えない！
+                times=None,
+                init_time_str=f"{ymd}_UTC{hh}",
                 city_name="japan",
-                ncols=ncols,
+                ncols=1,
                 nrows=nrows,
                 extent=extent,
-                dpi=300
+                dpi=300,
+                step=step   # ←stepごとに画像を作る
             )
-            # ファイル名だけリネームで管理
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
