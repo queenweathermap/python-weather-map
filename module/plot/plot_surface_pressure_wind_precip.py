@@ -35,35 +35,53 @@ def plot_surface_pressure_and_wind_msm(ax, ds_dict, step=0):
     """
     地上海面更正気圧・風・降水量（dict＋step方式）
     ds_dict: {"prmsl":..., "u10":..., "v10":..., "apcp":...}
+    どれか欠けてもあるものだけ描画、全部無ければNO DATA
     """
-    for k in ["prmsl", "u10", "v10", "apcp"]:
-        if ds_dict.get(k) is None:
-            ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
-            ax.coastlines(resolution="50m")
-            ax.add_feature(cfeature.BORDERS, linestyle=":")
-            ax.text(0.5, 0.5, f"NO DATA\n({k})", fontsize=14, color="gray",
-                    ha="center", va="center", transform=ax.transAxes)
-            return
+    prmsl = ds_dict.get("prmsl")
+    u10   = ds_dict.get("u10")
+    v10   = ds_dict.get("v10")
+    apcp  = ds_dict.get("apcp")
 
-    prmsl = ds_dict["prmsl"].isel(step=step)
-    u10 = ds_dict["u10"].isel(step=step)
-    v10 = ds_dict["v10"].isel(step=step)
-    precip = ds_dict["apcp"].isel(step=step)
-    lon2d = prmsl["longitude"].values
-    lat2d = prmsl["latitude"].values
-    if lon2d.ndim == 1 and lat2d.ndim == 1:
-        lon2d, lat2d = np.meshgrid(lon2d, lat2d)
-    skip = 5
+    # step次元がある場合だけスライス
+    if prmsl is not None and "step" in prmsl.dims:
+        prmsl = prmsl.isel(step=step)
+    if u10 is not None and "step" in u10.dims:
+        u10 = u10.isel(step=step)
+    if v10 is not None and "step" in v10.dims:
+        v10 = v10.isel(step=step)
+    if apcp is not None and "step" in apcp.dims:
+        apcp = apcp.isel(step=step)
 
-    
-    # --- 以降描画処理 ---
-    # 地図範囲・装飾
+    # 緯度経度をprmsl/u10/v10のどれかから取得
+    lon2d, lat2d = None, None
+    for arr in [prmsl, u10, v10]:
+        if arr is not None:
+            lon2d = arr["longitude"].values
+            lat2d = arr["latitude"].values
+            if lon2d.ndim == 1 and lat2d.ndim == 1:
+                lon2d, lat2d = np.meshgrid(lon2d, lat2d)
+            break
+
+    # 地図装飾
     ax.set_extent([120, 150, 20, 50], crs=ccrs.PlateCarree())
     ax.coastlines(resolution="50m")
     ax.add_feature(cfeature.BORDERS, linestyle=":")
 
+    has_content = False
+
+    # --- 降水量（色塗り） ---
+    if apcp is not None and lon2d is not None:
+        cf = ax.contourf(
+            lon2d, lat2d, apcp,
+            levels=np.arange(0, 51, 5), cmap="Blues", alpha=0.4,
+            transform=ccrs.PlateCarree()
+        )
+        cb = plt.colorbar(cf, ax=ax, orientation="vertical", shrink=0.6, pad=0.02)
+        cb.set_label("Precip [mm]", fontsize=8)
+        has_content = True
+
     # --- 海面更正気圧（等圧線） ---
-    if prmsl is not None:
+    if prmsl is not None and lon2d is not None:
         prmsl_hpa = prmsl / 100  # [hPa]
         levels_fine = np.arange(900, 1101, 1)
         cs = ax.contour(
@@ -81,11 +99,11 @@ def plot_surface_pressure_and_wind_msm(ax, ds_dict, step=0):
         label_texts = ax.clabel(cs_bold, fmt="%.0f", fontsize=8, colors='k')
         for txt in label_texts:
             txt.set_fontweight('bold')
+        has_content = True
 
-        # H/Lマーク自動描画（最高/最低気圧）
-        prmsl_max = maximum_filter(prmsl_hpa, size=5)
-        prmsl_min = minimum_filter(prmsl_hpa, size=5)
-        prmsl_flat = prmsl_hpa.flatten()
+        # H/Lマーク
+        from scipy.ndimage import maximum_filter, minimum_filter
+        prmsl_flat = prmsl_hpa.values.flatten()
         hmax_indices = np.argpartition(prmsl_flat, -2)[-2:]
         hmin_indices = np.argpartition(prmsl_flat, 2)[:2]
         hmax_coords = np.unravel_index(hmax_indices, prmsl_hpa.shape)
@@ -96,21 +114,18 @@ def plot_surface_pressure_and_wind_msm(ax, ds_dict, step=0):
             ax.text(lon2d[j, i], lat2d[j, i], 'L', color='red', fontsize=14, weight='bold', ha='center', va='center')
 
     # --- 10m風ベクトル ---
-    if u10 is not None and v10 is not None:
+    if u10 is not None and v10 is not None and lon2d is not None:
+        skip = 5
         ax.quiver(
             lon2d[::skip, ::skip], lat2d[::skip, ::skip],
             u10[::skip, ::skip], v10[::skip, ::skip],
             transform=ccrs.PlateCarree(), scale=500, width=0.002, alpha=0.8
         )
+        has_content = True
 
-    # --- 降水量（色塗り） ---
-    if precip is not None:
-        cf = ax.contourf(
-            lon2d, lat2d, precip,
-            levels=np.arange(0, 51, 5), cmap="Blues", alpha=0.4,
-            transform=ccrs.PlateCarree()
-        )
-        cb = plt.colorbar(cf, ax=ax, orientation="vertical", shrink=0.6, pad=0.02)
-        cb.set_label("PA [mm]", fontsize=8)
+    # --- 全部なければNO DATA表示 ---
+    if not has_content:
+        ax.text(0.5, 0.5, "NO DATA", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
+        ax.set_axis_off()
 
-    ax.set_title("Surface Pressure / Wind / Precipitation", fontsize=10, pad=10)
+    ax.set_title("地上気圧・風・降水量 (+0h)", fontsize=10, pad=10)
