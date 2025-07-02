@@ -191,5 +191,5 @@ __all__ = [
     "open_isobaric_dataset",
     "open_surface_dataset",
     "make_universal_weather_panel",
-    "concat_panel_images_horizontally",　# 公開関数リストに追加
+    "concat_panel_images_horizontally"  # ← カンマ、半角スペース、全角スペース無しでOK
 ]
