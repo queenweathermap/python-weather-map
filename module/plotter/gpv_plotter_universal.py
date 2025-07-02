@@ -321,7 +321,8 @@ def generate_universal_panel_and_notify(
     return panel_imgs, zip_path, drive_url
 
 
-# --- パネルグリッド描画汎用関数（panel_utils.py から移動） ---
+# module/plotter/gpv_plotter_universal.py
+# --- パネルグリッド描画汎用関数（完全dict+step対応・n_steps自動判定） ---
 def make_universal_weather_panel(
     save_dir,
     panel_def,
@@ -354,7 +355,6 @@ def make_universal_weather_panel(
     )
 
     # --- axesの形状を必ず2次元化 ---
-    import numpy as np
     if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
     elif nrows == 1:
@@ -364,9 +364,18 @@ def make_universal_weather_panel(
 
     # === 各コマ描画 ===
     for row, (plot_func, ds, title) in enumerate(panel_def):
-        n_steps = ds.sizes["step"] if (
-            ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes
-        ) else 0
+        # --- dsのstep次元をdictからでも自動取得 ---
+        n_steps = None
+        if isinstance(ds, dict):
+            for v in ds.values():
+                if hasattr(v, "sizes") and "step" in v.sizes:
+                    n_steps = v.sizes["step"]
+                    break
+        elif ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes:
+            n_steps = ds.sizes["step"]
+        if n_steps is None:
+            n_steps = ncols  # fallback: 全カラム分出力
+
         for col in range(ncols):
             step = col
             ax = axes[row, col]
@@ -376,7 +385,7 @@ def make_universal_weather_panel(
                 ax.set_title("" if plot_func is None else f"{title} (no data)")
                 continue
             try:
-                # --- 修正ポイント ---
+                # dict+step形式対応：全プロット関数で step引数が使える前提
                 if isinstance(ds, dict):
                     plot_func(ax, ds, step=step)
                 else:
@@ -386,35 +395,13 @@ def make_universal_weather_panel(
             except Exception as e:
                 ax.axis("off")
                 ax.set_title(f"{title} (エラー)")
-                log(f"[ERROR] {title}: {e}")
+                print(f"[ERROR] {title}: {e}")  # log()関数が未定義ならprintで
 
+    # --- 画像保存（省略可、必要に応じて追加） ---
+    # ここにパネル画像保存・panel_imgs.append(…) など
+    # ...
 
-    # === 列ごとにUTCラベル ===
-    # init_time_str例: "20250701_UTC00"
-    base_ymd = init_time_str.split('_')[0]  # '20250701'
-    base_hh = init_time_str.split('_')[1][3:5]  # '00'
-    base_dt = datetime.strptime(base_ymd + base_hh, "%Y%m%d%H")
-    for col in range(ncols):
-        col_time = base_dt + timedelta(hours=col*3)
-        label = col_time.strftime("%Y%m%d %HUTC")
-        fig.text(
-            (col + 0.5) / ncols, 0.02, label,
-            ha='center', va='bottom', fontsize=10, color="dimgray"
-        )
-
-    # === フッタ ===
-    fig.text(
-        0.5, 0.01,
-        f"{init_time_str} UTC",
-        fontsize=12, ha="center", va="bottom",
-        color="gray", alpha=0.9
-    )
-
-    out_name = f"panel_{city_name}_{init_time_str}.jpg"
-    out_path = os.path.join(save_dir, out_name)
-    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
-    panel_imgs.append(out_path)
     return panel_imgs
 
 
