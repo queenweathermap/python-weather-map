@@ -1,7 +1,7 @@
 # scripts/gpv_panel_daily_japan.py
 # ===============================================================
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 2025-07-01 ChatGPT（plotter_universal利用に統一／1枚出力版）
+# 2025-07-01 ChatGPT（plotter_universal利用に統一／複数枚→横結合）
 # ===============================================================
 
 import os
@@ -103,11 +103,13 @@ def main():
         }
         panel_def = get_panel_def_japan(panel_datasets)
 
-        # 3. 各step（列）ごとに6段1列パネル画像（複数）を生成
+        # 3. パネル描画用パラメータ
         ncols = 1
-        nrows = len(panel_def)  # 6段
-        nsteps = 9  # 9ステップ（+0h, +3h, ..., +24h）
-        
+        nrows = len(panel_def)
+        nsteps = 9  # (例: +0h, +3h, ..., +24h)
+        extent = REGION_EXTENTS["japan"]
+
+        # 4. 各step（時刻）ごとにパネル画像を順次生成
         panel_img_paths = []
         for step in range(nsteps):
             img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_p{step+1}.jpg"
@@ -117,35 +119,32 @@ def main():
                 times=None,
                 init_time_str=f"{ymd}_UTC{hh}",
                 city_name="japan",
-                ncols=1,
+                ncols=ncols,
                 nrows=nrows,
                 extent=extent,
                 dpi=300,
-                step=step   # ←stepごとに画像を作る
+                step=step   # stepごとの時刻で出力
             )
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
 
-        
-        # 4. 横方向に画像を結合（full.jpgを生成）
-        if panel_imgs and os.path.exists(panel_imgs[0]):
-            img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_p{step+1}.jpg"  # ファイル名だけ工夫
-            os.rename(panel_imgs[0], img_path)
-            panel_img_paths.append(img_path)
+        # 5. 連結画像を作成
+        if panel_img_paths:
+            full_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
+            concat_panel_images_horizontally(panel_img_paths, full_path)
+            panel_img_path = full_path
         else:
             raise RuntimeError("6段1列画像が1枚も生成されませんでした")
 
-
-        
-        # 5. Driveアップ（full.jpgだけ）
+        # 6. Driveアップ（full.jpgだけ）
         if drive_folder:
             delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
             drive_url = upload_to_drive(panel_img_path, folder_id=drive_folder)
         else:
             drive_url = "(未アップロード)"
 
-        # 6. Slack通知
+        # 7. Slack通知
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.path.basename(panel_img_path)}\n"
