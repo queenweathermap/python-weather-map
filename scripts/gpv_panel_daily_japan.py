@@ -22,6 +22,7 @@ from module.plotter.gpv_plotter_universal import (
 )
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
+from module.panel_utils import concat_panel_images_horizontally
 
 def find_and_download_gpv_files(
     base_dir="./data",
@@ -121,6 +122,15 @@ def main():
             dpi=300
         )
         panel_img_path = panel_imgs[0]
+
+
+                # 6段1列のjpg（例: 9step分）
+        img_paths = [f"./output/panel_japan_20250701_UTC00_p{i+1}.jpg" for i in range(9)]
+        img_paths = [p for p in img_paths if os.path.exists(p)]  # 存在チェック
+        if img_paths:
+            concat_panel_images_horizontally(img_paths, "./output/panel_japan_20250701_UTC00_full.jpg")
+
+        
 
         # 4. Driveアップ（1枚だけ）
         if drive_folder:
