@@ -158,7 +158,7 @@ def make_universal_weather_panel(
 from PIL import Image
 
 def concat_images_2by2(img1_path, img2_path, out_path):
-    """2枚だけ合成して保存"""
+    """2枚の画像を横に合成して保存"""
     imgs = [Image.open(img1_path), Image.open(img2_path)]
     widths, heights = zip(*(img.size for img in imgs))
     total_width = sum(widths)
@@ -188,18 +188,18 @@ def concat_panel_images_horizontally(img_paths, out_path):
             if i + 1 < len(temp_imgs):
                 out_tmp = f"{out_path}_tmp_r{round_num}_{i//2}.jpg"
                 concat_images_2by2(temp_imgs[i], temp_imgs[i+1], out_tmp)
-                # 前の2枚の一時ファイルは削除してOK（ただし元パネルを消す場合は注意）
+                # 前の2枚の一時ファイルは削除してOK（元ファイル以外のみ削除）
                 if temp_imgs[i] not in img_paths:
                     os.remove(temp_imgs[i])
                 if temp_imgs[i+1] not in img_paths:
                     os.remove(temp_imgs[i+1])
                 next_temp_imgs.append(out_tmp)
             else:
-                # 奇数枚の場合はそのまま
+                # 奇数枚はそのまま
                 next_temp_imgs.append(temp_imgs[i])
         temp_imgs = next_temp_imgs
         round_num += 1
-    # 最終結果
+    # 最終1枚
     os.rename(temp_imgs[0], out_path)
     print(f"[OK] 横結合画像保存: {out_path}")
     return out_path
