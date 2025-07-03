@@ -81,51 +81,44 @@ def main():
             base_dir=base_dir, days_back=days_back
         )
 
-        # 2. データ抽出
+        # 2. step数取得（代表変数からstep軸を調べるだけ！）
         from module.plotter.gpv_plotter_universal import open_grib2_var_auto
+        arr_sample = open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric")
+        nsteps = arr_sample.sizes["step"] if "step" in arr_sample.sizes else 9
+        del arr_sample
+        gc.collect()
 
-        panel_datasets = {
-            "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "v_300":  open_grib2_var_auto("v", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "gh_500": open_grib2_var_auto("gh", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "u_500":  open_grib2_var_auto("u", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "v_500":  open_grib2_var_auto("v", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "t_700":  open_grib2_var_auto("t", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "r_700":  open_grib2_var_auto("r", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "t_500":  open_grib2_var_auto("t", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "t_850":  open_grib2_var_auto("t", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "u_850":  open_grib2_var_auto("u", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-            "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
-            "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
-            "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        }
-
-        # 3. パネル定義とstep数自動取得
-        panel_def = get_panel_def_japan(panel_datasets)
-        ncols = 1
-        nrows = len(panel_def)
-        extent = REGION_EXTENTS["japan"]
-
-        # --- nsteps自動判定（最上段step数を利用） ---
-        first_ds = panel_def[0][1]
-        if isinstance(first_ds, dict):
-            arr_sample = next((v for v in first_ds.values() if v is not None), None)
-            nsteps = arr_sample.sizes["step"] if arr_sample is not None else 9
-        elif hasattr(first_ds, "sizes") and "step" in first_ds.sizes:
-            nsteps = first_ds.sizes["step"]
-        else:
-            nsteps = 9  # fallback
-
-        # --- 1枚ずつ分割出力 ---
+        # 3. 各stepでのみパネル定義を組み立てて描画！（メモリ最小！）
+        from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
         panel_img_paths = []
-        nsteps = 9  # ←必要なstep数をここで定義
-        
         for step in range(nsteps):
+            # step番目だけ必要変数を都度open
+                panel_datasets = {
+                "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "v_300":  open_grib2_var_auto("v", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "gh_500": open_grib2_var_auto("gh", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "u_500":  open_grib2_var_auto("u", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "v_500":  open_grib2_var_auto("v", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "t_700":  open_grib2_var_auto("t", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "r_700":  open_grib2_var_auto("r", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "t_500":  open_grib2_var_auto("t", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "t_850":  open_grib2_var_auto("t", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "u_850":  open_grib2_var_auto("u", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+                "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+                "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+                "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+                "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+            }
+
+           # 各変数はこのstepだけ！ここでパネル定義
+            panel_def = get_panel_def_japan(panel_datasets)
+            ncols = 1
+            nrows = len(panel_def)
+            extent = REGION_EXTENTS["japan"]
             img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_step{step+1}.jpg"
             panel_imgs = make_universal_weather_panel(
                 save_dir=output_dir,
@@ -133,36 +126,36 @@ def main():
                 times=None,
                 init_time_str=f"{ymd}_UTC{hh}",
                 city_name="japan",
-                ncols=1,
-                nrows=len(panel_def),
-                extent=REGION_EXTENTS["japan"],
-                dpi=120,       # ← ここを小さめに
-                step=step
+                ncols=ncols,
+                nrows=nrows,
+                extent=extent,
+                dpi=120,      # 軽量化
+                step=0        # ←このときは常に0扱いでOK（このstep分しかデータがないため）
             )
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
             # --- 強制メモリ開放 ---
-            del panel_imgs
+            del panel_imgs, panel_datasets, panel_def
             plt.close("all")
             gc.collect()
 
-        # --- 2枚ずつ段階的に横合成 ---
+        # 4. 合成
         if not panel_img_paths:
             raise RuntimeError("天気図パネル画像が1枚も生成されませんでした")
-
+        from module.panel_utils import concat_panel_images_horizontally
         full_img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
         concat_panel_images_horizontally(panel_img_paths, full_img_path)
         panel_img_path = full_img_path  # Drive・Slack用
 
-        # 4. Driveアップ
+        # 5. Driveアップ
         if drive_folder:
             delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
             drive_url = upload_to_drive(panel_img_path, folder_id=drive_folder)
         else:
             drive_url = "(未アップロード)"
 
-        # 5. Slack通知
+        # 6. Slack通知
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
             f"{os.path.basename(panel_img_path)}\n"
