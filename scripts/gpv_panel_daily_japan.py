@@ -102,12 +102,7 @@ def main():
             "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
             "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
         }
-        panel_def = get_panel_def_japan(panel_datasets)
-        ncols = 1                # 1列出力（分割）
-        nrows = len(panel_def)
-        nsteps = 9               # +0h, +3h, ... +24h
-        extent = REGION_EXTENTS["japan"]
-
+        # --- 1枚ずつ分割出力 ---
         panel_img_paths = []
         for step in range(nsteps):
             img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_step{step+1}.jpg"
@@ -121,37 +116,22 @@ def main():
                 nrows=nrows,
                 extent=extent,
                 dpi=300,
-                step=step     # ← stepごとに描画！
+                step=step
             )
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
 
-        # 3. 分割画像を段階的に横合成
+        # --- 2枚ずつ段階的に横合成 ---
         if not panel_img_paths:
             raise RuntimeError("天気図パネル画像が1枚も生成されませんでした")
 
-        # 例：2枚ずつ段階的に合成
         from module.panel_utils import concat_panel_images_horizontally
-        temp_paths = panel_img_paths[:]
-        while len(temp_paths) > 1:
-            next_temp = []
-            for i in range(0, len(temp_paths), 2):
-                imgs_to_merge = temp_paths[i:i+2]
-                if len(imgs_to_merge) == 1:
-                    next_temp.append(imgs_to_merge[0])
-                    continue
-                merged_path = imgs_to_merge[0].replace(".jpg", f"_concat.jpg")
-                concat_panel_images_horizontally(imgs_to_merge, merged_path)
-                next_temp.append(merged_path)
-                # 後始末
-                for img in imgs_to_merge:
-                    if img != merged_path and os.path.exists(img):
-                        os.remove(img)
-            temp_paths = next_temp
+        full_img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
+        concat_panel_images_horizontally(panel_img_paths, full_img_path)
 
-        # 合成画像（1枚）
-        panel_img_path = temp_paths[0]
+        panel_img_path = full_img_path  # Drive・Slack用
+
 
         # 4. Driveアップ
         if drive_folder:
