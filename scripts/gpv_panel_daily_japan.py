@@ -8,6 +8,8 @@
 import os
 import sys
 import datetime
+import gc
+import matplotlib.pyplot as plt 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -121,6 +123,8 @@ def main():
 
         # --- 1枚ずつ分割出力 ---
         panel_img_paths = []
+        nsteps = 9  # ←必要なstep数をここで定義
+        
         for step in range(nsteps):
             img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_step{step+1}.jpg"
             panel_imgs = make_universal_weather_panel(
@@ -129,15 +133,19 @@ def main():
                 times=None,
                 init_time_str=f"{ymd}_UTC{hh}",
                 city_name="japan",
-                ncols=ncols,
-                nrows=nrows,
-                extent=extent,
-                dpi=300,
+                ncols=1,
+                nrows=len(panel_def),
+                extent=REGION_EXTENTS["japan"],
+                dpi=120,       # ← ここを小さめに
                 step=step
             )
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
+            # --- 強制メモリ開放 ---
+            del panel_imgs
+            plt.close("all")
+            gc.collect()
 
         # --- 2枚ずつ段階的に横合成 ---
         if not panel_img_paths:
