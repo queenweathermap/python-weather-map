@@ -1,28 +1,25 @@
 # scripts/gpv_panel_daily_japan.py
 # ===============================================================
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 分割描画→合成方式
+# 1stepずつJPG出力→ZIP化→Driveアップ→Slack通知
 # 2025-07-01 ChatGPT
 # ===============================================================
 
 import os
 import sys
 import datetime
-import gc
-import matplotlib.pyplot as plt 
 import warnings
+import gc
+import zipfile
+import matplotlib.pyplot as plt
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 from module.utils.slack_utils import send_slack_text
-from module.core.gpv_downloader import list_files_on_server, GPV_MIRROR_URLS
-from module.plotter.gpv_plotter_universal import (
-    make_universal_weather_panel,
-    get_rh_fallback,
-    get_apcp_3hr,
-)
+from module.core.gpv_downloader import GPV_MIRROR_URLS
+from module.plotter.gpv_plotter_universal import open_grib2_var_auto, make_universal_weather_panel
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
-from module.panel_utils import concat_panel_images_horizontally
 
 def find_and_download_gpv_files(
     base_dir="./data",
@@ -67,8 +64,10 @@ def find_and_download_gpv_files(
                     return y+m+d, hh, file_paths
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
-
 def main():
+    import matplotlib
+    matplotlib.use("Agg")  # CLI運用
+
     base_dir = "./data"
     output_dir = "./output"
     drive_folder = os.environ.get("DRIVE_FOLDER_ID")
@@ -76,23 +75,21 @@ def main():
     days_back = 2
 
     try:
-        # 1. 必要ファイルDL＆パス取得
+        # 1. ファイルDL＆パス取得
         ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
             base_dir=base_dir, days_back=days_back
         )
 
-        # 2. step数取得（代表変数からstep軸を調べるだけ！）
-        from module.plotter.gpv_plotter_universal import open_grib2_var_auto
+        # 2. step数取得（代表変数からstep軸を調べるだけ）
         arr_sample = open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric")
         nsteps = arr_sample.sizes["step"] if "step" in arr_sample.sizes else 9
         del arr_sample
         gc.collect()
 
-        # 3. 各stepでのみパネル定義を組み立てて描画！（メモリ最小！）
-        from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
+        # 3. 各stepごとに描画→jpg保存
         panel_img_paths = []
         for step in range(nsteps):
-            # step番目だけ必要変数を都度open
+            # 必要変数をstepごとにopen（最小メモリ！）
             panel_datasets = {
                 "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
                 "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
@@ -113,8 +110,6 @@ def main():
                 "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
                 "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
             }
-
-            # 各変数はこのstepだけ！ここでパネル定義
             panel_def = get_panel_def_japan(panel_datasets)
             ncols = 1
             nrows = len(panel_def)
@@ -129,36 +124,37 @@ def main():
                 ncols=ncols,
                 nrows=nrows,
                 extent=extent,
-                dpi=120,      # 軽量化
-                step=0        # ←このときは常に0扱いでOK（このstep分しかデータがないため）
+                dpi=300,     # ←ご希望通り
+                step=0       # ←このときは常に0（1step分だけ）
             )
             if panel_imgs and os.path.exists(panel_imgs[0]):
                 os.rename(panel_imgs[0], img_path)
                 panel_img_paths.append(img_path)
-            # --- 強制メモリ開放 ---
             del panel_imgs, panel_datasets, panel_def
             plt.close("all")
             gc.collect()
 
-        # 4. 合成
+        # 4. ZIPにまとめる
         if not panel_img_paths:
             raise RuntimeError("天気図パネル画像が1枚も生成されませんでした")
-        from module.panel_utils import concat_panel_images_horizontally
-        full_img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
-        concat_panel_images_horizontally(panel_img_paths, full_img_path)
-        panel_img_path = full_img_path  # Drive・Slack用
+        zip_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_all.zip"
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for img_path in panel_img_paths:
+                zf.write(img_path, arcname=os.path.basename(img_path))
+        print(f"[OK] ZIP保存: {zip_path}")
 
         # 5. Driveアップ
         if drive_folder:
             delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
-            drive_url = upload_to_drive(panel_img_path, folder_id=drive_folder)
+            drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
         else:
             drive_url = "(未アップロード)"
 
-        # 6. Slack通知
+        # 6. Slack通知（ZIPのURLのみ）
         msg = (
             f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
-            f"{os.path.basename(panel_img_path)}\n"
+            f"全{len(panel_img_paths)}枚をZIPでまとめました\n"
+            f"{os.path.basename(zip_path)}\n"
             f"{drive_url if drive_url else '(Driveアップロード失敗)'}"
         )
         send_slack_text(channel=slack_channel, message=msg)
