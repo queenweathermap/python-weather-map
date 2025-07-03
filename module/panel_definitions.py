@@ -11,16 +11,10 @@ REGION_EXTENTS = {
 }
 
 def get_panel_def_japan(var_dict):
-    print(f"[DEBUG] get_panel_def_japan: called with var_dict keys: {list(var_dict.keys())}")
-    for k, v in var_dict.items():
-        if v is None:
-            print(f"[WARN] get_panel_def_japan: var_dict['{k}'] is None!")
-        else:
-            print(f"[OK] get_panel_def_japan: var_dict['{k}'] shape={getattr(v, 'shape', 'N/A')} dims={getattr(v, 'dims', 'N/A')}")
     """
-    全国16列6段パネル定義
-    var_dict: すべての必要変数をkey指定で格納したdict
-      例: {"gh_300": <DataArray>, "u_300": ...}
+    全国6段パネル定義（JPG1枚=1step分で呼ぶ用）
+    var_dict: そのstep分の変数dict
+      例: {"gh_300": <DataArray>, ...}
     """
     from module.plot.plot_300hpa_height_wind import plot_300hpa_height_wind
     from module.plot.plot_500hpa_vorticity import plot_500hpa_vorticity
@@ -31,69 +25,49 @@ def get_panel_def_japan(var_dict):
 
     return [
         # 1段目: 300hPa高度・風
-        (plot_300hpa_height_wind,
-            {
-                "h": var_dict.get("gh_300"),
-                "u": var_dict.get("u_300"),
-                "v": var_dict.get("v_300"),
-            },
-            "300hPa高度・風"
-        ),
+        (plot_300hpa_height_wind, {
+            "h": var_dict.get("gh_300"),
+            "u": var_dict.get("u_300"),
+            "v": var_dict.get("v_300"),
+        }, "300hPa高度・風"),
         # 2段目: 500hPa渦度
-        (plot_500hpa_vorticity,
-            {
-                "h": var_dict.get("gh_500"),
-                "u": var_dict.get("u_500"),
-                "v": var_dict.get("v_500"),
-            },
-            "500hPa渦度"
-        ),
+        (plot_500hpa_vorticity, {
+            "h": var_dict.get("gh_500"),
+            "u": var_dict.get("u_500"),
+            "v": var_dict.get("v_500"),
+        }, "500hPa渦度"),
         # 3段目: 700hPa湿数＋500hPa気温
-        (plot_700hpa_dindex_500hpa_temp,
-            {
-                "t_700": var_dict.get("t_700"),
-                "r_700": var_dict.get("r_700"),
-                "t_500": var_dict.get("t_500"),
-            },
-            "700hPa湿数+500hPa気温"
-        ),
+        (plot_700hpa_dindex_500hpa_temp, {
+            "t_700": var_dict.get("t_700"),
+            "r_700": var_dict.get("r_700"),
+            "t_500": var_dict.get("t_500"),
+        }, "700hPa湿数+500hPa気温"),
         # 4段目: 850hPa温度・風＋700hPa鉛直流
-        (plot_850hpa_temp_wind_700hpa_w,
-            {
-                "t_850": var_dict.get("t_850"),
-                "u_850": var_dict.get("u_850"),
-                "v_850": var_dict.get("v_850"),
-                "w_700": var_dict.get("w_700"),
-            },
-            "850hPa温度・風+700hPa鉛直流"
-        ),
+        (plot_850hpa_temp_wind_700hpa_w, {
+            "t_850": var_dict.get("t_850"),
+            "u_850": var_dict.get("u_850"),
+            "v_850": var_dict.get("v_850"),
+            "w_700": var_dict.get("w_700"),
+        }, "850hPa温度・風+700hPa鉛直流"),
         # 5段目: 850hPa θe流線
-        (plot_850hpa_thetae_stream,
-            {
-                "t_850": var_dict.get("t_850"),
-                "r_850": var_dict.get("r_850"),
-                "u_850": var_dict.get("u_850"),
-                "v_850": var_dict.get("v_850"),
-            },
-            "850hPa θe流線"
-        ),
+        (plot_850hpa_thetae_stream, {
+            "t_850": var_dict.get("t_850"),
+            "r_850": var_dict.get("r_850"),
+            "u_850": var_dict.get("u_850"),
+            "v_850": var_dict.get("v_850"),
+        }, "850hPa θe流線"),
         # 6段目: 地上気圧・風・降水量
-        (plot_surface_pressure_and_wind_msm,
-            {
-                "prmsl": var_dict.get("prmsl"),
-                "u10":   var_dict.get("u10"),
-                "v10":   var_dict.get("v10"),
-                "apcp":  var_dict.get("apcp"),
-            },
-            "地上気圧・風・降水量"
-        ),
+        (plot_surface_pressure_and_wind_msm, {
+            "prmsl": var_dict.get("prmsl"),
+            "u10":   var_dict.get("u10"),
+            "v10":   var_dict.get("v10"),
+            "apcp":  var_dict.get("apcp"),
+        }, "地上気圧・風・降水量"),
     ]
-
 
 def get_panel_def_akita(var_dict):
     """
-    秋田局地8段（または7段＋空欄1段等）パネル定義
-    var_dict: 必要変数をkey指定したdict
+    秋田局地用パネル定義
     """
     from module.plot.plot_emagram import plot_emagram
     from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
@@ -122,7 +96,6 @@ def get_panel_def_local(var_items, total_rows=8):
     result = list(var_items)
     while len(result) < total_rows:
         result.append(def_item)
-    print(f"[DEBUG] get_panel_def_japan: returning {len(var_dict)} variables as panel_def")
     return result[:total_rows]
 
 # --- 公開関数 ---
