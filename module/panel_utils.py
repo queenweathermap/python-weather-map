@@ -91,7 +91,7 @@ def make_universal_weather_panel(
     city_name="japan",
     ncols=9, nrows=6,   # ←8列6段
     extent=None,
-    dpi=120
+    dpi=120,
     step=None
 ):
     """
