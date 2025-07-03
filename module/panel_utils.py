@@ -89,13 +89,13 @@ def make_universal_weather_panel(
     times,
     init_time_str,
     city_name="japan",
-    ncols=9, nrows=6,   # ←8列6段
+    ncols=1, nrows=6,   # ←1列6段（stepごと1枚）
     extent=None,
-    dpi=120,
-    step=None
+    dpi=300,
+    step=0
 ):
     """
-    9列×6段（合計48コマ）の1枚パネル画像を生成
+    1列×6段（1step分のパネル画像）を生成
     ファイル右上にイニシャル時刻入りのファイル名
     """
     import cartopy.crs as ccrs
@@ -108,52 +108,49 @@ def make_universal_weather_panel(
         for _ in range(nrows - len(panel_def)):
             panel_def.append((None, None, ""))
 
-    # --- パネル描画 ---
     fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols,
-        figsize=(ncols*3, nrows*3),
+        nrows=nrows, ncols=1,
+        figsize=(3, nrows*3),
         constrained_layout=True,
         subplot_kw=dict(projection=ccrs.PlateCarree())
     )
 
-    for row, (plot_func, ds, title) in enumerate(panel_def):
-        # dsがNoneなら空白
-        n_steps = ds.sizes["step"] if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes) else 0
-        for col in range(ncols):
-            step = col
-            ax = axes[row, col]
-            if extent:
-                ax.set_extent(extent, crs=ccrs.PlateCarree())
-            if plot_func is None or ds is None or step >= n_steps:
-                ax.axis("off")
-                ax.set_title("" if plot_func is None else f"{title} (no data)")
-                continue
-            try:
-                # dictならサイズ確認スキップ（直接プロット関数にstep渡す）
-                if isinstance(ds, dict):
-                    plot_func(ax, ds, step=step)
-                else:
-                    # 従来どおりDatasetならstepでスライス
-                    ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
-                    plot_func(ax, ds_step)
-                ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
-            except Exception as e:
-                print(f"[WARN] パネル描画失敗: {title} {e}")
-                ax.axis("off")
-                ax.set_title(f"{title} (error)", fontsize=7)
+    # axesが配列でないとき対応
+    if not isinstance(axes, (list, np.ndarray)):
+        axes = [axes]
 
-    # ヘッダ・タイトルなし（要件どおり）
-    # 右上にイニシャル時刻付きファイル名
+    for row, (plot_func, ds, title) in enumerate(panel_def):
+        ax = axes[row]
+        if extent:
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
+        if plot_func is None or ds is None:
+            ax.axis("off")
+            ax.set_title("" if plot_func is None else f"{title} (no data)")
+            continue
+        try:
+            # dictをplot_funcにstep指定で渡す
+            if isinstance(ds, dict):
+                plot_func(ax, ds, step=step)
+            else:
+                # xarrayならstepでスライス
+                ds_step = ds.isel(step=step) if "step" in ds.sizes else ds
+                plot_func(ax, ds_step)
+            ax.set_title(f"{title}\n(+{step*3}h)", fontsize=9)
+        except Exception as e:
+            print(f"[WARN] パネル描画失敗: {title} {e}")
+            ax.axis("off")
+            ax.set_title(f"{title} (error)", fontsize=9)
+
     fig.text(0.99, 0.99, f"{city_name}_{init_time_str}", fontsize=10,
              ha="right", va="top", alpha=0.8, color="gray")
 
-    # ファイル名例: panel_japan_20240701_00UTC.jpg
-    out_name = f"panel_{city_name}_{init_time_str}.jpg"
+    out_name = f"panel_{city_name}_{init_time_str}_step{step+1}.jpg"
     out_path = os.path.join(save_dir, out_name)
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     panel_imgs.append(out_path)
     return panel_imgs
+
 
 # --- 複数パネル画像（縦長jpg）を横に並べて合成 ---
 from PIL import Image
