@@ -157,29 +157,50 @@ def make_universal_weather_panel(
 # --- 複数パネル画像（縦長jpg）を横に並べて合成 ---
 from PIL import Image
 
-def concat_panel_images_horizontally(img_paths, out_path):
-    """
-    複数の「6段1列パネル画像」を横方向（step順に並べて）合成し、1枚の横長画像として保存
-    img_paths: ["panel_xxx_p1.jpg", ..., "panel_xxx_pN.jpg"]
-    out_path:  "panel_xxx_full.jpg"
-    - 画像サイズは全て同じ（高さ一致）前提
-    - 枚数・step数は何枚でもOK
-    """
-    if not img_paths:
-        print("[WARN] 画像リストが空です")
-        return None
-    imgs = [Image.open(p) for p in img_paths]
-    # 全画像の幅・高さ取得
+def concat_images_2by2(img1_path, img2_path, out_path):
+    """2枚だけ合成して保存"""
+    imgs = [Image.open(img1_path), Image.open(img2_path)]
     widths, heights = zip(*(img.size for img in imgs))
     total_width = sum(widths)
     max_height = max(heights)
-    # 横長キャンバス生成
     new_img = Image.new("RGB", (total_width, max_height))
     x_offset = 0
     for img in imgs:
         new_img.paste(img, (x_offset, 0))
         x_offset += img.width
+        img.close()
     new_img.save(out_path)
+    new_img.close()
+    return out_path
+
+def concat_panel_images_horizontally(img_paths, out_path):
+    """
+    パネル画像リストimg_paths（左→右）を2枚ずつ段階的に合成し、最終的に1枚の横長画像を作る
+    """
+    if not img_paths:
+        print("[WARN] 画像リストが空です")
+        return None
+    temp_imgs = img_paths[:]
+    round_num = 1
+    while len(temp_imgs) > 1:
+        next_temp_imgs = []
+        for i in range(0, len(temp_imgs), 2):
+            if i + 1 < len(temp_imgs):
+                out_tmp = f"{out_path}_tmp_r{round_num}_{i//2}.jpg"
+                concat_images_2by2(temp_imgs[i], temp_imgs[i+1], out_tmp)
+                # 前の2枚の一時ファイルは削除してOK（ただし元パネルを消す場合は注意）
+                if temp_imgs[i] not in img_paths:
+                    os.remove(temp_imgs[i])
+                if temp_imgs[i+1] not in img_paths:
+                    os.remove(temp_imgs[i+1])
+                next_temp_imgs.append(out_tmp)
+            else:
+                # 奇数枚の場合はそのまま
+                next_temp_imgs.append(temp_imgs[i])
+        temp_imgs = next_temp_imgs
+        round_num += 1
+    # 最終結果
+    os.rename(temp_imgs[0], out_path)
     print(f"[OK] 横結合画像保存: {out_path}")
     return out_path
 
