@@ -27,7 +27,7 @@ def get_lon_lat(ds):
 # module/plot/plot_500hpa_vorticity.py
 def plot_500hpa_vorticity(ax, ds_dict, step=0):
     """
-    500hPa等高度・正渦度（オレンジ）パネル描画（dict＋step対応）
+    500hPa等高度・正渦度（オレンジ）パネル描画（dict＋step対応/完全2次元化/np.ndarray渡しで安全）
     ds_dict: {"h":..., "u":..., "v":...}
     step: スライス番号
     """
@@ -46,38 +46,37 @@ def plot_500hpa_vorticity(ax, ds_dict, step=0):
                     ha="center", va="center", transform=ax.transAxes)
             return
 
-    # --- 必ず2次元化（step以外の次元を落とす） ---
-    def to_2d(arr):
-        arr2 = arr.isel(step=step)
-        # 不要な次元（time, valid_time）があれば最初のインデックスで固定
-        for dim in ["time", "valid_time"]:
-            if dim in arr2.dims:
-                arr2 = arr2.isel({dim: 0})
-        return arr2
+    # --- step, time, valid_time すべて落とし "y, x" だけに ---
+    def arr2d(da):
+        # da: xarray.DataArray
+        # 必要な次元は latitude/longitude または (y, x) だけ
+        sl = {}
+        for dim in da.dims:
+            if dim == "step":
+                sl[dim] = step
+            elif dim in ["time", "valid_time"]:
+                sl[dim] = 0
+        da2 = da.isel(**sl) if sl else da
+        return da2.values  # ndarrayで返す
 
-    hgt = to_2d(ds_dict["h"])
-    ugrd = to_2d(ds_dict["u"])
-    vgrd = to_2d(ds_dict["v"])
-
-    # --- 2次元shape確認ログ（デバッグ用） ---
-    print(f"[DEBUG] hgt.shape={hgt.shape}, ugrd.shape={ugrd.shape}, vgrd.shape={vgrd.shape}")
-
-    # --- MetPyユニット変換 ---
-    ugrd = ugrd * units('m/s')
-    vgrd = vgrd * units('m/s')
+    hgt  = arr2d(ds_dict["h"])
+    ugrd = arr2d(ds_dict["u"])
+    vgrd = arr2d(ds_dict["v"])
 
     # --- 格子生成 ---
-    lon2d = hgt["longitude"].values
-    lat2d = hgt["latitude"].values
+    lon = ds_dict["h"]["longitude"]
+    lat = ds_dict["h"]["latitude"]
+    lon2d = lon.values
+    lat2d = lat.values
     if lon2d.ndim == 1 and lat2d.ndim == 1:
         lon2d, lat2d = np.meshgrid(lon2d, lat2d)
 
-    # --- 格子デルタ算出 ---
+    # --- 渦度計算（np.ndarray + metpy units）---
+    ugrd = ugrd * units('m/s')
+    vgrd = vgrd * units('m/s')
     dy, dx = mpcalc.lat_lon_grid_deltas(lon2d, lat2d)
     dx_mean = np.mean(dx)
     dy_mean = np.mean(dy)
-
-    # --- 渦度計算 ---
     vort = mpcalc.vorticity(ugrd, vgrd, dx=dx_mean, dy=dy_mean)
 
     # --- 地図装飾 ---
