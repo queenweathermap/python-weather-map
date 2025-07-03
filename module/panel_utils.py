@@ -89,12 +89,13 @@ def make_universal_weather_panel(
     times,
     init_time_str,
     city_name="japan",
-    ncols=8, nrows=6,   # ←8列6段
+    ncols=9, nrows=6,   # ←8列6段
     extent=None,
-    dpi=300
+    dpi=120
+    step=None
 ):
     """
-    8列×6段（合計48コマ）の1枚パネル画像を生成
+    9列×6段（合計48コマ）の1枚パネル画像を生成
     ファイル右上にイニシャル時刻入りのファイル名
     """
     import cartopy.crs as ccrs
