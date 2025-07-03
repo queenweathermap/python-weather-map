@@ -102,6 +102,23 @@ def main():
             "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
             "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
         }
+
+        # 3. パネル定義とstep数自動取得
+        panel_def = get_panel_def_japan(panel_datasets)
+        ncols = 1
+        nrows = len(panel_def)
+        extent = REGION_EXTENTS["japan"]
+
+        # --- nsteps自動判定（最上段step数を利用） ---
+        first_ds = panel_def[0][1]
+        if isinstance(first_ds, dict):
+            arr_sample = next((v for v in first_ds.values() if v is not None), None)
+            nsteps = arr_sample.sizes["step"] if arr_sample is not None else 9
+        elif hasattr(first_ds, "sizes") and "step" in first_ds.sizes:
+            nsteps = first_ds.sizes["step"]
+        else:
+            nsteps = 9  # fallback
+
         # --- 1枚ずつ分割出力 ---
         panel_img_paths = []
         for step in range(nsteps):
@@ -126,12 +143,9 @@ def main():
         if not panel_img_paths:
             raise RuntimeError("天気図パネル画像が1枚も生成されませんでした")
 
-        from module.panel_utils import concat_panel_images_horizontally
         full_img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_full.jpg"
         concat_panel_images_horizontally(panel_img_paths, full_img_path)
-
         panel_img_path = full_img_path  # Drive・Slack用
-
 
         # 4. Driveアップ
         if drive_folder:
