@@ -1,15 +1,13 @@
 # scripts/gpv_panel_daily_japan.py
 # ===============================================================
 # 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 2025-07-01 ChatGPT（plotter_universal利用に統一／複数枚→横結合）
+# 分割描画→合成方式
+# 2025-07-01 ChatGPT
 # ===============================================================
 
 import os
 import sys
-import glob
 import datetime
-import requests
-import xarray as xr
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -39,6 +37,7 @@ def find_and_download_gpv_files(
             dt = day.replace(hour=h, minute=0, second=0, microsecond=0)
             y, m, d, hh = dt.strftime("%Y %m %d %H").split()
             data_url = f"{base_url}/{y}/{m}/{d}/"
+            from module.core.gpv_downloader import list_files_on_server
             gsm_files = list_files_on_server(dt, "GSM_GPV_Rjp_Gll0p1deg_L-pall", fh_band_gsm)
             msm_l_pall_files = list_files_on_server(dt, "MSM_GPV_Rjp_L-pall", fh_band_msm)
             msm_lsurf_files  = list_files_on_server(dt, "MSM_GPV_Rjp_Lsurf", fh_band_msm)
@@ -47,6 +46,7 @@ def find_and_download_gpv_files(
                 msm_l_pall_fname = msm_l_pall_files[0]
                 msm_lsurf_fname  = msm_lsurf_files[0]
                 file_paths = []
+                import requests
                 for fname in [gsm_l_pall_fname, msm_l_pall_fname, msm_lsurf_fname]:
                     url = f"{data_url}{fname}"
                     local = os.path.join(base_dir, fname)
@@ -65,6 +65,7 @@ def find_and_download_gpv_files(
                     return y+m+d, hh, file_paths
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
 
+
 def main():
     base_dir = "./data"
     output_dir = "./output"
@@ -78,7 +79,7 @@ def main():
             base_dir=base_dir, days_back=days_back
         )
 
-        # 2. データ抽出（パネル定義取得に必要なdictを構築）
+        # 2. データ抽出
         from module.plotter.gpv_plotter_universal import open_grib2_var_auto
 
         panel_datasets = {
@@ -102,28 +103,55 @@ def main():
             "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
         }
         panel_def = get_panel_def_japan(panel_datasets)
-
-       # 3. 1枚で9列出力！
-        ncols = 9
+        ncols = 1                # 1列出力（分割）
         nrows = len(panel_def)
+        nsteps = 9               # +0h, +3h, ... +24h
         extent = REGION_EXTENTS["japan"]
 
-        panel_imgs = make_universal_weather_panel(
-            save_dir=output_dir,
-            panel_def=panel_def,
-            times=None,
-            init_time_str=f"{ymd}_UTC{hh}",
-            city_name="japan",
-            ncols=ncols,
-            nrows=nrows,
-            extent=extent,
-            dpi=300
-        )
+        panel_img_paths = []
+        for step in range(nsteps):
+            img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_step{step+1}.jpg"
+            panel_imgs = make_universal_weather_panel(
+                save_dir=output_dir,
+                panel_def=panel_def,
+                times=None,
+                init_time_str=f"{ymd}_UTC{hh}",
+                city_name="japan",
+                ncols=ncols,
+                nrows=nrows,
+                extent=extent,
+                dpi=300,
+                step=step     # ← stepごとに描画！
+            )
+            if panel_imgs and os.path.exists(panel_imgs[0]):
+                os.rename(panel_imgs[0], img_path)
+                panel_img_paths.append(img_path)
 
-        if panel_imgs and os.path.exists(panel_imgs[0]):
-            panel_img_path = panel_imgs[0]
-        else:
-            raise RuntimeError("天気図パネル画像が生成されませんでした")
+        # 3. 分割画像を段階的に横合成
+        if not panel_img_paths:
+            raise RuntimeError("天気図パネル画像が1枚も生成されませんでした")
+
+        # 例：2枚ずつ段階的に合成
+        from module.panel_utils import concat_panel_images_horizontally
+        temp_paths = panel_img_paths[:]
+        while len(temp_paths) > 1:
+            next_temp = []
+            for i in range(0, len(temp_paths), 2):
+                imgs_to_merge = temp_paths[i:i+2]
+                if len(imgs_to_merge) == 1:
+                    next_temp.append(imgs_to_merge[0])
+                    continue
+                merged_path = imgs_to_merge[0].replace(".jpg", f"_concat.jpg")
+                concat_panel_images_horizontally(imgs_to_merge, merged_path)
+                next_temp.append(merged_path)
+                # 後始末
+                for img in imgs_to_merge:
+                    if img != merged_path and os.path.exists(img):
+                        os.remove(img)
+            temp_paths = next_temp
+
+        # 合成画像（1枚）
+        panel_img_path = temp_paths[0]
 
         # 4. Driveアップ
         if drive_folder:
