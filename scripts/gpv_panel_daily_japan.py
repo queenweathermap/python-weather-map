@@ -124,7 +124,7 @@ def main():
                 ncols=ncols,
                 nrows=nrows,
                 extent=extent,
-                dpi=300,     # ←ご希望通り
+                dpi=80,     # ←ご希望通り
                 step=0       # ←このときは常に0（1step分だけ）
             )
             if panel_imgs and os.path.exists(panel_imgs[0]):
