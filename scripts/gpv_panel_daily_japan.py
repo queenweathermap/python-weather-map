@@ -93,7 +93,7 @@ def main():
         panel_img_paths = []
         for step in range(nsteps):
             # step番目だけ必要変数を都度open
-                panel_datasets = {
+            panel_datasets = {
                 "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
                 "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
                 "v_300":  open_grib2_var_auto("v", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
@@ -114,7 +114,7 @@ def main():
                 "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
             }
 
-           # 各変数はこのstepだけ！ここでパネル定義
+            # 各変数はこのstepだけ！ここでパネル定義
             panel_def = get_panel_def_japan(panel_datasets)
             ncols = 1
             nrows = len(panel_def)
