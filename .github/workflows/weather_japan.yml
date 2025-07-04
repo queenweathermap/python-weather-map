@@ -1,10 +1,10 @@
 # .github/workflows/weather_japan.yml
 # ===============================================
-# 全国GSM/MSMハイブリッド天気図パネル自動生成（Slack・Drive連携）
-# Cartopy地理データのキャッシュ対応！
+# 全国GSM/MSMハイブリッド天気図パネル自動生成（Slack・Drive連携・matrix分割）
+# 各予報時刻ごとに個別ジョブで描画・通知！
 # ===============================================
 
-name: JAPAN Weather Panel
+name: JAPAN Weather Panel (Matrix Split)
 
 on:
   schedule:
@@ -14,7 +14,12 @@ on:
 jobs:
   run-japan-panel:
     runs-on: ubuntu-latest
-    timeout-minutes: 90        # 長時間実行にも対応
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        forecast_hour: [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36]
+        # 必要な時刻だけリストアップ（9時間ごとでも3時間ごとでもOK）
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -38,11 +43,13 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
-      - name: Run Japan Weather Panel Script
+      - name: Run Japan Weather Panel Script (each forecast hour)
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          FORECAST_HOUR: ${{ matrix.forecast_hour }}
         run: |
-          PYTHONPATH=. python scripts/gpv_panel_daily_japan.py
+          echo "[INFO] forecast_hour=$FORECAST_HOUR"
+          PYTHONPATH=. python scripts/gpv_panel_daily_japan.py --forecast_hour $FORECAST_HOUR
