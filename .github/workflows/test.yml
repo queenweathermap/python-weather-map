@@ -8,4 +8,9 @@ name: Test
 on:
   workflow_dispatch:
 
-run: echo "START"
+jobs:
+  test-echo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo start message
+        run: echo "START"
