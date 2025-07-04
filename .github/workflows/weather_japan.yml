@@ -19,6 +19,7 @@ jobs:
       matrix:
         forecast_hour: [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36]
         # 必要な時刻だけリストアップ（9時間ごとでも3時間ごとでもOK）
+      max-parallel: 2
 
     steps:
       - name: Checkout repo
