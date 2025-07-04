@@ -11,6 +11,7 @@ import datetime
 import warnings
 import gc
 import zipfile
+import argparse
 import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -168,6 +169,15 @@ def main():
         print(f"[ERROR] {e}")
         import traceback; traceback.print_exc()
         sys.exit(1)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--forecast_hour', type=int, default=0,
+                        help='描画する予報時刻（0, 3, 6, ...）')
+    args = parser.parse_args()
+
+    # args.forecast_hour の値だけ処理・描画
+    print(f"[INFO] forecast_hour={args.forecast_hour}")
+    # ↓ここでargs.forecast_hourを使って必要なパネルだけ描画
 
 if __name__ == "__main__":
     main()
