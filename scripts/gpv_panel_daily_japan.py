@@ -74,12 +74,8 @@ def main():
     args = parser.parse_args()
     forecast_hour = args.forecast_hour
 
-    
-    # args.forecast_hour の値だけ処理・描画
     print(f"[INFO] forecast_hour={forecast_hour}")
-    # ↓ここでargs.forecast_hourを使って必要なパネルだけ描画
 
-    # --- 共通設定 ---
     base_dir = "./data"
     output_dir = "./output"
     drive_folder = os.environ.get("DRIVE_FOLDER_ID")
@@ -145,72 +141,23 @@ def main():
             os.rename(panel_imgs[0], img_path)
             print(f"[OK] 画像保存: {img_path}")
 
-        del panel_imgs, panel_datasets, panel_def
-        plt.close("all")
-        gc.collect()
+            # 4. Google Driveへアップロード
+            if drive_folder:
+                delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
+                drive_url = upload_to_drive(img_path, folder_id=drive_folder)
+            else:
+                drive_url = "(未アップロード)"
 
-        # 3. 各stepごとに描画→jpg保存
-        panel_img_paths = []
-        for step in range(nsteps):
-            # 必要変数をstepごとにopen（最小メモリ！）
-            panel_datasets = {
-                "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "v_300":  open_grib2_var_auto("v", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "gh_500": open_grib2_var_auto("gh", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "u_500":  open_grib2_var_auto("u", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "v_500":  open_grib2_var_auto("v", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "t_700":  open_grib2_var_auto("t", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "r_700":  open_grib2_var_auto("r", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "t_500":  open_grib2_var_auto("t", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "t_850":  open_grib2_var_auto("t", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "u_850":  open_grib2_var_auto("u", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-                "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-                "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
-                "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
-                "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-            }
-            panel_def = get_panel_def_japan(panel_datasets)
-            ncols = 1
-            nrows = len(panel_def)
-            extent = REGION_EXTENTS["japan"]
-            img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_fh{forecast_hour:02}.jpg"
-            panel_imgs = make_universal_weather_panel(
-                save_dir=output_dir,
-                panel_def=panel_def,
-                times=None,
-                init_time_str=f"{ymd}_UTC{hh}",
-                city_name="japan",
-                ncols=ncols,
-                nrows=nrows,
-                extent=extent,
-                dpi=80,
-                step=step
+            # 5. SlackにURL通知
+            msg = (
+                f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
+                f"{os.path.basename(img_path)}\n"
+                f"{drive_url if drive_url else '(Driveアップロード失敗)'}"
             )
-        if panel_imgs and os.path.exists(panel_imgs[0]):
-            os.rename(panel_imgs[0], img_path)
-            print(f"[OK] 画像保存: {img_path}")
-
-        # 4. Google Driveへアップロード
-        if drive_folder:
-            delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
-            drive_url = upload_to_drive(img_path, folder_id=drive_folder)
+            send_slack_text(channel=slack_channel, message=msg)
+            print("[OK] Slack通知 完了")
         else:
-            drive_url = "(未アップロード)"
-
-        # 5. SlackにURL通知
-        msg = (
-            f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
-            f"{os.path.basename(img_path)}\n"
-            f"{drive_url if drive_url else '(Driveアップロード失敗)'}"
-        )
-        send_slack_text(channel=slack_channel, message=msg)
-        print("[OK] Slack通知 完了")
-    else:
-        raise RuntimeError("画像ファイル生成に失敗しました")
+            raise RuntimeError("画像ファイル生成に失敗しました")
 
     except FileNotFoundError:
         send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
