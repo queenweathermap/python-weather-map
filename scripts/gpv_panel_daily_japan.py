@@ -69,6 +69,15 @@ def main():
     import matplotlib
     matplotlib.use("Agg")  # CLI運用
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--forecast_hour', type=int, default=0, help='描画する予報時刻（0, 3, 6, ...）')
+    args = parser.parse_args()
+    forecast_hour = args.forecast_hour
+    
+    # args.forecast_hour の値だけ処理・描画
+    print(f"[INFO] forecast_hour={args.forecast_hour}")
+    # ↓ここでargs.forecast_hourを使って必要なパネルだけ描画
+
     base_dir = "./data"
     output_dir = "./output"
     drive_folder = os.environ.get("DRIVE_FOLDER_ID")
@@ -85,6 +94,57 @@ def main():
         arr_sample = open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric")
         nsteps = arr_sample.sizes["step"] if "step" in arr_sample.sizes else 9
         del arr_sample
+        gc.collect()
+
+        # 3. 指定stepだけ描画
+        step = forecast_hour // 3  # 例: 3時間ごとならstep=1, 6時間ごとならstep=2
+        if step >= nsteps or step < 0:
+            raise ValueError(f"指定のforecast_hour({forecast_hour})が有効な範囲外です（nsteps={nsteps})")
+
+        # 必要変数をstepごとにopen
+        panel_datasets = {
+            "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_300":  open_grib2_var_auto("v", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "gh_500": open_grib2_var_auto("gh", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_500":  open_grib2_var_auto("u", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_500":  open_grib2_var_auto("v", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "t_700":  open_grib2_var_auto("t", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "r_700":  open_grib2_var_auto("r", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "t_500":  open_grib2_var_auto("t", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "t_850":  open_grib2_var_auto("t", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "u_850":  open_grib2_var_auto("u", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
+            "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+            "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+            "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+            "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+        }
+        panel_def = get_panel_def_japan(panel_datasets)
+        ncols = 1
+        nrows = len(panel_def)
+        extent = REGION_EXTENTS["japan"]
+        img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_step{step+1}.jpg"
+        panel_imgs = make_universal_weather_panel(
+            save_dir=output_dir,
+            panel_def=panel_def,
+            times=None,
+            init_time_str=f"{ymd}_UTC{hh}",
+            city_name="japan",
+            ncols=ncols,
+            nrows=nrows,
+            extent=extent,
+            dpi=80,
+            step=step
+        )
+        if panel_imgs and os.path.exists(panel_imgs[0]):
+            os.rename(panel_imgs[0], img_path)
+            print(f"[OK] 画像保存: {img_path}")
+
+        del panel_imgs, panel_datasets, panel_def
+        plt.close("all")
         gc.collect()
 
         # 3. 各stepごとに描画→jpg保存
@@ -169,15 +229,6 @@ def main():
         print(f"[ERROR] {e}")
         import traceback; traceback.print_exc()
         sys.exit(1)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--forecast_hour', type=int, default=0,
-                        help='描画する予報時刻（0, 3, 6, ...）')
-    args = parser.parse_args()
-
-    # args.forecast_hour の値だけ処理・描画
-    print(f"[INFO] forecast_hour={args.forecast_hour}")
-    # ↓ここでargs.forecast_hourを使って必要なパネルだけ描画
 
 if __name__ == "__main__":
     main()
