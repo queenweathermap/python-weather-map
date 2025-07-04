@@ -67,17 +67,19 @@ def find_and_download_gpv_files(
 
 def main():
     import matplotlib
-    matplotlib.use("Agg")  # CLI運用
+    matplotlib.use("Agg")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--forecast_hour', type=int, default=0, help='描画する予報時刻（0, 3, 6, ...）')
+    parser.add_argument('--forecast_hour', type=int, default=0)
     args = parser.parse_args()
     forecast_hour = args.forecast_hour
+
     
     # args.forecast_hour の値だけ処理・描画
-    print(f"[INFO] forecast_hour={args.forecast_hour}")
+    print(f"[INFO] forecast_hour={forecast_hour}")
     # ↓ここでargs.forecast_hourを使って必要なパネルだけ描画
 
+    # --- 共通設定 ---
     base_dir = "./data"
     output_dir = "./output"
     drive_folder = os.environ.get("DRIVE_FOLDER_ID")
@@ -90,14 +92,14 @@ def main():
             base_dir=base_dir, days_back=days_back
         )
 
-        # 2. step数取得（代表変数からstep軸を調べるだけ）
+        # 2. step数取得
         arr_sample = open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric")
         nsteps = arr_sample.sizes["step"] if "step" in arr_sample.sizes else 9
         del arr_sample
         gc.collect()
 
-        # 3. 指定stepだけ描画
-        step = forecast_hour // 3  # 例: 3時間ごとならstep=1, 6時間ごとならstep=2
+        # 3. このjobのforecast_hourだけ描画
+        step = forecast_hour // 3
         if step >= nsteps or step < 0:
             raise ValueError(f"指定のforecast_hour({forecast_hour})が有効な範囲外です（nsteps={nsteps})")
 
@@ -126,7 +128,7 @@ def main():
         ncols = 1
         nrows = len(panel_def)
         extent = REGION_EXTENTS["japan"]
-        img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_step{step+1}.jpg"
+        img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_fh{forecast_hour:02}.jpg"
         panel_imgs = make_universal_weather_panel(
             save_dir=output_dir,
             panel_def=panel_def,
@@ -175,7 +177,7 @@ def main():
             ncols = 1
             nrows = len(panel_def)
             extent = REGION_EXTENTS["japan"]
-            img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_step{step+1}.jpg"
+            img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_fh{forecast_hour:02}.jpg"
             panel_imgs = make_universal_weather_panel(
                 save_dir=output_dir,
                 panel_def=panel_def,
@@ -185,41 +187,30 @@ def main():
                 ncols=ncols,
                 nrows=nrows,
                 extent=extent,
-                dpi=80,     # ←ご希望通り
-                step=0       # ←このときは常に0（1step分だけ）
+                dpi=80,
+                step=step
             )
-            if panel_imgs and os.path.exists(panel_imgs[0]):
-                os.rename(panel_imgs[0], img_path)
-                panel_img_paths.append(img_path)
-            del panel_imgs, panel_datasets, panel_def
-            plt.close("all")
-            gc.collect()
+        if panel_imgs and os.path.exists(panel_imgs[0]):
+            os.rename(panel_imgs[0], img_path)
+            print(f"[OK] 画像保存: {img_path}")
 
-        # 4. ZIPにまとめる
-        if not panel_img_paths:
-            raise RuntimeError("天気図パネル画像が1枚も生成されませんでした")
-        zip_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_all.zip"
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for img_path in panel_img_paths:
-                zf.write(img_path, arcname=os.path.basename(img_path))
-        print(f"[OK] ZIP保存: {zip_path}")
-
-        # 5. Driveアップ
+        # 4. Google Driveへアップロード
         if drive_folder:
             delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
-            drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
+            drive_url = upload_to_drive(img_path, folder_id=drive_folder)
         else:
             drive_url = "(未アップロード)"
 
-        # 6. Slack通知（ZIPのURLのみ）
+        # 5. SlackにURL通知
         msg = (
-            f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh}\n"
-            f"全{len(panel_img_paths)}枚をZIPでまとめました\n"
-            f"{os.path.basename(zip_path)}\n"
+            f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
+            f"{os.path.basename(img_path)}\n"
             f"{drive_url if drive_url else '(Driveアップロード失敗)'}"
         )
         send_slack_text(channel=slack_channel, message=msg)
-        print("[OK] 全国パネル自動化 完了")
+        print("[OK] Slack通知 完了")
+    else:
+        raise RuntimeError("画像ファイル生成に失敗しました")
 
     except FileNotFoundError:
         send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
