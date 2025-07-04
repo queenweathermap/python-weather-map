@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 from module.utils.slack_utils import send_slack_text
+from module.utils.slack_utils import upload_file_slack
 from module.core.gpv_downloader import GPV_MIRROR_URLS
 from module.plotter.gpv_plotter_universal import open_grib2_var_auto, make_universal_weather_panel
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
@@ -141,12 +142,21 @@ def main():
             os.rename(panel_imgs[0], img_path)
             print(f"[OK] 画像保存: {img_path}")
 
+            # 画像ファイルが生成されたら
+            if os.path.exists(img_path):
+                upload_file_slack(
+                    channel=slack_channel,
+                    filepath=img_path,
+                    title=f"{ymd} UTC{hh} +{forecast_hour}h",
+                    initial_comment=f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h"
+                )
+
             # 4. Google Driveへアップロード
-            if drive_folder:
-                delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
-                drive_url = upload_to_drive(img_path, folder_id=drive_folder)
-            else:
-                drive_url = "(未アップロード)"
+            # if drive_folder:
+            #     delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
+            #     drive_url = upload_to_drive(img_path, folder_id=drive_folder)
+            # else:
+            #      drive_url = "(未アップロード)"
 
             # 5. SlackにURL通知
             msg = (
