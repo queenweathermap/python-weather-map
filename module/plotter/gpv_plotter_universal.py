@@ -55,22 +55,26 @@ def get_rh_fallback(ds, level_hPa=None):
 
 # module/plotter/gpv_plotter_universal.py
 # --- 降水量3h差分計算ユーティリティ ---
-
-def get_apcp_3hr(apcp):
-    """
-    apcp: xarray.DataArray（積算降水量、step次元あり）
-    → 3時間差分を計算
-    """
-    if apcp is None or "step" not in apcp.dims:
+def get_apcp_3hr(ds_or_path):
+    import xarray as xr
+    import numpy as np
+    # 1. ファイルパスだったらopen
+    if isinstance(ds_or_path, str):
+        ds = xr.open_dataset(ds_or_path, engine="cfgrib")
+        key = next((k for k in ["apcp", "APCP", "PRECIP", "precip"] if k in ds.variables), None)
+        if not key:
+            raise ValueError("apcp/precip変数が見つかりません")
+        da = ds[key]
+    else:
+        da = ds_or_path
+    if da is None or "step" not in da.dims:
         print("[WARN] apcpデータ無効 or step無し")
-        return apcp
-    apcp_3h = apcp.copy()
-    apcp_3h.values[1:] = apcp.values[1:] - apcp.values[:-1]
-    apcp_3h.values[0] = 0  # またはnp.nan
+        return da
+    apcp_3h = da.copy()
+    apcp_3h.values[1:] = da.values[1:] - da.values[:-1]
+    apcp_3h.values[0] = np.nan
     apcp_3h.name = "apcp_3hr"
     return apcp_3h
-
-
     
 
 # module/plotter/gpv_plotter_universal.py
