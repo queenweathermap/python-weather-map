@@ -79,7 +79,6 @@ def main():
 
     base_dir = "./data"
     output_dir = "./output"
-    drive_folder = os.environ.get("DRIVE_FOLDER_ID")
     slack_channel = os.environ.get("SLACK_CHANNEL_ID")
     days_back = 2
 
@@ -95,7 +94,7 @@ def main():
         del arr_sample
         gc.collect()
 
-        # 3. このjobのforecast_hourだけ描画
+        # 3. forecast_hour→step変換
         step = forecast_hour // 3
         if step >= nsteps or step < 0:
             raise ValueError(f"指定のforecast_hour({forecast_hour})が有効な範囲外です（nsteps={nsteps})")
@@ -121,6 +120,7 @@ def main():
             "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
             "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
         }
+        panel_datasets = {...}  # ここはそのまま
         panel_def = get_panel_def_japan(panel_datasets)
         ncols = 1
         nrows = len(panel_def)
@@ -142,31 +142,16 @@ def main():
             os.rename(panel_imgs[0], img_path)
             print(f"[OK] 画像保存: {img_path}")
 
-            # 画像ファイルが生成されたら
-            if os.path.exists(img_path):
-                upload_file_slack(
-                    channel=slack_channel,
-                    filepath=img_path,
-                    title=f"{ymd} UTC{hh} +{forecast_hour}h",
-                    initial_comment=f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h"
-                )
-
-            # 4. Google Driveへアップロード
-            # if drive_folder:
-            #     delete_old_files_from_drive(folder_id=drive_folder, older_than_days=30)
-            #     drive_url = upload_to_drive(img_path, folder_id=drive_folder)
-            # else:
-            #      drive_url = "(未アップロード)"
-
-            # 5. SlackにURL通知
-            msg = (
-                f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
-                f"{os.path.basename(img_path)}\n"
-                f"{drive_url if drive_url else '(Driveアップロード失敗)'}"
+            # 画像ファイルが生成されたら直接Slackへ送信
+            upload_file_slack(
+                channel=slack_channel,
+                filepath=img_path,
+                title=f"{ymd} UTC{hh} +{forecast_hour}h",
+                initial_comment=f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h"
             )
-            send_slack_text(channel=slack_channel, message=msg)
-            print("[OK] Slack通知 完了")
         else:
+            # Slackにテキスト警告（画像生成失敗時のみ）
+            send_slack_text(channel=slack_channel, message=":x: 画像ファイル生成に失敗しました")
             raise RuntimeError("画像ファイル生成に失敗しました")
 
     except FileNotFoundError:
