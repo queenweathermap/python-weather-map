@@ -62,7 +62,7 @@ def get_panel_def_japan(var_dict):
             "prmsl": var_dict.get("prmsl"),
             "u10":   var_dict.get("u10"),
             "v10":   var_dict.get("v10"),
-            "apcp":  var_dict.get("apcp"),
+          # "apcp":  var_dict.get("apcp"),
         }, "地上気圧・風・降水量"),
     ]
 
