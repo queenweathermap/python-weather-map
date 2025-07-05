@@ -58,15 +58,21 @@ def get_rh_fallback(ds, level_hPa=None):
 def get_apcp_3hr(ds_or_path):
     import xarray as xr
     import numpy as np
-    # 1. ファイルパスだったらopen
+
+    # ファイルパスの場合は"accum"だけで読む
     if isinstance(ds_or_path, str):
-        ds = xr.open_dataset(ds_or_path, engine="cfgrib")
+        try:
+            ds = xr.open_dataset(ds_or_path, engine="cfgrib", filter_by_keys={"stepType": "accum"})
+        except Exception as e:
+            print(f"[WARN] 'accum'失敗: {e}, 'avg'を試行")
+            ds = xr.open_dataset(ds_or_path, engine="cfgrib", filter_by_keys={"stepType": "avg"})
         key = next((k for k in ["apcp", "APCP", "PRECIP", "precip"] if k in ds.variables), None)
         if not key:
             raise ValueError("apcp/precip変数が見つかりません")
         da = ds[key]
     else:
         da = ds_or_path
+
     if da is None or "step" not in da.dims:
         print("[WARN] apcpデータ無効 or step無し")
         return da
@@ -75,6 +81,7 @@ def get_apcp_3hr(ds_or_path):
     apcp_3h.values[0] = np.nan
     apcp_3h.name = "apcp_3hr"
     return apcp_3h
+
     
 
 # module/plotter/gpv_plotter_universal.py
