@@ -10,7 +10,18 @@
 # ===============================================================
 
 import os
+import re
 import requests
+
+def sanitize_filename(filename):
+    """
+    Slack用: ファイル名から不正文字除去・サロゲート対応
+    """
+    # サロゲート文字・スラッシュ等Slack非対応文字除去
+    filename = filename.encode('utf-8', 'ignore').decode('utf-8')
+    filename = re.sub(r'[\\/:*?"<>|]', '_', filename)
+    return filename
+
 
 # --- 共通トークン取得 ---
 def get_slack_token():
