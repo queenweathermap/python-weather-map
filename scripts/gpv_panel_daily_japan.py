@@ -149,18 +149,21 @@ def main():
             drive_url = upload_to_drive(img_path, folder="DRIVE_FOLDER_ID")
             print(f"[OK] Drive URL: {drive_url}")
 
-            # ② SlackにはDrive共有URLのみ通知
-            send_slack_text(
-                channel=slack_channel,
-                message=f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n{drive_url}"
+            # ② SlackにはDrive共有URL＋ファイル名通知（秋田バージョンに準拠）
+            msg = (
+                f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
+                f"{os.path.basename(img_path)}\n"
+                f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
             )
+            send_slack_text(channel=slack_channel, message=msg)
 
-            # ③ 古いファイル自動削除（任意のタイミングでOK）
+            # ③ 古いファイル自動削除
             delete_old_files_from_drive(days=30, folder="DRIVE_FOLDER_ID")
 
         else:
             send_slack_text(channel=slack_channel, message=":x: 画像ファイル生成に失敗しました")
             raise RuntimeError("画像ファイル生成に失敗しました")
+
 
 
 if __name__ == "__main__":
