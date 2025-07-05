@@ -23,9 +23,6 @@ def upload_file_slack(
     title="Weather Map",
     initial_comment="Here is the latest weather map!"
 ):
-    """
-    Slackにファイル（画像やPDF）をアップロードする（推奨の外部アップロード方式）
-    """
     bot_token = get_slack_token()
     if not bot_token:
         print("[ERROR] SLACK_BOT_TOKEN が未設定です")
@@ -35,7 +32,12 @@ def upload_file_slack(
         return
 
     filename = os.path.basename(filepath)
-    length = int(os.path.getsize(filepath))
+    length = os.path.getsize(filepath)
+    if not filename or length == 0:
+        print(f"[ERROR] ファイル名またはサイズ不正: {filename}, {length}")
+        return
+
+    print(f"[DEBUG] Slack upload: {filename} ({length} bytes)")
 
     # === Step 1: アップロードURL取得 ===
     url_get = "https://slack.com/api/files.getUploadURLExternal"
@@ -43,7 +45,11 @@ def upload_file_slack(
         "Authorization": f"Bearer {bot_token}",
         "Content-Type": "application/json; charset=utf-8"
     }
-    res1 = requests.post(url_get, headers=headers, json={"filename": filename, "length": length})
+    payload = {
+        "filename": str(filename),
+        "length": int(length)
+    }
+    res1 = requests.post(url_get, headers=headers, json=payload)
     res1_json = res1.json()
     if not res1_json.get("ok"):
         print("[ERROR] Slack: アップロードURL取得失敗:", res1_json)
@@ -73,42 +79,3 @@ def upload_file_slack(
     else:
         print(f"[Slack] ファイル送信完了: {title}")
 
-# --- テキストメッセージ送信 ---
-def send_slack_text(channel, message):
-    """
-    指定チャンネルにテキストメッセージを送信（chat.postMessage API）
-    """
-    bot_token = get_slack_token()
-    if not bot_token:
-        print("[ERROR] SLACK_BOT_TOKEN が未設定です")
-        return
-
-    url = "https://slack.com/api/chat.postMessage"
-    headers = {
-        "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8"
-    }
-    data = {
-        "channel": channel,
-        "text": message
-    }
-    res = requests.post(url, headers=headers, json=data)
-    res_json = res.json()
-    if not res_json.get("ok"):
-        print("[ERROR] Slackテキスト送信失敗:", res_json)
-    else:
-        print(f"[Slack] メッセージ送信完了: {message[:30]}...")
-
-# --- 汎用関数名（他モジュールと統一） ---
-def send_slack_message(message, channel=None):
-    token = os.environ.get("SLACK_BOT_TOKEN")
-    channel = channel or os.environ.get("SLACK_CHANNEL_ID")
-    if not (token and channel):
-        print("[ERROR] SLACK_BOT_TOKEN / SLACK_CHANNEL_ID 未設定")
-        return
-    res = requests.post(
-        "https://slack.com/api/chat.postMessage",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"channel": channel, "text": message}
-    )
-    print("[Slack]", res.text)
