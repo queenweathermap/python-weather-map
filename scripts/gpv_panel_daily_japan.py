@@ -4,7 +4,8 @@
 # 1stepずつJPG出力→ZIP化→Driveアップ→Slack通知
 # 2025-07-01 ChatGPT
 # ===============================================================
-
+import module.utils.slack_utils as s
+print(dir(s))
 import os
 import sys
 import datetime
