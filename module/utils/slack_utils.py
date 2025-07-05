@@ -59,12 +59,14 @@ def upload_file_slack(
         return
 
     filename = os.path.basename(filepath)
-    length = os.path.getsize(filepath)
-    if not filename or length == 0:
+    length = int(os.path.getsize(filepath))
+    if not filename or length <= 0:
         print(f"[ERROR] ファイル名またはサイズ不正: {filename}, {length}")
         return
 
     print(f"[DEBUG] Slack upload: {filename} ({length} bytes)")
+
+
 
     # === Step 1: アップロードURL取得 ===
     url_get = "https://slack.com/api/files.getUploadURLExternal"
