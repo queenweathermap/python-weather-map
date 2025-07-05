@@ -141,35 +141,34 @@ def main():
             dpi=80,
             step=step
         )
-        if panel_imgs and os.path.exists(panel_imgs[0]):
-            os.rename(panel_imgs[0], img_path)
-            print(f"[OK] 画像保存: {img_path}")
-
-            # ① Google Driveへアップロード
-            drive_url = upload_to_drive(img_path, folder="DRIVE_FOLDER_ID")
-            print(f"[OK] Drive URL: {drive_url}")
-
-            # ② SlackにはDrive共有URL＋ファイル名通知（秋田バージョンに準拠）
-            msg = (
-                f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
-                f"{os.path.basename(img_path)}\n"
-                f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
-            )
-            send_slack_text(channel=slack_channel, message=msg)
-
-            # ③ 古いファイル自動削除
-            delete_old_files_from_drive(days=30, folder="DRIVE_FOLDER_ID")
-
-        else:
-            send_slack_text(channel=slack_channel, message=":x: 画像ファイル生成に失敗しました")
-            raise RuntimeError("画像ファイル生成に失敗しました")
-
+        try:
+            if panel_imgs and os.path.exists(panel_imgs[0]):
+                os.rename(panel_imgs[0], img_path)
+                print(f"[OK] 画像保存: {img_path}")
+        
+                drive_url = upload_to_drive(img_path, folder="DRIVE_FOLDER_ID")
+                print(f"[OK] Drive URL: {drive_url}")
+        
+                msg = (
+                    f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
+                    f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
+                    f"{os.path.basename(img_path)}\n"
+                    f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
+                )
+                send_slack_text(channel=slack_channel, message=msg)
+        
+                delete_old_files_from_drive(days=30, folder="DRIVE_FOLDER_ID")
+        
+            else:
+                send_slack_text(channel=slack_channel, message=":x: 画像ファイル生成に失敗しました")
+                raise RuntimeError("画像ファイル生成に失敗しました")
+        
         except Exception as e:
             msg = f":x: パネル生成失敗: {e}"
             send_slack_text(channel=slack_channel, message=msg)
             print(f"[ERROR] {e}")
             import traceback; traceback.print_exc()
             sys.exit(1)
-
+        
 if __name__ == "__main__":
     main()
