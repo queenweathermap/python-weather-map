@@ -33,14 +33,14 @@ def get_lon_lat(ds):
 # module/plot/plot_surface_pressure_wind_precip.py
 def plot_surface_pressure_and_wind_msm(ax, ds_dict, step=0):
     """
-    地上海面更正気圧・風・降水量（dict＋step方式）
+    地上海面更正気圧・風（＋あれば降水量）描画
     ds_dict: {"prmsl":..., "u10":..., "v10":..., "apcp":...}
-    どれか欠けてもあるものだけ描画、全部無ければNO DATA
     """
     prmsl = ds_dict.get("prmsl")
     u10   = ds_dict.get("u10")
     v10   = ds_dict.get("v10")
     apcp  = ds_dict.get("apcp")
+
 
     # step次元がある場合だけスライス
     if prmsl is not None and "step" in prmsl.dims:
@@ -69,7 +69,7 @@ def plot_surface_pressure_and_wind_msm(ax, ds_dict, step=0):
 
     has_content = False
 
-    # --- 降水量（色塗り） ---
+    # --- 降水量 ---
     if apcp is not None and lon2d is not None:
         cf = ax.contourf(
             lon2d, lat2d, apcp,
@@ -123,9 +123,18 @@ def plot_surface_pressure_and_wind_msm(ax, ds_dict, step=0):
         )
         has_content = True
 
-    # --- 全部なければNO DATA表示 ---
+    # --- 全部なければNO DATA ---
     if not has_content:
         ax.text(0.5, 0.5, "NO DATA", ha='center', va='center', fontsize=16, color='gray', transform=ax.transAxes)
         ax.set_axis_off()
 
-    ax.set_title("地上気圧・風・降水量 (+0h)", fontsize=10, pad=10)
+    # タイトルを自動調整
+    elements = []
+    if prmsl is not None:
+        elements.append("地上気圧")
+    if u10 is not None and v10 is not None:
+        elements.append("風")
+    if apcp is not None:
+        elements.append("降水量")
+    title = "・".join(elements) if elements else "地上気圧・風・降水量"
+    ax.set_title(f"{title} (+{step}h)", fontsize=10, pad=10)
