@@ -53,23 +53,23 @@ def get_rh_fallback(ds, level_hPa=None):
         return None
 
 
-
+# module/plotter/gpv_plotter_universal.py
 # --- 降水量3h差分計算ユーティリティ ---
-def get_apcp_3hr(ds):
-    """
-    ds: xarray.DataArray (apcp, step次元あり)
-    MSM積算値しか無い場合は差分で3時間値生成
-    """
-    if ds is None or "step" not in ds.dims:
-        print("[WARN] apcpデータ無効 or step無し")
-        return ds
-    # shape: (step, lat, lon)
-    # 差分（3h前→現在, 0には0をセット）
-    apcp_3h = ds.copy()
-    apcp_3h.values[1:] = ds.values[1:] - ds.values[:-1]
-    apcp_3h.values[0] = np.nan  # 初期値はNaN（必要に応じて0も可）
-    apcp_3h.name = "apcp_3hr"
-    return apcp_3h
+def get_precip_diff_3hr(file_path):
+    # cfgribでMSM Lsurfファイルを開き、'PRECIP'（または'APCP'）変数を抽出
+    ds = xr.open_dataset(file_path, engine="cfgrib")
+    for key in ["PRECIP", "APCP", "precip", "apcp"]:
+        if key in ds.variables:
+            var = ds[key]
+            break
+    else:
+        raise ValueError("降水量変数が見つかりません")
+    # step軸がある前提で3時間差分を計算
+    diff = var.diff("step")
+    # 最初のstepはNaNになるので、0埋めでもOK
+    diff = diff.reindex(step=var.step, fill_value=0)
+    return diff
+
     
 
 # module/plotter/gpv_plotter_universal.py
