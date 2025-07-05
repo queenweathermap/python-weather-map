@@ -10,6 +10,7 @@ REGION_EXTENTS = {
     "tokyo": [138.5, 140.0, 34.7, 36.2],
 }
 
+# module/panel_definitions.py
 def get_panel_def_japan(var_dict):
     """
     全国6段パネル定義（JPG1枚=1step分で呼ぶ用）
