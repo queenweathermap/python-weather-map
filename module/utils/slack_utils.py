@@ -16,12 +16,10 @@ import json
 
 def sanitize_filename(filename):
     """
-    Slack用: ファイル名から不正文字除去・サロゲート対応
+    Slackファイルアップロード用にファイル名をサニタイズ（半角英数字・アンダースコア・ピリオド以外除去）
     """
-    # サロゲート文字・スラッシュ等Slack非対応文字除去
-    filename = filename.encode('utf-8', 'ignore').decode('utf-8')
-    filename = re.sub(r'[\\/:*?"<>|]', '_', filename)
-    return filename
+    return re.sub(r'[^a-zA-Z0-9_.]', '_', filename)
+
 
 
 # --- 共通トークン取得 ---
@@ -85,20 +83,31 @@ def upload_file_slack(
         return
     
     print(f"[CHECK] filename='{filename}', length={length}")
-
-    print(f"[DEBUG] Slack upload: {filename} ({length} bytes)")
-
+    print(f"[DEBUG] filename type: {type(filename)}, length type: {type(length)}")
+    
     url_get = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8"
+        "Content-Type": "application/json"
     }
     payload = {
         "filename": filename,
         "length": length
     }
+    import json
+    print("[DEBUG] payload-dict:", payload)
+    print("[DEBUG] payload-json:", json.dumps(payload))
+
     res1 = requests.post(url_get, headers=headers, json=payload)
-    print("[DEBUG] files.getUploadURLExternal:", res1.text)  # ←エラー詳細見る
+    print("[DEBUG] files.getUploadURLExternal:", res1.text)  # エラー詳細確認
+
+    res1_json = res1.json()
+    if not res1_json.get("ok"):
+        print("[ERROR] Slack: アップロードURL取得失敗:", res1_json)
+        return
+    upload_url = res1_json["upload_url"]
+    file_id = res1_json["file_id"]
+
 
 
 
