@@ -71,12 +71,16 @@ def upload_file_slack(
 
     # ファイル名サニタイズ
     filename = sanitize_filename(os.path.basename(filepath))
-    length = int(os.path.getsize(filepath))
-    print(f"[CHECK] filename={filename!r}, length={length!r}")
-
-    if not filename or length <= 0:
-        print(f"[ERROR] ファイル名またはサイズ不正: {filename}, {length}")
+    if not filename:
+        print("[ERROR] ファイル名が空です！: ", filepath)
         return
+    
+    length = os.path.getsize(filepath)
+    if not isinstance(length, int) or length <= 0:
+        print(f"[ERROR] ファイルサイズ不正: length={length}, path={filepath}")
+        return
+    
+    print(f"[CHECK] filename='{filename}', length={length}")
 
     print(f"[DEBUG] Slack upload: {filename} ({length} bytes)")
 
