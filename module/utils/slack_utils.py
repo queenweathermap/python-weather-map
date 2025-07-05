@@ -40,8 +40,16 @@ def send_slack_text(channel, message):
     url = "https://slack.com/api/chat.postMessage"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json; charset=utf-8"
+        "Content-Type": "application/json"  # ← charset削除！
     }
+    payload = {
+        "filename": filename,
+        "length": length
+    }
+    print("[DEBUG] payload:", payload)
+    res1 = requests.post(url_get, headers=headers, json=payload)
+    print("[DEBUG] files.getUploadURLExternal:", res1.text)
+
     data = {
         "channel": channel,
         "text": message
