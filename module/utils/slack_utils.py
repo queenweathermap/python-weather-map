@@ -70,7 +70,6 @@ def upload_file_slack(
         print(f"[ERROR] ファイルが見つかりません: {filepath}")
         return
 
-    # ファイル名サニタイズ
     filename = sanitize_filename(os.path.basename(filepath))
     if not filename:
         print("[ERROR] ファイル名が空です！: ", filepath)
@@ -85,45 +84,18 @@ def upload_file_slack(
     print(f"[DEBUG] filename type: {type(filename)}, length type: {type(length)}")
     
     url_get = "https://slack.com/api/files.getUploadURLExternal"
-    headers = {
-        "Authorization": f"Bearer {bot_token}",
-    }
-    payload = {
-        "filename": filename,
-        "length": length
-    }
-    import json
+    headers = {"Authorization": f"Bearer {bot_token}"}
+    payload = {"filename": filename, "length": length}
     print("[DEBUG] payload-dict:", payload)
     print("[DEBUG] payload-json:", json.dumps(payload))
 
     res1 = requests.post(url_get, headers=headers, json=payload)
-    print("[DEBUG] files.getUploadURLExternal:", res1.text)  # エラー詳細確認
+    print("[DEBUG] files.getUploadURLExternal:", res1.text)
 
     res1_json = res1.json()
     if not res1_json.get("ok"):
         print("[ERROR] Slack: アップロードURL取得失敗:", res1_json)
         return
-    upload_url = res1_json["upload_url"]
-    file_id = res1_json["file_id"]
-
-
-
-
-    # === Step 1: アップロードURL取得 ===
-    url_get = "https://slack.com/api/files.getUploadURLExternal"
-    headers = {
-        "Authorization": f"Bearer {bot_token}",
-    }
-    payload = {
-        "filename": str(filename),
-        "length": int(length)
-    }
-    res1 = requests.post(url_get, headers=headers, json=payload)
-    res1_json = res1.json()
-    if not res1_json.get("ok"):
-        print("[ERROR] Slack: アップロードURL取得失敗:", res1_json)
-        return
-
     upload_url = res1_json["upload_url"]
     file_id = res1_json["file_id"]
 
@@ -147,4 +119,3 @@ def upload_file_slack(
         print("[ERROR] Slackアップロード完了処理失敗:", res3_json)
     else:
         print(f"[Slack] ファイル送信完了: {title}")
-
