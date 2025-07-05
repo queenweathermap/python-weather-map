@@ -80,6 +80,9 @@ def open_grib2_var_auto(
     type_of_level=None, stepType=None,
     rh_fallback_func=None, apcp_3hr_func=None,
 ):
+    import xarray as xr
+    import numpy as np
+
     print(f"\n[DEBUG] open_grib2_var_auto: varname={varname}, level={level}, type_of_level={type_of_level}, stepType={stepType}")
 
     # --- ファイル自動判定 ---
@@ -103,7 +106,6 @@ def open_grib2_var_auto(
 
     # --- filter_by_keys組み立て ---
     filter_keys = {}
-    # type_of_levelごとにセット
     if varname in ["gh", "u", "v", "t", "r", "w"]:
         filter_keys = {"typeOfLevel": "isobaricInhPa", "level": level}
     elif varname in ["u10", "v10"]:
@@ -111,23 +113,35 @@ def open_grib2_var_auto(
     elif varname == "prmsl":
         filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant"}
     elif varname == "apcp":
-        # apcpだけstepTypeが"accum","avg","instant"など複数あるのでループ
+        # stepType複数探索
         for try_step in ["accum", "avg", "instant"]:
             try:
                 print(f"[DEBUG] apcp: try stepType={try_step}")
                 ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys={"typeOfLevel": "surface", "stepType": try_step})
-                if varname in ds:
-                    print(f"[OK] apcp found with stepType={try_step} shape={ds[varname].shape}")
-                    return ds[varname]
+                # "apcp"や"APCP"や"precip"や"PRECIP"など対応
+                for key in ["apcp", "APCP", "precip", "PRECIP"]:
+                    if key in ds:
+                        print(f"[OK] {key} found with stepType={try_step} shape={ds[key].shape}")
+                        return ds[key]
             except Exception as e:
                 print(f"[WARN] apcp try_step={try_step} failed: {e}")
         # fallback: 差分作成
         if apcp_3hr_func is not None:
             print(f"[WARN] apcp not found. → fallback: get_apcp_3hr()")
             try:
-                apcp_3hr = apcp_3hr_func(file_path)
-                print(f"[OK] apcp_3hr fallback shape={apcp_3hr.shape}")
-                return apcp_3hr
+                # ファイルを全開して積算変数を探索
+                ds = xr.open_dataset(file_path, engine="cfgrib")
+                apcp_var = None
+                for key in ["apcp", "APCP", "precip", "PRECIP"]:
+                    if key in ds:
+                        apcp_var = ds[key]
+                        break
+                if apcp_var is not None:
+                    apcp_3hr = apcp_3hr_func(apcp_var)
+                    print(f"[OK] apcp_3hr fallback shape={apcp_3hr.shape}")
+                    return apcp_3hr
+                else:
+                    print("[FAIL] No APCP/PRECIP variable found in file for fallback.")
             except Exception as e:
                 print(f"[FAIL] apcp_3hr_func failed: {e}")
         print(f"[FAIL] apcp: 全stepType/fallback失敗")
@@ -135,7 +149,7 @@ def open_grib2_var_auto(
 
     print(f"[DEBUG] open_grib2_var_auto: using file_path={file_path}, filter_by_keys={filter_keys}")
 
-    # --- 変数ごとに都度open_dataset ---
+    # --- 通常変数 ---
     try:
         ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
         print(f"[DEBUG] ds.variables: {list(ds.variables.keys())}")
@@ -144,6 +158,7 @@ def open_grib2_var_auto(
             return ds[varname]
         else:
             print(f"[WARN] {varname} not in ds.variables!")
+            # 湿度だけはfallback
             if varname == "r" and rh_fallback_func is not None:
                 print(f"[WARN] {varname} fallback: get_rh_fallback()")
                 try:
