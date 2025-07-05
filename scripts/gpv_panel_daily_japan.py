@@ -140,10 +140,13 @@ def main():
         if panel_imgs and os.path.exists(panel_imgs[0]):
             os.rename(panel_imgs[0], img_path)
             print(f"[OK] 画像保存: {img_path}")
-
-            drive_url = upload_to_drive(img_path, folder="DRIVE_FOLDER_ID")
+    
+            # Google Driveへアップロード
+            # フォルダIDは環境変数DRIVE_FOLDER_IDを使う（なければNoneでOK）
+            folder_id = os.environ.get("DRIVE_FOLDER_ID")
+            drive_url = upload_to_drive(img_path, folder_id=folder_id)
             print(f"[OK] Drive URL: {drive_url}")
-
+    
             msg = (
                 f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
                 f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
@@ -151,8 +154,10 @@ def main():
                 f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
             )
             send_slack_text(channel=slack_channel, message=msg)
-
-            delete_old_files_from_drive(days=30, folder="DRIVE_FOLDER_ID")
+    
+            # 古いファイル自動削除（30日より前のファイル）
+            delete_old_files_from_drive(folder_id=folder_id, older_than_days=30)
+    
         else:
             send_slack_text(channel=slack_channel, message=":x: 画像ファイル生成に失敗しました")
             raise RuntimeError("画像ファイル生成に失敗しました")
