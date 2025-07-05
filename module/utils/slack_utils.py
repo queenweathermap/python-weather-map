@@ -88,7 +88,6 @@ def upload_file_slack(
     url_get = "https://slack.com/api/files.getUploadURLExternal"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json"
     }
     payload = {
         "filename": filename,
