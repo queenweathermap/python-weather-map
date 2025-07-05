@@ -120,7 +120,7 @@ def main():
             "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
             "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
         }
-        panel_datasets = {...}  # ここはそのまま
+
         panel_def = get_panel_def_japan(panel_datasets)
         ncols = 1
         nrows = len(panel_def)
