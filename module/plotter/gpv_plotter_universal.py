@@ -64,12 +64,13 @@ def get_apcp_3hr(file_path):
         try:
             ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys={"stepType": stepType})
             print(f"[{stepType}] ds.variables:", list(ds.variables.keys()))
+            # ↓ここを追加
+            for v in ds.variables:
+                print(f'  - {v}: {ds[v].attrs}')
             # まず既知の名前で探す
             key = next((k for k in ["apcp", "APCP", "PRECIP", "precip"] if k in ds.variables), None)
             if key is None and "unknown" in ds.variables:
-                # unknownの属性をprintしてみる（初回デバッグ）
                 print(f'[INFO] "unknown" attrs: {ds["unknown"].attrs}')
-                # shortNameなどで降水量か判定する
                 short_name = ds["unknown"].attrs.get("GRIB_shortName", "")
                 param_name = ds["unknown"].attrs.get("GRIB_paramName", "")
                 if "precip" in short_name or "precip" in param_name or "apcp" in short_name or "apcp" in param_name:
