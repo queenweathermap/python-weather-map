@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 from module.utils.slack_utils import send_slack_text
-from module.utils.slack_utils import upload_file_slack
 from module.core.gpv_downloader import GPV_MIRROR_URLS
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
