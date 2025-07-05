@@ -72,6 +72,7 @@ def get_apcp_3hr(ds):
     return apcp_3h
     
 
+# module/plotter/gpv_plotter_universal.py
 # --- 各変数を個別openするユーティリティ ---
 def open_grib2_var_auto(
     varname, level=None,
