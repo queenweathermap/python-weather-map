@@ -160,12 +160,12 @@ def main():
                 send_slack_text(channel=slack_channel, message=":x: 画像ファイル生成に失敗しました")
                 raise RuntimeError("画像ファイル生成に失敗しました")
 
-        except Exception as e:
-            msg = f":x: パネル生成失敗: {e}"
-            send_slack_text(channel=slack_channel, message=msg)
-            print(f"[ERROR] {e}")
-            import traceback; traceback.print_exc()
-            sys.exit(1)
+    except Exception as e:
+        msg = f":x: パネル生成失敗: {e}"
+        send_slack_text(channel=slack_channel, message=msg)
+        print(f"[ERROR] {e}")
+        import traceback; traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
