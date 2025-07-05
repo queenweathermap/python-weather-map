@@ -145,26 +145,23 @@ def main():
             os.rename(panel_imgs[0], img_path)
             print(f"[OK] 画像保存: {img_path}")
 
-            # 画像ファイルが生成されたら直接Slackへ送信
-            upload_file_slack(
+            # ① Google Driveへアップロード
+            drive_url = upload_to_drive(img_path, folder="DRIVE_FOLDER_ID")
+            print(f"[OK] Drive URL: {drive_url}")
+
+            # ② SlackにはDrive共有URLのみ通知
+            send_slack_text(
                 channel=slack_channel,
-                filepath=img_path,
-                title=f"{ymd} UTC{hh} +{forecast_hour}h",
-                initial_comment=f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h"
+                message=f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n{drive_url}"
             )
+
+            # ③ 古いファイル自動削除（任意のタイミングでOK）
+            delete_old_files_from_drive(days=30, folder="DRIVE_FOLDER_ID")
+
         else:
-            # Slackにテキスト警告（画像生成失敗時のみ）
             send_slack_text(channel=slack_channel, message=":x: 画像ファイル生成に失敗しました")
             raise RuntimeError("画像ファイル生成に失敗しました")
 
-    except FileNotFoundError:
-        send_slack_text(channel=slack_channel, message=":warning: 必要なGPVファイルが見つかりません（GSM/MSM/Lsurf）")
-        sys.exit(1)
-    except Exception as e:
-        send_slack_text(channel=slack_channel, message=f":x: パネル生成失敗: {e}")
-        print(f"[ERROR] {e}")
-        import traceback; traceback.print_exc()
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()
