@@ -20,9 +20,10 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 from module.utils.slack_utils import send_slack_text
 from module.utils.slack_utils import upload_file_slack
 from module.core.gpv_downloader import GPV_MIRROR_URLS
-from module.plotter.gpv_plotter_universal import open_grib2_var_auto, make_universal_weather_panel
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
+from module.plotter.gpv_plotter_universal import get_apcp_3hr, open_grib2_var_auto, make_universal_weather_panel
+
 
 def find_and_download_gpv_files(
     base_dir="./data",
@@ -116,10 +117,11 @@ def main():
             "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
             "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
             "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
-            "prmsl": open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-            "u10":   open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
-            "v10":   open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
-            "apcp":  open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+            "prmsl":  open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+            "u10":    open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+            "v10":    open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "heightAboveGround"),
+            # ▼ここだけ追加
+            "apcp":   open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, apcp_3hr_func=get_apcp_3hr),
         }
 
         panel_def = get_panel_def_japan(panel_datasets)
