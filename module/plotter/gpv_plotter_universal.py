@@ -100,25 +100,11 @@ def open_grib2_var_auto(
     elif varname == "prmsl":
         file_path = msm_lsurf_path
     elif varname == "apcp":
-        file_path = msm_lsurf_path
-    else:
-        file_path = msm_pall_path
-
-    # --- filter_by_keys組み立て ---
-    filter_keys = {}
-    if varname in ["gh", "u", "v", "t", "r", "w"]:
-        filter_keys = {"typeOfLevel": "isobaricInhPa", "level": level}
-    elif varname in ["u10", "v10"]:
-        filter_keys = {"typeOfLevel": "heightAboveGround", "level": 10, "stepType": "instant"}
-    elif varname == "prmsl":
-        filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant"}
-    elif varname == "apcp":
-        # stepType複数探索
+        # apcpだけstepTypeが"accum","avg","instant"など複数あるのでループ
         for try_step in ["accum", "avg", "instant"]:
             try:
                 print(f"[DEBUG] apcp: try stepType={try_step}")
                 ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys={"typeOfLevel": "surface", "stepType": try_step})
-                # "apcp"や"APCP"や"precip"や"PRECIP"など対応
                 for key in ["apcp", "APCP", "precip", "PRECIP"]:
                     if key in ds:
                         print(f"[OK] {key} found with stepType={try_step} shape={ds[key].shape}")
@@ -129,12 +115,11 @@ def open_grib2_var_auto(
         if apcp_3hr_func is not None:
             print(f"[WARN] apcp not found. → fallback: get_apcp_3hr()")
             try:
-                # ファイルを全開して積算変数を探索
-                ds = xr.open_dataset(file_path, engine="cfgrib")
+                ds_fallback = xr.open_dataset(file_path, engine="cfgrib")
                 apcp_var = None
                 for key in ["apcp", "APCP", "precip", "PRECIP"]:
-                    if key in ds:
-                        apcp_var = ds[key]
+                    if key in ds_fallback:
+                        apcp_var = ds_fallback[key]
                         break
                 if apcp_var is not None:
                     apcp_3hr = apcp_3hr_func(apcp_var)
