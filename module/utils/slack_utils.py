@@ -16,6 +16,33 @@ import requests
 def get_slack_token():
     return os.environ.get("SLACK_BOT_TOKEN")
 
+
+def send_slack_text(channel, message):
+    """
+    指定チャンネルにテキストメッセージを送信（chat.postMessage API）
+    """
+    bot_token = get_slack_token()
+    if not bot_token:
+        print("[ERROR] SLACK_BOT_TOKEN が未設定です")
+        return
+
+    url = "https://slack.com/api/chat.postMessage"
+    headers = {
+        "Authorization": f"Bearer {bot_token}",
+        "Content-Type": "application/json; charset=utf-8"
+    }
+    data = {
+        "channel": channel,
+        "text": message
+    }
+    res = requests.post(url, headers=headers, json=data)
+    res_json = res.json()
+    if not res_json.get("ok"):
+        print("[ERROR] Slackテキスト送信失敗:", res_json)
+    else:
+        print(f"[Slack] メッセージ送信完了: {message[:30]}...")
+
+
 # --- ファイルアップロード処理 ---
 def upload_file_slack(
     channel,
