@@ -55,32 +55,30 @@ def get_rh_fallback(ds, level_hPa=None):
 
 # module/plotter/gpv_plotter_universal.py
 # --- 降水量3h差分計算ユーティリティ ---
-def get_apcp_3hr(ds_or_path):
+def get_apcp_3hr(file_path):
     import xarray as xr
     import numpy as np
-
-    # ファイルパスの場合は"accum"だけで読む
-    if isinstance(ds_or_path, str):
+    last_exc = None
+    for step_type in ["accum", "avg", "instant"]:
         try:
-            ds = xr.open_dataset(ds_or_path, engine="cfgrib", filter_by_keys={"stepType": "accum"})
+            ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys={"stepType": step_type})
+            # ds.variables一覧をprintで出す
+            print(f"[{step_type}] ds.variables:", list(ds.variables.keys()))
+            key = next((k for k in ["apcp", "APCP", "PRECIP", "precip"] if k in ds.variables), None)
+            if key:
+                da = ds[key]
+                apcp_3h = da.copy()
+                apcp_3h.values[1:] = da.values[1:] - da.values[:-1]
+                apcp_3h.values[0] = np.nan
+                apcp_3h.name = "apcp_3hr"
+                return apcp_3h
+            else:
+                last_exc = Exception(f"降水量変数（apcp/precip等）が見つかりません stepType={step_type}")
         except Exception as e:
-            print(f"[WARN] 'accum'失敗: {e}, 'avg'を試行")
-            ds = xr.open_dataset(ds_or_path, engine="cfgrib", filter_by_keys={"stepType": "avg"})
-        key = next((k for k in ["apcp", "APCP", "PRECIP", "precip"] if k in ds.variables), None)
-        if not key:
-            raise ValueError("apcp/precip変数が見つかりません")
-        da = ds[key]
-    else:
-        da = ds_or_path
+            last_exc = e
+            print(f"[WARN] stepType={step_type} open failed: {e}")
+    raise last_exc
 
-    if da is None or "step" not in da.dims:
-        print("[WARN] apcpデータ無効 or step無し")
-        return da
-    apcp_3h = da.copy()
-    apcp_3h.values[1:] = da.values[1:] - da.values[:-1]
-    apcp_3h.values[0] = np.nan
-    apcp_3h.name = "apcp_3hr"
-    return apcp_3h
 
     
 
