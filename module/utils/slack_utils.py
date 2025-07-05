@@ -58,13 +58,28 @@ def upload_file_slack(
         print(f"[ERROR] ファイルが見つかりません: {filepath}")
         return
 
-    filename = os.path.basename(filepath)
+    # ファイル名サニタイズ
+    filename = sanitize_filename(os.path.basename(filepath))
     length = int(os.path.getsize(filepath))
+    print(f"[CHECK] filename={filename!r}, length={length!r}")
+
     if not filename or length <= 0:
         print(f"[ERROR] ファイル名またはサイズ不正: {filename}, {length}")
         return
 
     print(f"[DEBUG] Slack upload: {filename} ({length} bytes)")
+
+    url_get = "https://slack.com/api/files.getUploadURLExternal"
+    headers = {
+        "Authorization": f"Bearer {bot_token}",
+        "Content-Type": "application/json; charset=utf-8"
+    }
+    payload = {
+        "filename": filename,
+        "length": length
+    }
+    res1 = requests.post(url_get, headers=headers, json=payload)
+    print("[DEBUG] files.getUploadURLExternal:", res1.text)  # ←エラー詳細見る
 
 
 
