@@ -12,6 +12,7 @@
 import os
 import re
 import requests
+import json
 
 def sanitize_filename(filename):
     """
@@ -40,20 +41,15 @@ def send_slack_text(channel, message):
     url = "https://slack.com/api/chat.postMessage"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json"  # ← charset削除！
+        "Content-Type": "application/json"
     }
-    payload = {
-        "filename": filename,
-        "length": length
-    }
-    print("[DEBUG] payload:", payload)
-    res1 = requests.post(url_get, headers=headers, json=payload)
-    print("[DEBUG] files.getUploadURLExternal:", res1.text)
-
     data = {
         "channel": channel,
         "text": message
     }
+    import json
+    print("[DEBUG] send_slack_text data:", json.dumps(data, ensure_ascii=False))
+
     res = requests.post(url, headers=headers, json=data)
     res_json = res.json()
     if not res_json.get("ok"):
