@@ -39,7 +39,6 @@ def send_slack_text(channel, message):
     url = "https://slack.com/api/chat.postMessage"
     headers = {
         "Authorization": f"Bearer {bot_token}",
-        "Content-Type": "application/json"
     }
     data = {
         "channel": channel,
