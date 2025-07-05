@@ -59,11 +59,11 @@ def get_apcp_3hr(file_path):
     import xarray as xr
     import numpy as np
     last_exc = None
-    for step_type in ["accum", "avg", "instant"]:
+
+    for stepType in ["accum", "avg", "instant"]:
         try:
-            ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys={"stepType": step_type})
-            # ds.variables一覧をprintで出す
-            print(f"[{step_type}] ds.variables:", list(ds.variables.keys()))
+            ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys={"stepType": stepType})
+            print(f"[{stepType}] ds.variables:", list(ds.variables.keys()))
             key = next((k for k in ["apcp", "APCP", "PRECIP", "precip"] if k in ds.variables), None)
             if key:
                 da = ds[key]
@@ -73,12 +73,11 @@ def get_apcp_3hr(file_path):
                 apcp_3h.name = "apcp_3hr"
                 return apcp_3h
             else:
-                last_exc = Exception(f"降水量変数（apcp/precip等）が見つかりません stepType={step_type}")
+                last_exc = Exception(f"降水量変数（apcp/precip等）が見つかりません stepType={stepType}")
         except Exception as e:
             last_exc = e
-            print(f"[WARN] stepType={step_type} open failed: {e}")
+            print(f"[WARN] stepType={stepType} open failed: {e}")
     raise last_exc
-
 
     
 
