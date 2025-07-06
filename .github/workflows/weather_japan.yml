@@ -7,8 +7,8 @@
 name: JAPAN Weather Panel (Matrix Split)
 
 on:
-  schedule:
-    - cron: '0 6 * * *'   # JST 15時
+  # schedule:
+  #   - cron: '0 6 * * *'   # JST 15時
   workflow_dispatch:
 
 jobs:
