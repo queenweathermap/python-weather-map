@@ -1,8 +1,8 @@
 name: Weathercaster JMA
 
 on:
-  schedule:
-    - cron: '0 6 * * *'  # JST 15時に実行（UTCで指定）
+ # schedule:
+ #  - cron: '0 6 * * *'  # JST 15時に実行（UTCで指定）
   workflow_dispatch:      # 手動実行も可能
 
 jobs:
