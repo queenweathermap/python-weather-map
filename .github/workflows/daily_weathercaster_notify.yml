@@ -31,4 +31,4 @@ jobs:
 
 
       - name: Run weathercaster notify
-        run: PYTHONPATH=. python scripts/daily_weathercaster_notify.py
+        run: PYTHONPATH=. python scripts/weathercaster_jma.py
