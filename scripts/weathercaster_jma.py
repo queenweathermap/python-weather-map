@@ -128,9 +128,9 @@ try:
             merged_img.save(merged_path)
             jpg_group_paths.append(merged_path)
             print(f"[OK] SKAISETU縦連結画像保存: {merged_path}")
-            desktop_path = os.path.expanduser(f"~/Desktop/{today}_{group_name}_merge.jpg")
-            merged_img.save(desktop_path)
-            print(f"[OK] デスクトップにも保存: {desktop_path}")
+        #  desktop_path = os.path.expanduser(f"~/Desktop/{today}_{group_name}_merge.jpg")
+        #  merged_img.save(desktop_path)
+        #  print(f"[OK] デスクトップにも保存: {desktop_path}")
         elif group_name in ["COMP_ALL", "FXXN_FZCX"]:
             # 横連結グループのみmerge
             jpgs = []
@@ -154,9 +154,9 @@ try:
             merged_img.save(merged_path)
             jpg_group_paths.append(merged_path)
             print(f"[OK] 横一列連結画像保存: {merged_path}")
-            desktop_path = os.path.expanduser(f"~/Desktop/{today}_{group_name}_merge.jpg")
-            merged_img.save(desktop_path)
-            print(f"[OK] デスクトップにも保存: {desktop_path}")
+        #  desktop_path = os.path.expanduser(f"~/Desktop/{today}_{group_name}_merge.jpg")
+        #  merged_img.save(desktop_path)
+        #  print(f"[OK] デスクトップにも保存: {desktop_path}")
         else:
             # 単独PDFは1ページ目だけ（mergeなし）
             pdf = group_pdfs[0]
@@ -164,9 +164,9 @@ try:
             jpg_1st = f"{SAVE_DIR}/{base}-1.jpg"
             if os.path.exists(jpg_1st):
                 jpg_group_paths.append(jpg_1st)
-                desktop_path = os.path.expanduser(f"~/Desktop/{base}-1.jpg")
-                shutil.copy(jpg_1st, desktop_path)
-                print(f"[OK] 単独画像をデスクトップ保存: {desktop_path}")
+          #  desktop_path = os.path.expanduser(f"~/Desktop/{base}-1.jpg")
+          #  shutil.copy(jpg_1st, desktop_path)
+          #   print(f"[OK] 単独画像をデスクトップ保存: {desktop_path}")
 
     # --- STEP 4: ZIP圧縮（merge/単独のみ） ---
     print("[STEP4] JPGをZIP圧縮")
