@@ -42,7 +42,7 @@ BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
 today = datetime.now().strftime("%Y%m%d")
 USER = os.environ["WEATHERCASTER_USER"]
 PASS = os.environ["WEATHERCASTER_PASS"]
-DRIVE_FOLDER_ID = os.environ["WEATHERCASTER_DRIVE_FOLDER_ID"]
+DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 SLACK_CHANNEL_ID = os.environ["SLACK_CHANNEL_ID"]
 
 log_buffer = StringIO()
