@@ -2,12 +2,13 @@ name: Weathercaster JMA
 
 on:
   schedule:
-   - cron: '0 6 * * *'   # JST 15時
-  workflow_dispatch:
+    - cron: '0 6 * * *'  # JST 15時に実行（UTCで指定）
+  workflow_dispatch:      # 手動実行も可能
 
 jobs:
   notify:
     runs-on: ubuntu-latest
+
     env:
       WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
       WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
@@ -17,18 +18,20 @@ jobs:
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
-         python -m pip install --upgrade pip
-         pip install -r requirements.txt
-         sudo apt-get update
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          sudo apt-get update
           sudo apt-get install -y poppler-utils
 
-
-      - name: Run weathercaster notify
+      - name: Run Weathercaster script
         run: PYTHONPATH=. python scripts/weathercaster_jma.py
