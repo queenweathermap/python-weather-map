@@ -1,20 +1,2 @@
-cfgrib
-eccodes
-xarray
-numpy
-metpy
-pandas
-matplotlib
-cartopy
-xarray
-scipy
-requests
-python-dotenv
-slack_sdk
-line-bot-sdk
-google-api-python-client
-google-auth-httplib2
-google-auth
-beautifulsoup4
-pdf2image
-pillow
+pip install pip-tools
+pip-compile requirements.in
