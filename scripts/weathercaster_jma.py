@@ -1,4 +1,4 @@
-# scripts/daily_weathercaster_notify.py
+z# scripts/daily_weathercaster_notify.py
 # ===============================================================
 # 気象庁Weathercaster PDF天気図一括DL→JPG→
 # COMP_ALLとFXXN_FZCXは横連結mergeだけ生成・保存
