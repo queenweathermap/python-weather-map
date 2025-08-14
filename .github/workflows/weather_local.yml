@@ -1,25 +1,7 @@
-# ===============================================
-# Local Weather Panel (manual) — Mail + Slack
-# 任意地点の MSM 局地（workflow_dispatch 入力で拡張可）
-# ===============================================
-
 name: Local Weather Panel
 
 on:
   workflow_dispatch:
-    inputs:
-      lat:
-        description: "Latitude (optional)"
-        required: false
-        type: number
-      lon:
-        description: "Longitude (optional)"
-        required: false
-        type: number
-      label:
-        description: "Place label (subject suffix)"
-        required: false
-        type: string
 
 jobs:
   run-local-panel:
@@ -27,24 +9,26 @@ jobs:
     timeout-minutes: 60
     env:
       TZ: Asia/Tokyo
-      # ---- Mail (必須) ----
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_PASS: ${{ secrets.SMTP_PASS }}
-      MAIL_FROM: ${{ secrets.MAIL_FROM }}
-      MAIL_TO:   ${{ secrets.MAIL_TO }}
+      FROM_EMAIL:      ${{ secrets.FROM_EMAIL }}
+      TO_EMAIL:        ${{ secrets.TO_EMAIL }}
+      SMTP_SERVER:     ${{ secrets.SMTP_SERVER }}
+      SMTP_PORT:       ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME:   ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD:   ${{ secrets.SMTP_PASSWORD }}
       MAIL_SUBJECT_PREFIX: "[Local]"
-      # ---- Slack (任意) ----
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Cache Cartopy Data
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/cartopy
+          key: cartopy-data-v1
+
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -57,14 +41,5 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run Local Weather Script
-        env:
-          LAT:   ${{ inputs.lat }}
-          LON:   ${{ inputs.lon }}
-          LABEL: ${{ inputs.label }}
         run: |
-          ARGS=""
-          if [ -n "$LAT" ]; then ARGS="$ARGS --lat $LAT"; fi
-          if [ -n "$LON" ]; then ARGS="$ARGS --lon $LON"; fi
-          if [ -n "$LABEL" ]; then ARGS="$ARGS --label \"$LABEL\""; fi
-          echo "ARGS=$ARGS"
-          PYTHONPATH=. python scripts/gpv_panel_daily_local.py $ARGS
+          PYTHONPATH=. python3 scripts/gpv_panel_daily_local.py
