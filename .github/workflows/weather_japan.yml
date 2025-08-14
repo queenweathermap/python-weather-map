@@ -4,7 +4,7 @@
 # 保存なし（ZIPをメールで送付）／Slackは任意
 # ===============================================
 
-name: JAPAN Weather Panel (Matrix Split)
+name: JAPAN Weather Panel
 
 on:
   # schedule:
