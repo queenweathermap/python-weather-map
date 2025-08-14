@@ -1,28 +1,31 @@
+# -*- coding: utf-8 -*-
+# =============================================================================
 # scripts/gpv_panel_daily_local.py
-# ===============================================================
-# 任意局地 MSM天気図パネル（7段4列）自動生成・Drive+Slack通知バッチ
-# 2025-06-28
-# 緯度・経度・都市名・範囲を変えるだけで複数地点運用OK
-# ===============================================================
-
+# -----------------------------------------------------------------------------
+# 任意地点の MSM 局地パネル（7段×4列）の生成 → ZIP化 → メール添付送信
+# 入力は workflow_dispatch の --lat/--lon/--label などで与える想定。
+# =============================================================================
 
 import os
 import datetime
 import requests
-import traceback
-from module.utils.slack_utils import send_slack_text
-from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
+import shutil
+import argparse
+
 from module.panel_definitions import get_panel_def_local, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
-from module.gpv_download_utils import find_latest_available_files_for_model
-from module.core.gpv_downloader import MODEL_CONFIG, list_files_on_server, GPV_MIRROR_URLS
+from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify
+from module.utils.mail_utils import send_mail
+from module.utils.zip_utils import to_zip_bytes_from_dir
+from module.utils.slack_utils import send_slack_text
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
 
+
 def find_latest_available_files_local(base_url=BASE_URL, max_days=2):
     now = datetime.datetime.utcnow()
-    for day_delta in range(max_days):
+    for day_delta in range(max_days + 1):
         day = now - datetime.timedelta(days=day_delta)
         for h in CYCLE_HOURS:
             t = day.replace(hour=h, minute=0, second=0, microsecond=0)
@@ -31,63 +34,57 @@ def find_latest_available_files_local(base_url=BASE_URL, max_days=2):
             target_init = f"{y}{m}{d}{hh}0000"
             file_patterns = [
                 f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_L-pall_FH00-15_grib2.bin",
-                f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin"
+                f"Z__C_RJTD_{target_init}_MSM_GPV_Rjp_Lsurf_FH00-15_grib2.bin",
             ]
-            file_paths = []
-            found = False
+            infos = []
             for fname in file_patterns:
                 url = f"{data_url}{fname}"
-                r = requests.head(url, timeout=5)
+                r = requests.head(url, timeout=10)
                 if r.status_code == 200:
-                    found = True
-                    file_paths.append({"url": url, "local": os.path.join("./data", fname)})
-            if found:
-                return f"{y}{m}{d}", hh, file_paths
-    raise FileNotFoundError("利用可能なGPVファイルが見つかりません")
+                    infos.append({"url": url, "local": os.path.join("./data", fname)})
+            if len(infos) == 2:
+                return f"{y}{m}{d}", hh, infos
+    raise FileNotFoundError("利用可能な MSM GPV ファイルが見つかりません。")
+
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lat", type=float, required=False, help="中心緯度（任意）")
+    parser.add_argument("--lon", type=float, required=False, help="中心経度（任意）")
+    parser.add_argument("--label", type=str, default="local", help="地名ラベル（件名等に使用）")
+    args = parser.parse_args()
+
+    city_label = args.label or "local"
+    output_dir = "./output_local"
+    slack_channel = os.environ.get("SLACK_CHANNEL_ID")
+
     try:
         ymd, hh, file_infos = find_latest_available_files_local()
-        model = "MSM"
-        output_dir = "./output_local"
-        drive_folder = os.environ["DRIVE_FOLDER_ID"]
-        slack_channel = os.environ["SLACK_CHANNEL_ID"]
-        city_name = "tokyo"
 
-        # --- GPVファイルDL ---
+        # DL
+        os.makedirs("./data", exist_ok=True)
         for info in file_infos:
             if not os.path.exists(info["local"]):
-                resp = requests.get(info["url"])
-                if resp.status_code == 200:
-                    os.makedirs(os.path.dirname(info["local"]), exist_ok=True)
-                    with open(info["local"], "wb") as f:
-                        f.write(resp.content)
-                    print(f"[OK] DL: {info['local']}")
-                else:
-                    print(f"[WARN] ファイル未取得: {info['url']} (status={resp.status_code})")
+                r = requests.get(info["url"], timeout=60)
+                r.raise_for_status()
+                with open(info["local"], "wb") as f:
+                    f.write(r.content)
+                print(f"[OK] DL: {info['local']}")
 
-        # --- ファイル自動仕分け ---
-        l_pall_path = None
-        lsurf_path = None
-        for info in file_infos:
-            fname = info["local"]
-            if "MSM_GPV_Rjp_L-pall" in fname:
-                l_pall_path = fname
-            elif "MSM_GPV_Rjp_Lsurf" in fname:
-                lsurf_path = fname
-
+        l_pall_path = next((i["local"] for i in file_infos if "L-pall" in i["local"]), None)
+        lsurf_path = next((i["local"] for i in file_infos if "Lsurf" in i["local"]), None)
         if not (l_pall_path and lsurf_path):
-            raise FileNotFoundError(f"必要なMSM GPVファイルが不足: l_pall={l_pall_path}, lsurf={lsurf_path}")
+            raise FileNotFoundError("必要ファイル不足（L-pall/Lsurf）")
 
-        # --- データセット気圧面ごと抽出 ---
+        # データセット
         ds_emagram = open_isobaric_dataset(l_pall_path)
         ds_850 = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe用は要カスタマイズ可
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)
         ds_925 = open_isobaric_dataset(l_pall_path, hPa=925)
         ds_975 = open_isobaric_dataset(l_pall_path, hPa=975)
         ds_surface = open_surface_dataset(lsurf_path)
 
-        # --- パネル定義（必要に応じて7段以上も可）---
+        # パネル定義（サンプル構成）
         from module.plot.plot_emagram import plot_emagram
         from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
         from module.plot.plot_850hpa_thetae_stream import plot_850hpa_thetae_stream
@@ -102,37 +99,63 @@ def main():
             (plot_925hpa_temp_wind_dindex, ds_925, "925hPa気温・風・湿数"),
             (plot_975hpa_temp_wind_dindex, ds_975, "975hPa気温・風・湿数"),
             (plot_surface_pressure_and_wind_msm, ds_surface, "地上"),
-            (None, None, ""),   # 7段目は空欄
+            (None, None, ""),  # 余白
         ]
         panel_def_local = get_panel_def_local(custom_items, total_rows=7)
-        extent = REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
-        # --- パネル生成 ---
-        panel_imgs, zip_path, drive_url = generate_universal_panel_and_notify(
+        # 地域範囲（指定なければデフォルト）
+        extent = REGION_EXTENTS.get(city_label, REGION_EXTENTS["japan"])
+
+        # 生成
+        os.makedirs(output_dir, exist_ok=True)
+        panel_imgs, _, _ = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
-            model=model,
+            model="MSM",
             output_dir=output_dir,
-            drive_folder=drive_folder,
-            ncols=4, npages=4,
+            drive_folder=None,
+            ncols=4,
+            npages=4,
             panel_def=panel_def_local,
             nrows=7,
-            city_name=city_name,
+            city_name=city_label,
             extent=extent,
         )
 
-        msg = (
-            f"🟡 ワンポイント天気図パネル {ymd} UTC{hh}\n"
-            f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
-            f"{os.path.basename(zip_path)}\n"
-            f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
+        # メール
+        zip_bytes = to_zip_bytes_from_dir(output_dir)
+        subject = f"{city_label} 局地パネル {ymd} UTC{hh}"
+        body = f"{city_label} の MSM 局地パネル出力一式をZIP添付します（保存なし運用）。"
+
+        msg_id = send_mail(
+            to_addrs=os.environ.get("MAIL_TO", ""),
+            subject=subject,
+            body=body,
+            attachment_blobs=[(f"{city_label}_panel_{ymd}_UTC{hh}.zip", zip_bytes, "application/zip")],
         )
-        send_slack_text(channel=slack_channel, message=msg)
-        print("[OK] 任意局地パネル自動化 完了")
+        print(f"[OK] Mail sent. Message-ID: {msg_id}")
+
+        if slack_channel:
+            try:
+                fnames = ", ".join(sorted(os.listdir(output_dir)))
+                send_slack_text(
+                    channel=slack_channel,
+                    message=f"🟡 任意局地パネル送信 {ymd} UTC{hh} ({city_label})\nMessage-ID: {msg_id}\nfiles: {fnames}",
+                )
+            except Exception:
+                pass
+
     except Exception as e:
+        if slack_channel:
+            send_slack_text(channel=slack_channel, message=f":x: 任意局地パネル失敗: {e}")
         print(f"[ERROR] {e}")
-        import traceback; traceback.print_exc()
-        exit(1)
+        raise
+    finally:
+        try:
+            shutil.rmtree(output_dir, ignore_errors=True)
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     main()
