@@ -1,18 +1,33 @@
-# .github/workflows/weather_akita.yml
 # ===============================================
-# 秋田局地 MSM天気図パネル自動生成・Drive/Slack連携
+# Akita Weather Panel (Mail + Slack)
+# MSM 局地（エマグラム付き）。保存せずメール送付／Slackは任意
 # ===============================================
 
 name: Akita Weather Panel
 
 on:
   # schedule:
-  #   - cron: '0 6 * * *'   # JST 15時
+  #   - cron: "15 6 * * *"   # JST 15:15 など任意
   workflow_dispatch:
 
 jobs:
   run-akita-panel:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TZ: Asia/Tokyo
+      # ---- Mail (必須) ----
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      MAIL_FROM: ${{ secrets.MAIL_FROM }}
+      MAIL_TO:   ${{ secrets.MAIL_TO }}
+      MAIL_SUBJECT_PREFIX: "[Akita]"
+      # ---- Slack (任意) ----
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -20,21 +35,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-
-      - name: Install requirements
-        run: pip install -r requirements.txt
+          python-version: "3.11"
 
       - name: Install Japanese font (IPAexGothic)
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-ipaexfont
 
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
       - name: Run Akita Local Weather Script
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
-          PYTHONPATH=. python3 scripts/gpv_panel_daily_akita.py
+          PYTHONPATH=. python scripts/gpv_panel_daily_akita.py
