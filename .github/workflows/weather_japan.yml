@@ -8,7 +8,7 @@ name: JAPAN Weather Panel
 
 on:
   # schedule:
-  #   - cron: "0 6 * * *"   # JST 15:00（UTC 06:00）
+  #   - cron: "0 6 * * *"  # JST 15:00（UTC 06:00）
   workflow_dispatch:
 
 jobs:
@@ -17,16 +17,16 @@ jobs:
     timeout-minutes: 60
     env:
       TZ: Asia/Tokyo
-      # ---- Mail (必須) ----
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_PASS: ${{ secrets.SMTP_PASS }}
-      MAIL_FROM: ${{ secrets.MAIL_FROM }}
-      MAIL_TO:   ${{ secrets.MAIL_TO }}
+      # ---- Mail（統一名）----
+      FROM_EMAIL:      ${{ secrets.FROM_EMAIL }}
+      TO_EMAIL:        ${{ secrets.TO_EMAIL }}
+      SMTP_SERVER:     ${{ secrets.SMTP_SERVER }}
+      SMTP_PORT:       ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME:   ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD:   ${{ secrets.SMTP_PASSWORD }}
       MAIL_SUBJECT_PREFIX: "[Japan]"
-      # ---- Slack (任意) ----
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      # ---- Slack（任意） ----
+      SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
     strategy:
@@ -39,16 +39,16 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache Cartopy data
+      - name: Cache Cartopy Data
         uses: actions/cache@v4
         with:
           path: ~/.local/share/cartopy
           key: cartopy-data-v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       - name: Install Japanese font (IPAexGothic)
         run: |
