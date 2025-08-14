@@ -37,18 +37,20 @@ import cartopy.crs as ccrs
 from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
 from module.utils.zip_utils import zip_files
 
-# --- Drive 依存の“安全フォールバック” -----------------------------------------
-# 既存コードの互換性維持のため import は試みるが、無ければ no-op を定義
+
+# --- Drive 依存を安全に無効化（存在しない場合は no-op 関数に置き換え） ---
 try:
-    from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive  # type: ignore
-except Exception:
+    from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
+except ImportError:
     def upload_to_drive(*args, **kwargs):
-        print("[INFO] drive upload skipped (no-op)")
-        return "未アップロード"
+        """Driveが利用できない場合の代替（処理なし）"""
+        print("[INFO] Google Drive へのアップロードはスキップされました（no-op）")
+        return None
 
     def delete_old_files_from_drive(*args, **kwargs):
-        print("[INFO] drive cleanup skipped (no-op)")
-        return 0
+        """Driveが利用できない場合の代替（処理なし）"""
+        print("[INFO] Google Drive 上の古いファイル削除はスキップされました（no-op）")
+        return None
 
 
 # =============================================================================
