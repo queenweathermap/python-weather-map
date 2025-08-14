@@ -1,104 +1,130 @@
+# -*- coding: utf-8 -*-
+# =============================================================================
 # scripts/gpv_panel_daily_japan.py
-# ===============================================================
-# 全国（GSM+MSMハイブリッド）天気図パネル自動生成・Drive+Slack通知バッチ
-# 1stepずつJPG出力→ZIP化→Driveアップ→Slack通知
-# 2025-07-01 ChatGPT
-# ===============================================================
-import module.utils.slack_utils as s
+# -----------------------------------------------------------------------------
+# 全国（GSM+MSMハイブリッド）パネル自動生成 → ZIP化 → メール添付送信
+# ※ Google Drive 永続保存は一切行わない（保存しない運用）
+#
+# 必要な環境変数（GitHub Actions Secrets を推奨）:
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
+#   MAIL_FROM, MAIL_TO, (任意) MAIL_SUBJECT_PREFIX
+#   SLACK_CHANNEL_ID (任意、未設定ならSlack通知をスキップ)
+#
+# 依存モジュール（本リポジトリ内）:
+#   - module.plotter.gpv_plotter_universal: open_grib2_var_auto, make_universal_weather_panel
+#   - module.panel_definitions: get_panel_def_japan, REGION_EXTENTS
+#   - module.core.gpv_downloader: GPV_MIRROR_URLS, list_files_on_server
+#   - module.utils.mail_utils: send_mail
+#   - module.utils.zip_utils: to_zip_bytes_from_dir
+#   - module.utils.slack_utils: send_slack_text（任意）
+#
+# 実行例:
+#   python scripts/gpv_panel_daily_japan.py --forecast_hour 0
+# =============================================================================
+
 import os
 import sys
-import datetime
-import warnings
 import gc
 import zipfile
 import argparse
-import matplotlib.pyplot as plt
+import datetime
+import warnings
+import shutil
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-from module.utils.slack_utils import send_slack_text
-from module.core.gpv_downloader import GPV_MIRROR_URLS
+from module.plotter.gpv_plotter_universal import (
+    open_grib2_var_auto,
+    make_universal_weather_panel,
+)
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
-from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
-from module.plotter.gpv_plotter_universal import open_grib2_var_auto, make_universal_weather_panel
+from module.utils.mail_utils import send_mail
+from module.utils.zip_utils import to_zip_bytes_from_dir
+from module.utils.slack_utils import send_slack_text  # 環境変数未設定なら使われない想定
+from module.core.gpv_downloader import GPV_MIRROR_URLS
+
+import requests
+
 
 def find_and_download_gpv_files(
-    base_dir="./data",
-    days_back=2,
-    cycle_hours=[0, 21, 18, 15, 12, 9, 6, 3],
-    fh_band_gsm="FD0000-0100",
-    fh_band_msm="FH00-15"
+    base_dir: str = "./data",
+    days_back: int = 2,
+    cycle_hours=(0, 21, 18, 15, 12, 9, 6, 3),
+    fh_band_gsm: str = "FD0000-0100",
+    fh_band_msm: str = "FH00-15",
 ):
+    """
+    RISH の日付パスを上から走査し、GSM/MSMの必要 bin が3本とも見つかった時点でDLして返す。
+    404が混じる前提で、indexベースの列挙関数を使って存在確認を行う。
+    """
+    from module.core.gpv_downloader import list_files_on_server
+
     base_url = GPV_MIRROR_URLS[0]
     now = datetime.datetime.utcnow()
-    for day_delta in range(days_back):
+
+    for day_delta in range(days_back + 1):
         day = now - datetime.timedelta(days=day_delta)
         for h in cycle_hours:
             dt = day.replace(hour=h, minute=0, second=0, microsecond=0)
             y, m, d, hh = dt.strftime("%Y %m %d %H").split()
             data_url = f"{base_url}/{y}/{m}/{d}/"
-            from module.core.gpv_downloader import list_files_on_server
+
             gsm_files = list_files_on_server(dt, "GSM_GPV_Rjp_Gll0p1deg_L-pall", fh_band_gsm)
-            msm_l_pall_files = list_files_on_server(dt, "MSM_GPV_Rjp_L-pall", fh_band_msm)
-            msm_lsurf_files  = list_files_on_server(dt, "MSM_GPV_Rjp_Lsurf", fh_band_msm)
-            if gsm_files and msm_l_pall_files and msm_lsurf_files:
-                gsm_l_pall_fname = gsm_files[0]
-                msm_l_pall_fname = msm_l_pall_files[0]
-                msm_lsurf_fname  = msm_lsurf_files[0]
-                file_paths = []
-                import requests
-                for fname in [gsm_l_pall_fname, msm_l_pall_fname, msm_lsurf_fname]:
+            msm_l_pall = list_files_on_server(dt, "MSM_GPV_Rjp_L-pall", fh_band_msm)
+            msm_lsurf  = list_files_on_server(dt, "MSM_GPV_Rjp_Lsurf", fh_band_msm)
+
+            if gsm_files and msm_l_pall and msm_lsurf:
+                target_files = [gsm_files[0], msm_l_pall[0], msm_lsurf[0]]
+                paths = []
+                os.makedirs(base_dir, exist_ok=True)
+                for fname in target_files:
                     url = f"{data_url}{fname}"
                     local = os.path.join(base_dir, fname)
                     if not os.path.exists(local):
-                        resp = requests.get(url)
-                        if resp.status_code == 200:
-                            os.makedirs(os.path.dirname(local), exist_ok=True)
-                            with open(local, "wb") as f:
-                                f.write(resp.content)
-                            print(f"[OK] DL: {local}")
-                        else:
-                            print(f"[NG] DL: {url} (status={resp.status_code})")
-                            break
-                    file_paths.append(local)
-                if len(file_paths) == 3:
-                    return y+m+d, hh, file_paths
-    raise FileNotFoundError("利用可能なGSM/MSM GPVファイルがindex.html上に見つかりません")
+                        r = requests.get(url, timeout=60)
+                        r.raise_for_status()
+                        with open(local, "wb") as f:
+                            f.write(r.content)
+                        print(f"[OK] DL: {local}")
+                    paths.append(local)
+                return y + m + d, hh, paths
+
+    raise FileNotFoundError("利用可能なGSM/MSM GPVファイルが見つかりません。")
+
 
 def main():
+    # Aggバックエンド（ヘッドレス）
     import matplotlib
+
     matplotlib.use("Agg")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--forecast_hour', type=int, default=0)
+    parser.add_argument("--forecast_hour", type=int, default=0, help="3h刻み（0,3,6, ...）")
     args = parser.parse_args()
-    forecast_hour = args.forecast_hour
-
+    forecast_hour = int(args.forecast_hour)
     print(f"[INFO] forecast_hour={forecast_hour}")
 
     base_dir = "./data"
     output_dir = "./output"
     slack_channel = os.environ.get("SLACK_CHANNEL_ID")
-    days_back = 2
 
     try:
-        # 1. ファイルDL＆パス取得
+        # 1) 必要な GRIB2 を取得
         ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
-            base_dir=base_dir, days_back=days_back
+            base_dir=base_dir
         )
 
-        # 2. step数取得
-        arr_sample = open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric")
-        nsteps = arr_sample.sizes["step"] if "step" in arr_sample.sizes else 9
-        del arr_sample
+        # 2) step 計算（3h 刻み）
+        arr = open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric")
+        nsteps = arr.sizes.get("step", 9)
+        del arr
         gc.collect()
 
-        # 3. forecast_hour→step変換
         step = forecast_hour // 3
-        if step >= nsteps or step < 0:
-            raise ValueError(f"指定のforecast_hour({forecast_hour})が有効な範囲外です（nsteps={nsteps})")
+        if step < 0 or step >= nsteps:
+            raise ValueError(f"指定 forecast_hour={forecast_hour} が有効範囲外（nsteps={nsteps}）")
 
-        # 必要変数をstepごとにopen
+        # 3) 必要変数を開く（isobaric/surface混在に対応するユニバーサルオープナ）
         panel_datasets = {
             "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
             "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
@@ -120,54 +146,58 @@ def main():
         }
 
         panel_def = get_panel_def_japan(panel_datasets)
-        ncols = 1
-        nrows = len(panel_def)
         extent = REGION_EXTENTS["japan"]
-        img_path = f"{output_dir}/panel_japan_{ymd}_UTC{hh}_fh{forecast_hour:02}.jpg"
-        panel_imgs = make_universal_weather_panel(
+
+        os.makedirs(output_dir, exist_ok=True)
+        _ = make_universal_weather_panel(
             save_dir=output_dir,
             panel_def=panel_def,
             times=None,
             init_time_str=f"{ymd}_UTC{hh}",
             city_name="japan",
-            ncols=ncols,
-            nrows=nrows,
+            ncols=1,
+            nrows=len(panel_def),
             extent=extent,
             dpi=80,
-            step=step
+            step=step,
         )
 
-        if panel_imgs and os.path.exists(panel_imgs[0]):
-            os.rename(panel_imgs[0], img_path)
-            print(f"[OK] 画像保存: {img_path}")
-    
-            # Google Driveへアップロード
-            # フォルダIDは環境変数DRIVE_FOLDER_IDを使う（なければNoneでOK）
-            folder_id = os.environ.get("DRIVE_FOLDER_ID")
-            drive_url = upload_to_drive(img_path, folder_id=folder_id)
-            print(f"[OK] Drive URL: {drive_url}")
-    
-            msg = (
-                f":large_blue_circle: 全国天気図パネル {ymd} UTC{hh} +{forecast_hour}h\n"
-                f"{os.linesep.join(os.path.basename(f) for f in panel_imgs)}\n"
-                f"{os.path.basename(img_path)}\n"
-                f"{drive_url if drive_url and drive_url not in ('未アップロード', '') else '(Driveアップロード未設定)'}"
-            )
-            send_slack_text(channel=slack_channel, message=msg)
-    
-            # 古いファイル自動削除（30日より前のファイル）
-            delete_old_files_from_drive(folder_id=folder_id, older_than_days=30)
-    
-        else:
-            send_slack_text(channel=slack_channel, message=":x: 画像ファイル生成に失敗しました")
-            raise RuntimeError("画像ファイル生成に失敗しました")
+        # 4) 出力ディレクトリを ZIP（メモリ上）→ メール添付で送信
+        zip_bytes = to_zip_bytes_from_dir(output_dir)
+        subject = f"全国パネル {ymd} UTC{hh} +{forecast_hour}h"
+        body = "全国（GSM+MSM）パネル出力一式をZIP添付します（保存なし運用）。"
+
+        msg_id = send_mail(
+            to_addrs=os.environ.get("MAIL_TO", ""),
+            subject=subject,
+            body=body,
+            attachment_blobs=[(f"japan_panel_{ymd}_UTC{hh}_fh{forecast_hour:02}.zip", zip_bytes, "application/zip")],
+        )
+        print(f"[OK] Mail sent. Message-ID: {msg_id}")
+
+        # 任意: Slack テキスト通知
+        if slack_channel:
+            try:
+                fnames = ", ".join(sorted(os.listdir(output_dir)))
+                send_slack_text(
+                    channel=slack_channel,
+                    message=f":large_blue_circle: 全国パネル送信 {ymd} UTC{hh} +{forecast_hour}h\nMessage-ID: {msg_id}\nfiles: {fnames}",
+                )
+            except Exception as _:
+                pass
 
     except Exception as e:
-        msg = f":x: パネル生成失敗: {e}"
-        send_slack_text(channel=slack_channel, message=msg)
+        if os.environ.get("SLACK_CHANNEL_ID"):
+            send_slack_text(channel=os.environ["SLACK_CHANNEL_ID"], message=f":x: 全国パネル失敗: {e}")
         print(f"[ERROR] {e}")
-        import traceback; traceback.print_exc()
-        sys.exit(1)
+        raise
+    finally:
+        # 5) 後片付け（実行環境からも削除）※終了後にランナーは破棄されるが念のため
+        try:
+            shutil.rmtree(output_dir, ignore_errors=True)
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     main()
