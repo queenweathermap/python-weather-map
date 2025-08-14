@@ -1,0 +1,46 @@
+name: SPF Test Mail from wx@queenw.com
+
+on:
+  workflow_dispatch: # 手動実行
+  schedule:
+    - cron: "0 0 * * 1" # 毎週月曜 09:00 JST（00:00 UTC）
+
+jobs:
+  send_mail:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install yagmail
+
+      - name: Send SPF test mail
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}     # wx@queenw.com
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}     # メールパスワード
+          TO_EMAIL:  ${{ secrets.TO_EMAIL }}      # 受信先（例：自分のiCloudアドレス）
+        run: |
+          python - << 'PYCODE'
+          import yagmail
+          import datetime
+
+          now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+          yag = yagmail.SMTP(
+              user="${SMTP_USER}",
+              password="${SMTP_PASS}",
+              host="queenworks.sakura.ne.jp",
+              port=587
+          )
+          yag.send(
+              to="${TO_EMAIL}",
+              subject=f"SPF Test from {now}",
+              contents="This is an automated SPF test email sent from GitHub Actions."
+          )
+          print("✅ Test mail sent")
+          PYCODE
