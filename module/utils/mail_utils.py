@@ -5,7 +5,7 @@
 # SMTPメール送信（添付/HTML/複数宛先/再試行/詳細デバッグ/保存なし運用）
 # - 587(STARTTLS) と 465(SMTPS) を自動フォールバック
 # - EHLO → STARTTLS → EHLO → AUTH の正しい順序
-# - エンベロープFrom（Return-Path）= 認証ユーザー を強制（ポリシー回避）
+# - エンベロープFrom（Return-Path）= 認証ユーザー を強制
 # - MAIL_DEBUG=1 で SMTPlib の生ログを有効化
 # =============================================================================
 import os
@@ -36,14 +36,12 @@ def _build_message(
     attachments: List[Tuple[str, bytes, str]],
 ) -> MIMEMultipart:
     msg = MIMEMultipart()
-    # 見た目のFrom（ヘッダ）。実体のエンベロープは別で指定
     msg["From"] = formataddr((str(Address(display_name="", username=mail_from.split("@")[0], domain=mail_from.split("@")[1])) , mail_from))
     msg["To"] = ", ".join(to_addrs)
     if cc_addrs: msg["Cc"] = ", ".join(cc_addrs)
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "html" if is_html else "plain", "utf-8"))
 
-    # 添付
     for name, blob, ctype in attachments:
         part = MIMEApplication(blob, Name=name)
         part.add_header("Content-Disposition", "attachment", filename=name)
@@ -62,10 +60,6 @@ def _connect_and_send(
     msg: MIMEMultipart,
     debug: bool,
 ) -> str:
-    """
-    指定ポートで接続して送信。成功で Message-ID を返す。
-    465=SMTPS, それ以外はSMTP→STARTTLS。
-    """
     if port == 465:
         server = smtplib.SMTP_SSL(host, port, timeout=60)
     else:
@@ -80,26 +74,19 @@ def _connect_and_send(
             server.ehlo(localname)
 
         server.login(user, password)
-
-        # 実際のエンベロープFromを認証ユーザーで固定（Return-Path）
         server.sendmail(envelope_from, recipients, msg.as_string())
-        try:
-            # 返ってくるメッセージIDが無いこともあるのでヘッダから拾う
-            mid = msg.get("Message-ID") or ""
-        except Exception:
-            mid = ""
-        return mid or "(sent)"
+        return msg.get("Message-ID") or "(sent)"
     finally:
         try: server.quit()
         except Exception: pass
 
 def send_mail(
-    to_addrs,
-    subject: str,
-    body: str,
+    to_addrs=None,
+    subject: str = "",
+    body: str = "",
     *,
     attachment_paths: Optional[List[str]] = None,
-    attachment_blobs: Optional[List[Tuple[str, bytes, str]]] = None,  # (filename, bytes, mimetype)
+    attachment_blobs: Optional[List[Tuple[str, bytes, str]]] = None,
     mail_from: Optional[str] = None,
     smtp_host: Optional[str] = None,
     smtp_port: Optional[int] = None,
@@ -109,31 +96,27 @@ def send_mail(
     bcc_addrs: Optional[Iterable[str]] = None,
     is_html: bool = False,
 ) -> str:
-    """
-    送信メイン。成功時 Message-ID 風の識別子を返す／失敗時 RuntimeError。
-    """
-    # --- env / 引数解決 ---
-    mail_from  = mail_from  or os.environ.get("MAIL_FROM", "")
-    smtp_host  = smtp_host  or os.environ.get("SMTP_HOST", "")
+    # --- 環境変数統一名から読み込み ---
+    mail_from  = mail_from  or os.environ.get("FROM_EMAIL", "")
+    to_addrs   = to_addrs   or os.environ.get("TO_EMAIL", "")
+    smtp_host  = smtp_host  or os.environ.get("SMTP_SERVER", "")
     smtp_port  = int(smtp_port or os.environ.get("SMTP_PORT", "587"))
-    smtp_user  = smtp_user  or os.environ.get("SMTP_USER", "")
-    smtp_pass  = smtp_password or os.environ.get("SMTP_PASS", "")
+    smtp_user  = smtp_user  or os.environ.get("SMTP_USERNAME", "")
+    smtp_pass  = smtp_password or os.environ.get("SMTP_PASSWORD", "")
     debug      = os.environ.get("MAIL_DEBUG", "0") == "1"
 
-    if not mail_from:  raise RuntimeError("MAIL_FROM 未設定")
-    if not smtp_host:  raise RuntimeError("SMTP_HOST 未設定")
-    if not smtp_user:  raise RuntimeError("SMTP_USER 未設定")
-    if not smtp_pass:  raise RuntimeError("SMTP_PASS 未設定")
+    if not mail_from:  raise RuntimeError("FROM_EMAIL 未設定")
+    if not smtp_host:  raise RuntimeError("SMTP_SERVER 未設定")
+    if not smtp_user:  raise RuntimeError("SMTP_USERNAME 未設定")
+    if not smtp_pass:  raise RuntimeError("SMTP_PASSWORD 未設定")
 
     to_list  = _ensure_list(to_addrs)
     cc_list  = _ensure_list(cc_addrs)
     bcc_list = _ensure_list(bcc_addrs)
     recipients = [a for a in (to_list + cc_list + bcc_list) if a]
-
     if not recipients:
         raise RuntimeError("宛先がありません")
 
-    # 添付（ファイルパス→bytes化）
     blobs: List[Tuple[str, bytes, str]] = list(attachment_blobs or [])
     if attachment_paths:
         for p in attachment_paths:
@@ -142,7 +125,6 @@ def send_mail(
             with open(p, "rb") as f:
                 blobs.append((os.path.basename(p), f.read(), "application/octet-stream"))
 
-    # メッセージ構築
     msg = _build_message(
         mail_from=mail_from,
         to_addrs=to_list,
@@ -153,17 +135,12 @@ def send_mail(
         attachments=blobs,
     )
 
-    # ポリシー回避のため、エンベロープFromは “認証ユーザー” に固定
-    # （= 送信サーバが許可したドメインのFrom/Return-Path整合）
     envelope_from = smtp_user
-
-    # From と 認証ユーザーのドメインを合わせるのが基本（明示チェック）
     from_domain = mail_from.split("@")[-1].lower()
     user_domain = smtp_user.split("@")[-1].lower()
     if from_domain != user_domain:
-        print(f"[WARN] From({from_domain}) と SMTP_USER({user_domain}) のドメインが不一致です。拒否される可能性があります。")
+        print(f"[WARN] From({from_domain}) と SMTP_USERNAME({user_domain}) のドメインが不一致です。拒否される可能性があります。")
 
-    # 2回リトライ（587→465 の順）
     ports = [smtp_port] if smtp_port in (465, 587) else [587, 465]
     last_err = None
     for attempt, port in enumerate(ports, start=1):
@@ -181,10 +158,6 @@ def send_mail(
             )
             print(f"[OK] メール送信成功（port={port}）: Message-ID={mid}")
             return mid
-        except smtplib.SMTPResponseException as e:
-            # サーバが返した応答コードをそのまま表示
-            print(f"[ERR] SMTP {e.smtp_code} {e.smtp_error}")
-            last_err = e
         except Exception as e:
             print(f"[ERR] SMTP送信失敗（port={port}）: {e}")
             last_err = e
