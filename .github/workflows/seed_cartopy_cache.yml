@@ -1,1 +1,36 @@
 
+name: Seed Cartopy Cache
+
+on:
+  workflow_dispatch: {}   # 手動で一度だけ実行
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ① Cartopy キャッシュ（~/.local/share/cartopy）を復元/保存
+      - name: Cache Cartopy Data
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/cartopy
+          key: cartopy-data-v1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps (minimum)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ② ダウンロードを“確実に”発生させる
+      - name: Seed cartopy cache
+        env:
+          CARTOPY_DATA_DIR: ~/.local/share/cartopy  # 任意
+        run: |
+          PYTHONPATH=. python scripts/seed_cartopy_cache.py
