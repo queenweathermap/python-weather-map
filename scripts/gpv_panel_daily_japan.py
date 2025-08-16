@@ -7,18 +7,10 @@
 #  - 生成されたページ画像は後段ジョブ（aggregate_and_send.py）で1通にまとめて送信
 #  - Google Drive 等の保存は行わない“保存しない運用”
 #
-# 統一ENV（mail_utils に準拠: FROM_EMAIL / TO_EMAIL / SMTP_* は mail_utils が使用）
-# 追加ENV:
-#   MAIL_SUBJECT_PREFIX : 件名プレフィックス（集約側で利用）
-#   SLACK_BOT_TOKEN / SLACK_CHANNEL_ID : 任意で同報（本スクリプトは完了通知のみ）
-#
 # 描画調整（ENV もしくは CLI 引数で指定、CLI優先）:
-#   PANEL_NCOLS   / --ncols     : 列数（既定 4）
-#   PANEL_DPI     / --dpi       : DPI（既定 120）
-#   PANEL_MAX_PAGES / --max_pages : 出力ページ上限（既定 0=全ページ）
-#
-# 実行例:
-#   python scripts/gpv_panel_daily_japan.py --ncols 4 --max_pages 0
+#   PANEL_NCOLS     / --ncols      : 列数（既定 4）
+#   PANEL_DPI       / --dpi        : DPI（既定 120）
+#   PANEL_MAX_PAGES / --max_pages  : 出力ページ上限（既定 1。0=全ページ）
 # =============================================================================
 
 from __future__ import annotations
@@ -28,7 +20,6 @@ import gc
 import argparse
 import datetime
 import warnings
-import shutil
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -37,9 +28,7 @@ import requests
 from module.core.gpv_downloader import GPV_MIRROR_URLS
 from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
 from module.utils.slack_utils import send_slack_text  # 任意（未設定なら無視）
-
-# 複数列1枚の描画コア
-from module.panel_utils import make_universal_weather_panel
+from module.panel_utils import make_universal_weather_panel  # 複数列1枚の描画コア
 from module.plotter.gpv_plotter_universal import open_grib2_var_auto
 
 
@@ -91,22 +80,34 @@ def find_and_download_gpv_files(
 
 
 # -------------------------------- main ---------------------------------------
+def _envint(name: str, default: int) -> int:
+    """環境変数の整数取得（未設定や不正値は default）"""
+    try:
+        return int(os.environ.get(name, str(default)))
+    except Exception:
+        return default
+
+
 def main():
     # ヘッドレス描画
     import matplotlib
     matplotlib.use("Agg")
 
-    # 既定値を調整
-    parser.add_argument("--ncols", type=int, default=int(os.environ.get("PANEL_NCOLS", "6")))
-    parser.add_argument("--dpi", type=int, default=int(os.environ.get("PANEL_DPI", "120")))
-    parser.add_argument("--max_pages", type=int, default=int(os.environ.get("PANEL_MAX_PAGES", "1")),
-                        help="生成ページ数の上限。1にしてまず“1枚”を安定化")
-
+    # ---- 引数/ENV（CLI優先）----
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ncols", type=int, default=_envint("PANEL_NCOLS", 4))
+    parser.add_argument("--dpi", type=int, default=_envint("PANEL_DPI", 120))
+    parser.add_argument(
+        "--max_pages",
+        type=int,
+        default=_envint("PANEL_MAX_PAGES", 1),
+        help="生成ページ数の上限。まずは 1 で“横長1枚/ページ”を安定化。0=全ページ",
+    )
     args = parser.parse_args()
 
-    NCOLS = max(1, int(args.ncols))
-    DPI   = max(60, int(args.dpi))
-    MAXP  = max(0, int(args.max_pages))
+    NCOLS = max(1, args.ncols)
+    DPI   = max(60, args.dpi)
+    MAXP  = max(0, args.max_pages)
 
     base_dir = "./data"
     output_dir = "./output"
@@ -199,10 +200,6 @@ def main():
             except Exception:
                 pass
         raise
-    finally:
-        # GitHub Actions の後続アーティファクト収集を使う場合は削除しない。
-        # ここでは保持（集約ジョブが download-artifact で回収）
-        pass
 
 
 if __name__ == "__main__":
