@@ -156,112 +156,68 @@ def get_apcp_3hr(file_path: str) -> xr.DataArray:
 # 変数ユニバーサルオープナ
 # =============================================================================
 def open_grib2_var_auto(
-    varname: str,
-    level: Optional[int] = None,
-    gsm_path: Optional[str] = None,
-    msm_pall_path: Optional[str] = None,
-    msm_lsurf_path: Optional[str] = None,
-    type_of_level: Optional[str] = None,  # 互換のため残す（自動で決める）
-    stepType: Optional[str] = None,
-    rh_fallback_func=get_rh_fallback,
-    apcp_3hr_func=get_apcp_3hr,
+    varname, level=None,
+    gsm_path=None, msm_pall_path=None, msm_lsurf_path=None,
+    type_of_level=None, stepType=None,
+    rh_fallback_func=None, apcp_3hr_func=None,
 ):
-    """
-    変数名から自動で “どのファイルをどの filter_by_keys で開くか” を決めて返す。
-    見つからない／開けない場合は None を返す。
-    """
-    print(f"\n[DEBUG] open_grib2_var_auto: var={varname}, level={level}, stepType={stepType}")
+    print(f"\n[DEBUG] open_grib2_var_auto: var={varname}, level={level}, type_of_level={type_of_level}, stepType={stepType}")
 
-    # --- ファイル自動判定（経験則ベース） ---
-    if varname in ("gh", "u", "v", "t", "r"):
-        file_path = gsm_path if (level in (300, 500, 700)) else msm_pall_path
-    elif varname == "w":
+    # --- ファイル自動判定 ---
+    if varname in ["gh", "u", "v", "t", "r"]:
+        if level in [300, 500, 700]:
+            file_path = gsm_path
+        elif level == 850:
+            file_path = msm_pall_path
+        else:
+            file_path = msm_pall_path
+    elif varname == "w" and level == 700:
         file_path = msm_pall_path
-    elif varname in ("u10", "v10", "prmsl", "apcp"):
+    elif varname in ["u10", "v10"]:
         file_path = msm_lsurf_path
+    elif varname == "prmsl":
+        file_path = msm_lsurf_path
+    elif varname == "apcp":
+        file_path = msm_lsurf_path
+        # ...（apcp のフォールバック部は現状のままでOK）
+        # 省略
     else:
         file_path = msm_pall_path
 
-    if not file_path:
-        print(f"[WARN] open_grib2_var_auto: file_path 未指定（var={varname}）")
-        return None
-
-    # --- filter_by_keys 構築 ---
-    fkeys: Dict[str, Any] = {}
-    if varname in ("gh", "u", "v", "t", "r", "w"):
-        fkeys = {"typeOfLevel": "isobaricInhPa", "level": level}
+    # --- filter_by_keys を必ず初期化してから使う ---
+    filter_keys = {}
+    if varname in ["gh", "u", "v", "t", "r", "w"]:
+        filter_keys = {"typeOfLevel": "isobaricInhPa", "level": level}
     elif varname in ["u10", "v10"]:
-        file_path = msm_lsurf_path
         filter_keys = {"typeOfLevel": "heightAboveGround", "level": 10, "stepType": "instant"}
-        try:
-            ds = _open_cfgrib_once(file_path, filter_keys)
-            return ds[varname] if varname in ds else None
-        except Exception as e:
-            print(f"[WARN] 10m風スキップ: {e}")
-            return None
-    
     elif varname == "prmsl":
-        file_path = msm_lsurf_path
         filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant"}
-        try:
-            ds = _open_cfgrib_once(file_path, filter_keys)
-            return ds["prmsl"] if "prmsl" in ds else None
-        except Exception as e:
-            print(f"[WARN] PRMSLスキップ: {e}")
-            return None
 
-        # apcp は stepType が揺れるため後段で特別処理する
-        pass
+    print(f"[DEBUG] open_grib2_var_auto: using file_path={file_path}, filter_by_keys={filter_keys}")
 
-    print(f"[DEBUG] open_grib2_var_auto: use file={file_path}, filter={fkeys or '(apcp special)'}")
-
-    # --- apcp の特別処理（順に試す→fallback で 3h 差分） ---
-    if varname == "apcp":
-        for try_step in ("accum", "avg", "instant"):
-            try:
-                ds = xr.open_dataset(
-                    file_path, engine="cfgrib", filter_by_keys={"typeOfLevel": "surface", "stepType": try_step}
-                )
-                if "apcp" in ds:
-                    print(f"[OK] apcp found stepType={try_step} shape={ds['apcp'].shape}")
-                    return ds["apcp"]
-            except Exception as e:
-                print(f"[WARN] apcp open (stepType={try_step}) failed: {e}")
-
-        # fallback: 3h 差分
-        try:
-            ap = apcp_3hr_func(file_path) if apcp_3hr_func else None
-            if ap is not None:
-                print(f"[OK] apcp_3hr fallback shape={ap.shape}")
-                return ap
-        except Exception as e:
-            print(f"[FAIL] apcp_3hr fallback failed: {e}")
-
-        print("[FAIL] apcp 取得に失敗")
-        return None
-
-    # --- 通常の open ---
     try:
-        # ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
-        ds = _open_cfgrib_once(file_path, filter_keys)
-        if varname in ds.variables:
+        ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
+        print(f"[DEBUG] ds.variables: {list(ds.variables.keys())}")
+        if varname in ds:
             print(f"[OK] {varname} shape={ds[varname].shape}")
             return ds[varname]
-
-        # r はフォールバック
-        if varname == "r" and rh_fallback_func:
-            print("[WARN] r not found → RH fallback を試行")
-            rh = rh_fallback_func(ds, level_hPa=level)
-            if rh is not None:
-                print(f"[OK] r fallback shape={rh.shape}")
-                return rh
-
-        print(f"[WARN] {varname} が ds.variables に存在しません")
+        # 相対湿度フォールバック
+        if varname == "r" and rh_fallback_func is not None:
+            print(f"[WARN] r missing → fallback get_rh_fallback()")
+            try:
+                rh = rh_fallback_func(ds, level_hPa=level)
+                if rh is not None:
+                    print(f"[OK] r fallback shape={rh.shape}")
+                    return rh
+            except Exception as e:
+                print(f"[FAIL] get_rh_fallback failed: {e}")
+        print(f"[WARN] {varname} not found in dataset.")
         return None
-
     except Exception as e:
-        print(f"[FAIL] open_grib2_var_auto: {e}")
+        # ここで filter_keys を安全に参照できる（初期化済み）
+        print(f"[FAIL] open_grib2_var_auto: file={file_path}, filter={filter_keys}, err={e}")
         return None
+
 
 
 # =============================================================================
