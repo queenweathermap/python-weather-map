@@ -2,30 +2,33 @@
 # =============================================================================
 # scripts/gpv_panel_daily_japan.py
 # -----------------------------------------------------------------------------
-# 全国（GSM+MSMハイブリッド）パネル自動生成 → ZIP化 → メール添付送信
-# ※ Google Drive 永続保存は一切行わない（保存しない運用）
+# 全国（GSM+MSMハイブリッド）パネル自動生成（複数列を1枚に）→ メール1通で送信
+#  - Google Drive 永続保存は行わない（“保存しない”運用）
+#  - 列＝連続step（+0h, +3h, +6h ...）を横に並べた 1 枚を生成
+#  - 全stepをカバーするためのページ分割にも対応（列数×ページで網羅）
 #
-# 必要な環境変数（GitHub Actions Secrets を推奨）:
-#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
-#   MAIL_FROM, MAIL_TO, (任意) MAIL_SUBJECT_PREFIX
-#   SLACK_CHANNEL_ID (任意、未設定ならSlack通知をスキップ)
+# 主要ENV（GitHub Actions Secrets 推奨／mail_utilsの統一名に準拠）
+#   FROM_EMAIL, TO_EMAIL, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+#   MAIL_SUBJECT_PREFIX   : 件名先頭（例 "[Japan]"）
+#   MAIL_ATTACH_AS_ZIP    : "1" なら原画像群をZIPでも同梱（mail_utils側で処理）
+#   MAX_MAIL_SIZE_MB      : 合計サイズ上限（既定20MB、超過で自動ZIP）
+#   SLACK_BOT_TOKEN / SLACK_CHANNEL_ID : あれば同報（mail_utils側で1回だけ）
 #
-# 依存モジュール（本リポジトリ内）:
-#   - module.plotter.gpv_plotter_universal: open_grib2_var_auto, make_universal_weather_panel
-#   - module.panel_definitions: get_panel_def_japan, REGION_EXTENTS
-#   - module.core.gpv_downloader: GPV_MIRROR_URLS, list_files_on_server
-#   - module.utils.mail_utils: send_mail
-#   - module.utils.zip_utils: to_zip_bytes_from_dir
-#   - module.utils.slack_utils: send_slack_text（任意）
+# パネル出力の調整ENV / CLI
+#   PANEL_NCOLS           : 列数（既定 4） 例: 4列なら +0,+3,+6,+9h を1枚
+#   PANEL_DPI             : 画像DPI（既定 120）
+#   PANEL_MAX_PAGES       : 生成ページ数の上限（既定 0=全ページ）
+#   --ncols, --dpi, --max_pages でも指定可（ENVよりCLI優先）
 #
 # 実行例:
-#   python scripts/gpv_panel_daily_japan.py --forecast_hour 0
+#   python scripts/gpv_panel_daily_japan.py --ncols 4 --max_pages 0
 # =============================================================================
+
+from __future__ import annotations
 
 import os
 import sys
 import gc
-import zipfile
 import argparse
 import datetime
 import warnings
@@ -33,19 +36,21 @@ import shutil
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-from module.plotter.gpv_plotter_universal import (
-    open_grib2_var_auto,
-    make_universal_weather_panel,
-)
-from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
-from module.utils.mail_utils import send_mail
-from module.utils.zip_utils import to_zip_bytes_from_dir
-from module.utils.slack_utils import send_slack_text  # 環境変数未設定なら使われない想定
-from module.core.gpv_downloader import GPV_MIRROR_URLS
-
 import requests
 
+from module.core.gpv_downloader import GPV_MIRROR_URLS
+from module.panel_definitions import get_panel_def_japan, REGION_EXTENTS
+from module.utils.mail_utils import send_mail
+from module.utils.slack_utils import send_slack_text  # 任意（環境変数未設定なら何もしない）
 
+# ここが“複数列1枚”対応のパネル描画コア
+from module.panel_utils import make_universal_weather_panel
+from module.plotter.gpv_plotter_universal import open_grib2_var_auto
+
+
+# -----------------------------------------------------------------------------
+# GPVの存在チェック＆ダウンロード
+# -----------------------------------------------------------------------------
 def find_and_download_gpv_files(
     base_dir: str = "./data",
     days_back: int = 2,
@@ -54,8 +59,8 @@ def find_and_download_gpv_files(
     fh_band_msm: str = "FH00-15",
 ):
     """
-    RISH の日付パスを上から走査し、GSM/MSMの必要 bin が3本とも見つかった時点でDLして返す。
-    404が混じる前提で、indexベースの列挙関数を使って存在確認を行う。
+    RISHの公開ディレクトリを新しい方から走査し、GSM/MSMの必要binが
+    3本（GSM L-pall、MSM L-pall、MSM Lsurf）そろった初回でDLして返す。
     """
     from module.core.gpv_downloader import list_files_on_server
 
@@ -74,10 +79,10 @@ def find_and_download_gpv_files(
             msm_lsurf  = list_files_on_server(dt, "MSM_GPV_Rjp_Lsurf", fh_band_msm)
 
             if gsm_files and msm_l_pall and msm_lsurf:
-                target_files = [gsm_files[0], msm_l_pall[0], msm_lsurf[0]]
-                paths = []
+                targets = [gsm_files[0], msm_l_pall[0], msm_lsurf[0]]
                 os.makedirs(base_dir, exist_ok=True)
-                for fname in target_files:
+                paths = []
+                for fname in targets:
                     url = f"{data_url}{fname}"
                     local = os.path.join(base_dir, fname)
                     if not os.path.exists(local):
@@ -92,39 +97,45 @@ def find_and_download_gpv_files(
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルが見つかりません。")
 
 
+# -----------------------------------------------------------------------------
+# メイン
+# -----------------------------------------------------------------------------
 def main():
-    # Aggバックエンド（ヘッドレス）
+    # ヘッドレス描画
     import matplotlib
-
     matplotlib.use("Agg")
 
+    # ---- 引数/ENV ----
     parser = argparse.ArgumentParser()
-    parser.add_argument("--forecast_hour", type=int, default=0, help="3h刻み（0,3,6, ...）")
+    parser.add_argument("--ncols", type=int, default=int(os.environ.get("PANEL_NCOLS", "4")))
+    parser.add_argument("--dpi", type=int, default=int(os.environ.get("PANEL_DPI", "120")))
+    parser.add_argument("--max_pages", type=int, default=int(os.environ.get("PANEL_MAX_PAGES", "0")),
+                        help="生成ページ数の上限。0なら全stepを網羅")
     args = parser.parse_args()
-    forecast_hour = int(args.forecast_hour)
-    print(f"[INFO] forecast_hour={forecast_hour}")
+
+    NCOLS = max(1, int(args.ncols))
+    DPI   = max(60, int(args.dpi))
+    MAXP  = max(0, int(args.max_pages))  # 0 = all
 
     base_dir = "./data"
     output_dir = "./output"
     slack_channel = os.environ.get("SLACK_CHANNEL_ID")
 
     try:
-        # 1) 必要な GRIB2 を取得
+        # 1) GPVファイル3本を入手
         ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
             base_dir=base_dir
         )
 
-        # 2) step 計算（3h 刻み）
+        # 2) 利用可能な step 数を把握（3時間刻み）
         arr = open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric")
-        nsteps = arr.sizes.get("step", 9)
+        total_steps = int(arr.sizes.get("step", 0)) or 0
         del arr
         gc.collect()
+        if total_steps <= 0:
+            raise RuntimeError("step 次元が取得できませんでした")
 
-        step = forecast_hour // 3
-        if step < 0 or step >= nsteps:
-            raise ValueError(f"指定 forecast_hour={forecast_hour} が有効範囲外（nsteps={nsteps}）")
-
-        # 3) 必要変数を開く（isobaric/surface混在に対応するユニバーサルオープナ）
+        # 3) 描画に使う変数群をopen（isobaric/surface混在OK）
         panel_datasets = {
             "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
             "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
@@ -148,51 +159,76 @@ def main():
         panel_def = get_panel_def_japan(panel_datasets)
         extent = REGION_EXTENTS["japan"]
 
+        # 4) 複数列パネルを“ページ分割”で生成
         os.makedirs(output_dir, exist_ok=True)
-        _ = make_universal_weather_panel(
-            save_dir=output_dir,
-            panel_def=panel_def,
-            times=None,
-            init_time_str=f"{ymd}_UTC{hh}",
-            city_name="japan",
-            ncols=1,
-            nrows=len(panel_def),
-            extent=extent,
-            dpi=80,
-            step=step,
+        pages = (total_steps + NCOLS - 1) // NCOLS
+        if MAXP > 0:
+            pages = min(pages, MAXP)
+
+        saved_imgs = []
+        for page in range(pages):
+            start_step = page * NCOLS
+            filename_tag = f"{ymd}_UTC{hh}_p{page+1}"
+            imgs = make_universal_weather_panel(
+                save_dir=output_dir,
+                panel_def=panel_def,
+                times=None,
+                init_time_str=f"{ymd}_UTC{hh}",
+                city_name="japan",
+                ncols=NCOLS,                   # ★ 列＝連続step
+                nrows=len(panel_def),
+                extent=extent,
+                dpi=DPI,
+                step=None,                     # ★ None → 列ごとに start_step + col を自動表示
+                start_step=start_step,         # ★ ページング（0, ncols, 2*ncols, ...）
+                title_prefix="全国パネル",
+                filename_tag=filename_tag,
+            )
+            saved_imgs.extend(imgs)
+
+        # 5) メール 1 通で送信（mail_utils が複数添付でも“1通”にまとめる）
+        subject = f"全国パネル {ymd} UTC{hh}（{NCOLS}列×{len(saved_imgs)}ページ）"
+        body = (
+            f"{ymd} UTC{hh} 初期の全国パネルを {NCOLS}列で出力しました。\n"
+            f"ページ数: {len(saved_imgs)}\n"
+            f"列あたり +3h 進行（例: 列1=+0h, 列2=+3h ...）\n"
         )
-
-        # 4) 出力ディレクトリを ZIP（メモリ上）→ メール添付で送信
-        zip_bytes = to_zip_bytes_from_dir(output_dir)
-        subject = f"全国パネル {ymd} UTC{hh} +{forecast_hour}h"
-        body = "全国（GSM+MSM）パネル出力一式をZIP添付します（保存なし運用）。"
-
         msg_id = send_mail(
-            to_addrs=os.environ.get("MAIL_TO", ""),
             subject=subject,
             body=body,
-            attachment_blobs=[(f"japan_panel_{ymd}_UTC{hh}_fh{forecast_hour:02}.zip", zip_bytes, "application/zip")],
+            attachment_paths=saved_imgs,   # ← 複数添付でも 1 通で送信
+            is_html=False,
         )
         print(f"[OK] Mail sent. Message-ID: {msg_id}")
 
-        # 任意: Slack テキスト通知
+        # 6) 任意：Slackテキスト通知（mail_utilsでも成功/失敗は1回通知される）
         if slack_channel:
             try:
-                fnames = ", ".join(sorted(os.listdir(output_dir)))
+                fnames = ", ".join(os.path.basename(p) for p in saved_imgs[:6])
+                more = f"...(+{len(saved_imgs)-6} files)" if len(saved_imgs) > 6 else ""
                 send_slack_text(
                     channel=slack_channel,
-                    message=f":large_blue_circle: 全国パネル送信 {ymd} UTC{hh} +{forecast_hour}h\nMessage-ID: {msg_id}\nfiles: {fnames}",
+                    message=(
+                        f":large_blue_circle: 全国パネル送信 {ymd} UTC{hh}\n"
+                        f"{NCOLS}列 × {len(saved_imgs)}ページ\n"
+                        f"Message-ID: {msg_id}\n"
+                        f"files: {fnames} {more}"
+                    ),
                 )
-            except Exception as _:
+            except Exception:
                 pass
 
     except Exception as e:
+        # エラー時も可能ならSlackに通知
         if os.environ.get("SLACK_CHANNEL_ID"):
-            send_slack_text(channel=os.environ["SLACK_CHANNEL_ID"], message=f":x: 全国パネル失敗: {e}")
+            try:
+                send_slack_text(channel=os.environ["SLACK_CHANNEL_ID"], message=f":x: 全国パネル失敗: {e}")
+            except Exception:
+                pass
         print(f"[ERROR] {e}")
         raise
     finally:
-        # 5) 後片付け（実行環境からも削除）※終了後にランナーは破棄されるが念のため
+        # 7) 後片付け（ランナーは破棄されるが念のため）
         try:
             shutil.rmtree(output_dir, ignore_errors=True)
         except Exception:
