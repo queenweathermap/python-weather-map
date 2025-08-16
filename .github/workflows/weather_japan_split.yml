@@ -39,45 +39,16 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
-      - name: Debug repo layout
-        run: |
-          pwd
-          ls -la
-          ls -la scripts || true
-          find . -maxdepth 3 -type f -name "gpv_panel_japan*"
-
       - name: Render ${{ matrix.part }}
         env:
           PYTHONUNBUFFERED: "1"
         run: |
-          set -euo pipefail
           mkdir -p output
-
-          # 候補を順に探索（どの配置/命名でも動くように）
-          SCRIPT=""
-          for f in \
-            "scripts/gpv_panel_japan_part.py" \
-            "scripts/gpv_panel_japan_part_${{ matrix.part }}.py" \
-            "scripts/split/gpv_panel_japan_part_${{ matrix.part }}.py"
-          do
-            if [ -f "$f" ]; then SCRIPT="$f"; break; fi
-          done
-
-          if [ -z "${SCRIPT:-}" ]; then
-            echo "❌ gpv_panel_japan_part*.py が見つかりません"
-            ls -la scripts || true
-            find . -maxdepth 3 -type f -name "gpv_panel_japan*"
-            exit 1
-          fi
-
-          echo "▶ Using script: $SCRIPT"
-          PYTHONPATH=. python -u "$SCRIPT" \
+          PYTHONPATH=. python -u scripts/gpv_panel_daily_japan.py \
             --part ${{ matrix.part }} \
             --ncols "${PANEL_NCOLS}" \
             --dpi "${PANEL_DPI}" \
             --max_pages "${PANEL_MAX_PAGES}"
-
-          echo "Generated files:"
           ls -1 output || true
 
       - name: Upload artifacts (${{ matrix.part }})
@@ -107,21 +78,22 @@ jobs:
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install requirements (minimal)
         run: pip install -r requirements.txt
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: all_outputs
-
-      - name: Send one email (or Slack)
+      - name: Send TOP
         env:
-          AGGREGATE_DIR: all_outputs
-        run: |
-          PYTHONPATH=. python -u scripts/aggregate_and_send.py
+          AGGREGATE_DIR: all_outputs/jp-panels-top
+          MAIL_SUBJECT_PREFIX: "[Japan][TOP]"
+        run: PYTHONPATH=. python -u scripts/aggregate_and_send.py
+      - name: Send BOTTOM
+        env:
+          AGGREGATE_DIR: all_outputs/jp-panels-bottom
+          MAIL_SUBJECT_PREFIX: "[Japan][BOTTOM]"
+        run: PYTHONPATH=. python -u scripts/aggregate_and_send.py
