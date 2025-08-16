@@ -38,6 +38,20 @@ from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
 from module.utils.zip_utils import zip_files
 
 
+# ファイル頭の import 群の近くに追加
+_OPEN_CACHE = {}
+
+def _open_cfgrib_once(path, filter_by_keys):
+    """(path, frozenset(filter_by_keys)) をキーに1回だけ open"""
+    key = (path, frozenset((filter_by_keys or {}).items()))
+    if key in _OPEN_CACHE:
+        return _OPEN_CACHE[key]
+    ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_by_keys or {})
+    _OPEN_CACHE[key] = ds
+    return ds
+
+
+
 # --- Drive 依存を安全に無効化（存在しない場合は no-op 関数に置き換え） ---
 try:
     from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
@@ -214,6 +228,7 @@ def open_grib2_var_auto(
     # --- 通常の open ---
     try:
         ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=fkeys)  # type: ignore[arg-type]
+        
         if varname in ds.variables:
             print(f"[OK] {varname} shape={ds[varname].shape}")
             return ds[varname]
