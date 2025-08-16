@@ -1,15 +1,14 @@
 # ===============================================
 # JAPAN Weather Panel (One-shot, Mail + Slack)
 # 全国 GSM/MSM ハイブリッド：全stepを1回で生成 → 1通で送信
-# 保存なし運用（ローカル出力はジョブ終了時に破棄）
 # ===============================================
 
 name: JAPAN Weather Panel
 
 on:
+  workflow_dispatch:
   # schedule:
   #   - cron: "0 7 * * *"   # JST 16:00（UTC 07:00）
-  workflow_dispatch:
 
 jobs:
   run-japan-panel:
@@ -17,9 +16,8 @@ jobs:
     timeout-minutes: 120
     env:
       TZ: Asia/Tokyo
-      ECCODES_GRIB_THREADS: 1   # cfgribのスレッド抑制で安定
-
-      # ---- Mail（統一名）----
+      ECCODES_GRIB_THREADS: 1   # cfgribの並列抑制で安定
+      # --- メール（統一名） ---
       FROM_EMAIL:      ${{ secrets.FROM_EMAIL }}
       TO_EMAIL:        ${{ secrets.TO_EMAIL }}
       SMTP_SERVER:     ${{ secrets.SMTP_SERVER }}
@@ -27,10 +25,15 @@ jobs:
       SMTP_USERNAME:   ${{ secrets.SMTP_USERNAME }}
       SMTP_PASSWORD:   ${{ secrets.SMTP_PASSWORD }}
       MAIL_SUBJECT_PREFIX: "[Japan]"
-
-      # ---- Slack（任意） ----
+      # 画像をZIPで1ファイルにしたいなら "1"
+      MAIL_ATTACH_AS_ZIP: ${{ vars.MAIL_ATTACH_AS_ZIP || '0' }}
+      # --- Slack（任意） ---
       SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      # --- パネル調整（必要に応じて） ---
+      PANEL_NCOLS: "6"         # 横方向の列数（+0h,+3h,...を何枚横に並べるか）
+      PANEL_DPI:   "120"
+      PANEL_MAX_PAGES: "0"     # 0=全ページ生成 / 試験は1に
 
     steps:
       - name: Checkout repo
@@ -55,7 +58,23 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
-      - name: Run Japan Weather Panel Script (one-shot)
+      - name: Generate all panels (one-shot)
+        env:
+          # ここで列数/DPI/ページ上限を上書きしたい場合は追加
+          # PANEL_NCOLS: "6"
+          # PANEL_DPI:   "120"
+          # PANEL_MAX_PAGES: "0"
+          PYTHONUNBUFFERED: "1"
         run: |
+          set -euo pipefail
           echo "[INFO] start one-shot run"
-          PYTHONPATH=. python scripts/gpv_panel_daily_japan.py
+          PYTHONPATH=. python -u scripts/gpv_panel_daily_japan.py
+
+      - name: Send one email with all images
+        env:
+          AGGREGATE_DIR: output        # gpv_panel_daily_japan.py が出す出力先
+          MAIL_ATTACH_AS_ZIP: ${{ env.MAIL_ATTACH_AS_ZIP }}
+          MAIL_SUBJECT_PREFIX: ${{ env.MAIL_SUBJECT_PREFIX }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -u scripts/aggregate_and_send.py
