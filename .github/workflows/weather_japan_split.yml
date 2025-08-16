@@ -1,7 +1,4 @@
-#weather_japan_split.yml
-
-
-name: JAPAN Weather Panel (Split: top/bottom)
+name: JAPAN Weather Panel
 
 on:
   workflow_dispatch:
