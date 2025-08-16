@@ -80,29 +80,46 @@ def find_and_download_gpv_files(
 
 
 # -------------------------------- main ---------------------------------------
-def _envint(name: str, default: int) -> int:
-    """環境変数の整数取得（未設定や不正値は default）"""
+def _envint(key: str, default: int) -> int:
     try:
-        return int(os.environ.get(name, str(default)))
+        return int(os.environ.get(key, str(default)))
     except Exception:
         return default
 
+def _guess_total_steps(gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) -> int:
+    """利用可能な step 数を複数の候補から推定。失敗時 0。"""
+    candidates = [
+        ("gh", 300, "isobaric"),
+        ("t", 500, "isobaric"),
+        ("t", 700, "isobaric"),
+        ("r", 700, "isobaric"),
+        ("prmsl", None, None),
+        ("u10", 10, "heightAboveGround"),
+    ]
+    for var, lev, _tol in candidates:
+        da = open_grib2_var_auto(var, lev, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, _tol)
+        if da is not None and hasattr(da, "sizes") and "step" in da.sizes:
+            try:
+                n = int(da.sizes["step"])
+                if n > 0:
+                    print(f"[INFO] step count from {var}/{lev}: {n}")
+                    return n
+            except Exception:
+                pass
+    print("[WARN] step 数を推定できませんでした")
+    return 0
+
+
 
 def main():
-    # ヘッドレス描画
     import matplotlib
     matplotlib.use("Agg")
 
-    # ---- 引数/ENV（CLI優先）----
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ncols", type=int, default=_envint("PANEL_NCOLS", 4))
+    parser.add_argument("--ncols", type=int, default=_envint("PANEL_NCOLS", 6))
     parser.add_argument("--dpi", type=int, default=_envint("PANEL_DPI", 120))
-    parser.add_argument(
-        "--max_pages",
-        type=int,
-        default=_envint("PANEL_MAX_PAGES", 1),
-        help="生成ページ数の上限。まずは 1 で“横長1枚/ページ”を安定化。0=全ページ",
-    )
+    parser.add_argument("--max_pages", type=int, default=_envint("PANEL_MAX_PAGES", 1),
+                        help="生成ページ数の上限（まずは1で安定化。0=全ページ）")
     args = parser.parse_args()
 
     NCOLS = max(1, args.ncols)
@@ -112,23 +129,16 @@ def main():
     base_dir = "./data"
     output_dir = "./output"
     slack_channel = os.environ.get("SLACK_CHANNEL_ID")
-
-    # ✅ ここで初期化しておく
-    saved_imgs: list[str] = []
+    saved_imgs: list[str] = []   # ← 先に初期化
 
     try:
-        # 1) 必要なGRIB2（3本）を取得
-        ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
-            base_dir=base_dir
-        )
+        ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(base_dir=base_dir)
 
-        # 2) 利用可能step数（3h刻み）
-        arr = open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric")
-        total_steps = int(arr.sizes.get("step", 0)) or 0
-        del arr
-        gc.collect()
+        # ここを安全化
+        total_steps = _guess_total_steps(gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path)
         if total_steps <= 0:
-            raise RuntimeError("step 次元が取得できませんでした")
+            raise RuntimeError("step 次元が取得できませんでした（open_grib2_var_auto が全て None）")
+
 
         # 3) 各変数をopen（isobaric/surface混在OK）
         panel_datasets = {
