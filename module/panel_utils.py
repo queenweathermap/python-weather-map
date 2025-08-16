@@ -340,6 +340,177 @@ def concat_panel_images_horizontally(img_paths: List[str], out_path: str) -> Opt
     print(f"[OK] 横結合画像保存: {out_path}")
     return out_path
 
+# =============================================================================
+# 行=変数 × 列=時系列 の横長モザイク（タイル出力 → 最後に1枚JPG）
+# =============================================================================
+from typing import Sequence
+from PIL import Image, ImageDraw, ImageFont
+
+def render_core_rows_tiles_for_step(
+    panel_def: list[tuple],
+    *,
+    titles_want: Sequence[str],     # 例: ["850", "700", "500", "地上"]
+    step: int,
+    extent=None,
+    out_dir: str = "./tiles",
+    dpi: int = 120,
+    tile_size_inch: tuple[float, float] = (3.0, 3.0),  # 1タイルの図サイズ
+    file_tag: str = "",                                  # 例: "fh03"
+) -> list[str]:
+    """
+    指定 step の“行”（850/700/500/地上など）だけを抽出して、1行=1枚のJPGタイルに保存する。
+    return: [tile_path(row0), tile_path(row1), ...]  (titles_wantの順)
+    """
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    os.makedirs(out_dir, exist_ok=True)
+
+    # タイトルで行を抽出（ゆるく部分一致）
+    def _pick_idx_by_title():
+        idx_list = []
+        titles = [t for (_, _, t) in panel_def]
+        for want in titles_want:
+            w = str(want)
+            cand = [i for i, t in enumerate(titles) if t and (w in t)]
+            idx_list.append(cand[0] if cand else -1)
+        return idx_list
+
+    row_indices = _pick_idx_by_title()
+    paths: list[str] = []
+
+    for ridx, want in zip(row_indices, titles_want):
+        if ridx < 0:
+            # ダミーNO DATAを出す
+            dummy = os.path.join(out_dir, f"tile_{file_tag}_{want}_nodata.jpg")
+            fig, ax = plt.subplots(figsize=tile_size_inch)
+            ax.axis("off")
+            ax.text(0.5, 0.5, f"{want}\n(no data)", ha="center", va="center")
+            fig.savefig(dummy, dpi=dpi, bbox_inches="tight")
+            plt.close(fig)
+            paths.append(dummy)
+            continue
+
+        plot_func, ds, title = panel_def[ridx]
+
+        fig, ax = plt.subplots(
+            figsize=tile_size_inch,
+            subplot_kw=dict(projection=ccrs.PlateCarree())
+        )
+        if extent:
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
+
+        ok = True
+        try:
+            if isinstance(ds, dict):
+                plot_func(ax, ds, step=step)
+            else:
+                if hasattr(ds, "sizes") and ("step" in ds.sizes):
+                    if step >= ds.sizes["step"]:
+                        ok = False
+                    else:
+                        plot_func(ax, ds.isel(step=step))
+                else:
+                    plot_func(ax, ds)
+        except Exception as e:
+            print(f"[WARN] tile render failed: '{title}' step={step}: {e}")
+            ok = False
+
+        if ok:
+            ax.set_title(f"{title} (+{step*3}h)", fontsize=8)
+        else:
+            ax.axis("off"); ax.set_title(f"{title} (no data)", fontsize=8)
+
+        fname = f"tile_{file_tag}_{want}.jpg"
+        fpath = os.path.join(out_dir, fname)
+        fig.savefig(fpath, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        paths.append(fpath)
+
+    return paths
+
+
+def assemble_time_series_mosaic_jpg(
+    *,
+    rows_order: Sequence[str],          # 例: ["850","700","500","地上"]  (上からこの順)
+    steps_order: Sequence[int],         # 例: [0,1,2,3,4,5,6,7,8,9,10]  (3h刻みstep)
+    tiles_dir: str = "./tiles",         # 各runnerで出力したタイルが集まっている場所（artifact DL後）
+    out_path: str = "./output/japan_timeseries_all.jpg",
+    h_gap: int = 8,
+    v_gap: int = 12,
+    bg_rgb: tuple[int,int,int] = (255,255,255),
+    add_header: str | None = None,      # 例: "JAPAN Panel 20250814 UTC00"
+    header_px: int = 48,
+) -> str:
+    """
+    「行=rows_order」「列=steps_order」でタイルを敷き詰めて最終1枚の横長JPGを作る。
+    期待タイルの名前は: tiles/tile_fh{step*3:02}_{row}.jpg（推奨）
+      ※file_tag は各runnerが render_core_rows_tiles_for_step で付ける値
+    """
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+
+    # すべてのタイルをロード（存在しないものはNot Foundプレースホルダ）
+    grid: list[list[Image.Image]] = []
+    W = H = None
+
+    def _load_or_placeholder(p: str, want_size: tuple[int,int]|None):
+        if os.path.exists(p):
+            im = Image.open(p).convert("RGB")
+        else:
+            # プレースホルダ（グレー）
+            im = Image.new("RGB", want_size or (400, 400), (230,230,230))
+            d = ImageDraw.Draw(im)
+            d.text((10,10), os.path.basename(p), fill=(80,80,80))
+        if want_size and im.size != want_size:
+            im = im.resize(want_size, Image.BILINEAR)
+        return im
+
+    # 1枚目のサイズを基準に揃える
+    sample = None
+    for st in steps_order:
+        for row in rows_order:
+            candidate = os.path.join(tiles_dir, f"tile_fh{st*3:02}_{row}.jpg")
+            if os.path.exists(candidate):
+                sample = Image.open(candidate).convert("RGB")
+                break
+        if sample:
+            break
+    base_size = sample.size if sample else (600, 600)
+
+    for row in rows_order:
+        row_imgs: list[Image.Image] = []
+        for st in steps_order:
+            p = os.path.join(tiles_dir, f"tile_fh{st*3:02}_{row}.jpg")
+            row_imgs.append(_load_or_placeholder(p, base_size))
+        grid.append(row_imgs)
+
+    # キャンバスサイズ計算
+    cols = len(steps_order)
+    rows = len(rows_order)
+    W = base_size[0]*cols + h_gap*(cols-1)
+    H = base_size[1]*rows + v_gap*(rows-1)
+    total_h = H + (header_px if add_header else 0)
+
+    canvas = Image.new("RGB", (W, total_h), bg_rgb)
+    y = header_px if add_header else 0
+
+    # ヘッダ
+    if add_header:
+        d = ImageDraw.Draw(canvas)
+        d.text((10, 10), add_header, fill=(30,30,30))
+
+    # 貼り付け
+    for r in range(rows):
+        x = 0
+        for c in range(cols):
+            canvas.paste(grid[r][c], (x, y))
+            x += base_size[0] + h_gap
+        y += base_size[1] + v_gap
+
+    canvas.save(out_path, quality=90, optimize=True)
+    print(f"[OK] 横長最終JPG: {out_path}")
+    return out_path
+
+
 
 __all__ = [
     "make_nodata_weather_panel",
