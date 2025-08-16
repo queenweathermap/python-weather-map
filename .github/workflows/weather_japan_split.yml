@@ -1,4 +1,4 @@
-name: JAPAN Weather Panel
+name: JAPAN Weather Panel Split
 
 on:
   workflow_dispatch:
