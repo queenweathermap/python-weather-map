@@ -190,11 +190,26 @@ def open_grib2_var_auto(
     fkeys: Dict[str, Any] = {}
     if varname in ("gh", "u", "v", "t", "r", "w"):
         fkeys = {"typeOfLevel": "isobaricInhPa", "level": level}
-    elif varname in ("u10", "v10"):
-        fkeys = {"typeOfLevel": "heightAboveGround", "level": 10, "stepType": "instant"}
+    elif varname in ["u10", "v10"]:
+        file_path = msm_lsurf_path
+        filter_keys = {"typeOfLevel": "heightAboveGround", "level": 10, "stepType": "instant"}
+        try:
+            ds = _open_cfgrib_once(file_path, filter_keys)
+            return ds[varname] if varname in ds else None
+        except Exception as e:
+            print(f"[WARN] 10m風スキップ: {e}")
+            return None
+    
     elif varname == "prmsl":
-        fkeys = {"typeOfLevel": "meanSea", "stepType": "instant"}
-    elif varname == "apcp":
+        file_path = msm_lsurf_path
+        filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant"}
+        try:
+            ds = _open_cfgrib_once(file_path, filter_keys)
+            return ds["prmsl"] if "prmsl" in ds else None
+        except Exception as e:
+            print(f"[WARN] PRMSLスキップ: {e}")
+            return None
+
         # apcp は stepType が揺れるため後段で特別処理する
         pass
 
@@ -227,8 +242,8 @@ def open_grib2_var_auto(
 
     # --- 通常の open ---
     try:
-        ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=fkeys)  # type: ignore[arg-type]
-        
+        # ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
+        ds = _open_cfgrib_once(file_path, filter_keys)
         if varname in ds.variables:
             print(f"[OK] {varname} shape={ds[varname].shape}")
             return ds[varname]
