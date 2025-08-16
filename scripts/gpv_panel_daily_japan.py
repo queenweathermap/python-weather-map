@@ -96,11 +96,12 @@ def main():
     import matplotlib
     matplotlib.use("Agg")
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--ncols", type=int, default=int(os.environ.get("PANEL_NCOLS", "4")))
+    # 既定値を調整
+    parser.add_argument("--ncols", type=int, default=int(os.environ.get("PANEL_NCOLS", "6")))
     parser.add_argument("--dpi", type=int, default=int(os.environ.get("PANEL_DPI", "120")))
-    parser.add_argument("--max_pages", type=int, default=int(os.environ.get("PANEL_MAX_PAGES", "0")),
-                        help="出力ページ数上限（0=全stepを網羅）")
+    parser.add_argument("--max_pages", type=int, default=int(os.environ.get("PANEL_MAX_PAGES", "1")),
+                        help="生成ページ数の上限。1にしてまず“1枚”を安定化")
+
     args = parser.parse_args()
 
     NCOLS = max(1, int(args.ncols))
