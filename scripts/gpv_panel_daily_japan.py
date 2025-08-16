@@ -113,6 +113,9 @@ def main():
     output_dir = "./output"
     slack_channel = os.environ.get("SLACK_CHANNEL_ID")
 
+    # ✅ ここで初期化しておく
+    saved_imgs: list[str] = []
+
     try:
         # 1) 必要なGRIB2（3本）を取得
         ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
@@ -182,23 +185,17 @@ def main():
 
         # 5) Slackに軽く実行完了のみ通知（送信は集約ジョブ）
         if slack_channel:
-            try:
-                send_slack_text(
-                    channel=slack_channel,
-                    message=(
-                        f":white_check_mark: 生成完了 {ymd} UTC{hh}\n"
-                        f"列={NCOLS}, DPI={DPI}, ページ={len(saved_imgs)}"
-                    ),
-                )
-            except Exception:
-                pass
+            send_slack_text(
+                channel=slack_channel,
+                message=(
+                    f":white_check_mark: 生成完了 {ymd} UTC{hh}\n"
+                    f"列={NCOLS}, DPI={DPI}, ページ={len(saved_imgs)}"
+                ),
+            )
 
     except Exception as e:
-        if os.environ.get("SLACK_CHANNEL_ID"):
-            try:
-                send_slack_text(channel=os.environ["SLACK_CHANNEL_ID"], message=f":x: 生成失敗: {e}")
-            except Exception:
-                pass
+        if slack_channel:
+            send_slack_text(channel=slack_channel, message=f":x: 生成失敗: {e}")
         raise
 
 
