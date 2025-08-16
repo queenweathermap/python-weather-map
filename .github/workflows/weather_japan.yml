@@ -1,6 +1,7 @@
 # ===============================================
 # JAPAN Weather Panel (One-shot, Mail + Slack)
-# 全国 GSM/MSM ハイブリッド：全stepを1回で生成 → 1通で送信
+# 全国 GSM/MSM ハイブリッド：全 step を一回で生成 → 1通で送信
+# 保存なし運用（ローカル出力はジョブ内のみ）
 # ===============================================
 
 name: JAPAN Weather Panel
@@ -10,13 +11,19 @@ on:
   # schedule:
   #   - cron: "0 7 * * *"   # JST 16:00（UTC 07:00）
 
+# 同時起動を相殺（キャッシュ競合や二重送信を防止）
+concurrency:
+  group: japan-weather-panel
+  cancel-in-progress: true
+
 jobs:
   run-japan-panel:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       TZ: Asia/Tokyo
-      ECCODES_GRIB_THREADS: 1   # cfgribの並列抑制で安定
+      ECCODES_GRIB_THREADS: 1       # cfgrib の並列抑制で安定
+
       # --- メール（統一名） ---
       FROM_EMAIL:      ${{ secrets.FROM_EMAIL }}
       TO_EMAIL:        ${{ secrets.TO_EMAIL }}
@@ -25,21 +32,23 @@ jobs:
       SMTP_USERNAME:   ${{ secrets.SMTP_USERNAME }}
       SMTP_PASSWORD:   ${{ secrets.SMTP_PASSWORD }}
       MAIL_SUBJECT_PREFIX: "[Japan]"
-      # 画像をZIPで1ファイルにしたいなら "1"
+      # 画像を ZIP 1 ファイルにしたい場合は 1
       MAIL_ATTACH_AS_ZIP: ${{ vars.MAIL_ATTACH_AS_ZIP || '0' }}
+
       # --- Slack（任意） ---
       SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-      # --- パネル調整（必要に応じて） ---
-      PANEL_NCOLS: "6"         # 横方向の列数（+0h,+3h,...を何枚横に並べるか）
-      PANEL_DPI:   "120"
-      PANEL_MAX_PAGES: "0"     # 0=全ページ生成 / 試験は1に
+
+      # --- パネル調整（必要に応じて上書き可） ---
+      PANEL_NCOLS: "6"          # 横方向の列数（+0h,+3h,... を何枚横に並べるか）
+      PANEL_DPI:   "110"        # メール用途に十分な解像度
+      PANEL_MAX_PAGES: "0"      # 0=全ページ生成（試験時は 1 などに）
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Cache Cartopy Data
+      - name: Cache Cartopy data
         uses: actions/cache@v4
         with:
           path: ~/.local/share/cartopy
@@ -49,6 +58,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          # pip の依存をキャッシュ（2回目以降が速くなります）
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install Japanese font (IPAexGothic)
         run: |
@@ -60,10 +72,6 @@ jobs:
 
       - name: Generate all panels (one-shot)
         env:
-          # ここで列数/DPI/ページ上限を上書きしたい場合は追加
-          # PANEL_NCOLS: "6"
-          # PANEL_DPI:   "120"
-          # PANEL_MAX_PAGES: "0"
           PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail
@@ -72,9 +80,19 @@ jobs:
 
       - name: Send one email with all images
         env:
-          AGGREGATE_DIR: output        # gpv_panel_daily_japan.py が出す出力先
+          AGGREGATE_DIR: output
           MAIL_ATTACH_AS_ZIP: ${{ env.MAIL_ATTACH_AS_ZIP }}
           MAIL_SUBJECT_PREFIX: ${{ env.MAIL_SUBJECT_PREFIX }}
+          PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail
           PYTHONPATH=. python -u scripts/aggregate_and_send.py
+
+      # 失敗時の調査用に出力を保存（任意）
+      - name: Upload outputs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs-on-failure
+          path: output/**/* 
+          if-no-files-found: ignore
