@@ -2,15 +2,14 @@
 # =============================================================================
 # scripts/gpv_panel_daily_japan.py
 # -----------------------------------------------------------------------------
-# 全国（GSM+MSMハイブリッド）パネル自動生成
-#  - 列＝連続 step（+0h, +3h, +6h ...）を横に並べた「1枚画像」をページごとに生成
-#  - 生成されたページ画像は後段ジョブ（aggregate_and_send.py）で1通にまとめて送信
+# 全国（GSM+MSMハイブリッド）パネル自動生成（2枚構成）
+#  - 「上3段」「下3段」をそれぞれ横に ncols 列（+0h, +3h, ...）で並べた1枚ずつを出力
+#  - 生成された2枚は後段ジョブ（aggregate_and_send.py）で1通にまとめて送信
 #  - Google Drive 等の保存は行わない“保存しない運用”
 #
 # 描画調整（ENV もしくは CLI 引数で指定、CLI優先）:
-#   PANEL_NCOLS     / --ncols      : 列数（既定 4）
-#   PANEL_DPI       / --dpi        : DPI（既定 120）
-#   PANEL_MAX_PAGES / --max_pages  : 出力ページ上限（既定 1。0=全ページ）
+#   PANEL_NCOLS / --ncols : 横列数（既定 16 推奨。利用可能 step 数以下に自動クリップ）
+#   PANEL_DPI   / --dpi   : DPI（既定 120）
 # =============================================================================
 
 from __future__ import annotations
@@ -79,7 +78,7 @@ def find_and_download_gpv_files(
     raise FileNotFoundError("利用可能なGSM/MSM GPVファイルが見つかりません。")
 
 
-# -------------------------------- main ---------------------------------------
+# ------------------------------ helpers --------------------------------------
 def _envint(key: str, default: int) -> int:
     try:
         return int(os.environ.get(key, str(default)))
@@ -96,8 +95,8 @@ def _guess_total_steps(gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) -> int:
         ("prmsl", None, None),
         ("u10", 10, "heightAboveGround"),
     ]
-    for var, lev, _tol in candidates:
-        da = open_grib2_var_auto(var, lev, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, _tol)
+    for var, lev, tol in candidates:
+        da = open_grib2_var_auto(var, lev, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, tol)
         if da is not None and hasattr(da, "sizes") and "step" in da.sizes:
             try:
                 n = int(da.sizes["step"])
@@ -110,37 +109,36 @@ def _guess_total_steps(gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) -> int:
     return 0
 
 
-
+# -------------------------------- main ---------------------------------------
 def main():
     import matplotlib
     matplotlib.use("Agg")
 
+    # 引数
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ncols", type=int, default=_envint("PANEL_NCOLS", 6))
+    parser.add_argument("--ncols", type=int, default=_envint("PANEL_NCOLS", 16))
     parser.add_argument("--dpi", type=int, default=_envint("PANEL_DPI", 120))
-    parser.add_argument("--max_pages", type=int, default=_envint("PANEL_MAX_PAGES", 1),
-                        help="生成ページ数の上限（まずは1で安定化。0=全ページ）")
     args = parser.parse_args()
 
     NCOLS = max(1, args.ncols)
     DPI   = max(60, args.dpi)
-    MAXP  = max(0, args.max_pages)
 
     base_dir = "./data"
     output_dir = "./output"
     slack_channel = os.environ.get("SLACK_CHANNEL_ID")
-    saved_imgs: list[str] = []   # ← 先に初期化
 
     try:
-        ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(base_dir=base_dir)
+        # 1) 必要なGRIB2（3本）を取得
+        ymd, hh, (gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path) = find_and_download_gpv_files(
+            base_dir=base_dir
+        )
 
-        # ここを安全化
+        # 2) 利用可能 step 数を把握（3h刻み）
         total_steps = _guess_total_steps(gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path)
         if total_steps <= 0:
             raise RuntimeError("step 次元が取得できませんでした（open_grib2_var_auto が全て None）")
 
-
-        # 3) 各変数をopen（isobaric/surface混在OK）
+        # 3) 描画に使う変数群をopen（isobaric/surface混在OK）
         panel_datasets = {
             "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
             "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, "isobaric"),
@@ -164,48 +162,58 @@ def main():
         panel_def = get_panel_def_japan(panel_datasets)
         extent = REGION_EXTENTS["japan"]
 
-        # 4) ページ分割で 1ページ=NCOLS列 の横長画像を順次出力
+        # 4) 「上3段」「下3段」をそれぞれ横長で出力（合計2枚）
         os.makedirs(output_dir, exist_ok=True)
-        pages = (total_steps + NCOLS - 1) // NCOLS
-        if MAXP > 0:
-            pages = min(pages, MAXP)
+        # 利用可能 step 数に合わせて列数をクリップ
+        ncols = max(1, min(NCOLS, total_steps))
+        start_step = 0  # 必要なら現在時刻からのオフセットに変更可
+
+        groups = [
+            ("top",    panel_def[:3]),
+            ("bottom", panel_def[3:6]),
+        ]
 
         saved_imgs = []
-        for page in range(pages):
-            start_step = page * NCOLS
-            tag = f"{ymd}_UTC{hh}_p{page+1}"
+        for label, rows in groups:
+            tag = f"{ymd}_UTC{hh}_{label}"
             imgs = make_universal_weather_panel(
                 save_dir=output_dir,
-                panel_def=panel_def,
+                panel_def=rows,              # ★ 3行だけ
                 times=None,
                 init_time_str=f"{ymd}_UTC{hh}",
                 city_name="japan",
-                ncols=NCOLS,                  # 列＝連続 step
-                nrows=len(panel_def),         # 行＝panel_def（変数群）
+                ncols=ncols,                 # ★ 横 ncols 列
+                nrows=len(rows),             # 3
                 extent=extent,
                 dpi=DPI,
-                step=None,                    # None→列は start_step+col
+                step=None,                   # 列は start_step + col
                 start_step=start_step,
                 title_prefix="全国パネル",
-                filename_tag=tag,
+                filename_tag=tag,            # panel_japan_YYYYMMDD_UTCHH_top.jpg / bottom.jpg
             )
             saved_imgs.extend(imgs)
 
-        print(f"[OK] 出力完了: {len(saved_imgs)} 枚 -> {output_dir}")
+        print(f"[OK] 出力完了（2枚）: {saved_imgs}")
 
-        # 5) Slackに軽く実行完了のみ通知（送信は集約ジョブ）
+        # 5) Slackに軽く完了通知（画像は後段でメール送信）
         if slack_channel:
-            send_slack_text(
-                channel=slack_channel,
-                message=(
-                    f":white_check_mark: 生成完了 {ymd} UTC{hh}\n"
-                    f"列={NCOLS}, DPI={DPI}, ページ={len(saved_imgs)}"
-                ),
-            )
+            try:
+                send_slack_text(
+                    channel=slack_channel,
+                    message=(
+                        f":white_check_mark: 生成完了 {ymd} UTC{hh}\n"
+                        f"列={ncols}, DPI={DPI}, 出力={len(saved_imgs)}枚（top/bottom）"
+                    ),
+                )
+            except Exception:
+                pass
 
     except Exception as e:
-        if slack_channel:
-            send_slack_text(channel=slack_channel, message=f":x: 生成失敗: {e}")
+        if os.environ.get("SLACK_CHANNEL_ID"):
+            try:
+                send_slack_text(channel=os.environ["SLACK_CHANNEL_ID"], message=f":x: 生成失敗: {e}")
+            except Exception:
+                pass
         raise
 
 
