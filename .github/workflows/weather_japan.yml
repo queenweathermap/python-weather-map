@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 120
     env:
       TZ: Asia/Tokyo
+      ECCODES_GRIB_THREADS: 1   # cfgribのスレッド抑制で安定
 
       # ---- Mail（統一名）----
       FROM_EMAIL:      ${{ secrets.FROM_EMAIL }}
