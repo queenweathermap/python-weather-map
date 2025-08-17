@@ -102,7 +102,40 @@ def main():
         ds_975 = open_isobaric_dataset(l_pall_path, hPa=975)
         ds_surface = open_surface_dataset(lsurf_path)
 
-        panel_def = get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface)
+        # --- 互換ラッパー：get_panel_def_akita の署名差異に対応 ---
+        def _resolve_panel_def():
+            datasets = {
+                "ds_emagram": ds_emagram,
+                "ds_850": ds_850,
+                "ds_850_thetae": ds_850_thetae,
+                "ds_925": ds_925,
+                "ds_975": ds_975,
+                "ds_surface": ds_surface,
+            }
+            # 1) 6引数版
+            try:
+                return get_panel_def_akita(
+                    ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface
+                )
+            except TypeError:
+                pass
+            # 2) dict 1引数版
+            try:
+                return get_panel_def_akita(datasets)
+            except TypeError:
+                pass
+            # 3) 引数なし版
+            try:
+                return get_panel_def_akita()
+            except TypeError as e:
+                raise TypeError(
+                    "get_panel_def_akita の呼び出しに失敗しました。"
+                    "6引数・dict1個・引数なしのいずれにも一致しません。"
+                ) from e
+
+        panel_def = _resolve_panel_def()
+        # -------------------------------------------------------------
+
         extent = REGION_EXTENTS["akita"]
 
         # 5) パネル生成（Drive/Slack無効）
