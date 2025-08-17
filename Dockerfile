@@ -1,16 +1,24 @@
 # ===============================================
-# python-weather-map用 Dockerfile（GRIB2直接処理/Slack通知対応）
+# 秋田パネル用 Dockerfile（GRIB2直接処理/Slack通知対応）
 # ===============================================
 
-FROM continuumio/miniconda3
+FROM python:3.11-slim
 
-# --- 必須パッケージ一発で ---
-RUN conda install -c conda-forge python=3.11 eccodes cfgrib cartopy xarray pandas numpy matplotlib metpy scipy requests python-dotenv slack_sdk google-api-python-client google-auth-httplib2 google-auth beautifulsoup4 ipython
+# Cartopy/cfgrib に必要なネイティブ依存
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential gfortran \
+    proj-bin libproj-dev libgeos-dev \
+    libeccodes0 libeccodes-dev \
+    libnetcdf-dev libhdf5-dev \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-# --- 日本語フォント ---
-RUN apt-get update && apt-get install -y fonts-ipafont-gothic
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
-WORKDIR /workspace
-COPY . /workspace
+# 日本語フォントが必要なら有効化（任意）
+# RUN apt-get update && apt-get install -y fonts-noto-cjk && rm -rf /var/lib/apt/lists/*
 
-CMD ["bash"]
+COPY . .
+ENTRYPOINT ["python", "scripts/gpv_panel_daily_akita.py"]
