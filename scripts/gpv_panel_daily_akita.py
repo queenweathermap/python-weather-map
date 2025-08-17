@@ -138,20 +138,51 @@ def main():
 
         extent = REGION_EXTENTS["akita"]
 
-        # 5) パネル生成（Drive/Slack無効）
-        panel_imgs, _, _ = generate_universal_panel_and_notify(
-            ymd=ymd,
-            hh=hh,
-            model="MSM",
-            output_dir=OUTPUT_DIR,
-            drive_folder=None,  # 無効
-            ncols=4,
-            npages=4,
-            panel_def=panel_def,
-            nrows=7,
-            city_name="akita",
-            extent=extent,
-        )
+        # --- 互換ラッパー：generate_universal_panel_and_notify の署名差異に対応 ---
+        def _call_plotter():
+            """
+            返り値は環境によって
+              - panel_imgs
+              - (panel_imgs, zip_path)
+              - (panel_imgs, zip_path, drive_url)
+            などがあり得るので、最初の要素を取り出す。
+            """
+            candidates = [
+                # 旧：model キーあり
+                dict(
+                    ymd=ymd, hh=hh, model="MSM", output_dir=OUTPUT_DIR, drive_folder=None,
+                    ncols=4, npages=4, panel_def=panel_def, nrows=7,
+                    city_name="akita", extent=extent,
+                ),
+                # 新：model キーなし
+                dict(
+                    ymd=ymd, hh=hh, output_dir=OUTPUT_DIR, drive_folder=None,
+                    ncols=4, npages=4, panel_def=panel_def, nrows=7,
+                    city_name="akita", extent=extent,
+                ),
+                # drive_folder も無い版
+                dict(
+                    ymd=ymd, hh=hh, output_dir=OUTPUT_DIR,
+                    ncols=4, npages=4, panel_def=panel_def, nrows=7,
+                    city_name="akita", extent=extent,
+                ),
+            ]
+            last_err = None
+            for kw in candidates:
+                try:
+                    ret = generate_universal_panel_and_notify(**kw)
+                    if isinstance(ret, tuple):
+                        return ret[0]
+                    return ret
+                except TypeError as e:
+                    last_err = e
+                    continue
+            raise TypeError(
+                f"generate_universal_panel_and_notify の互換呼び出しに失敗: {last_err}"
+            )
+
+        panel_imgs = _call_plotter()
+        # ----------------------------------------------------------------------
 
         # 6) ZIP 作成 → GCS or メール送信
         zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
