@@ -2,8 +2,9 @@
 # =============================================================================
 # scripts/gpv_panel_daily_akita.py
 # -----------------------------------------------------------------------------
-# 秋田局地 MSM パネル（エマグラム含む）自動生成 → ZIP化 → メール添付送信
-# ※ Drive 不使用／保存しない運用
+# 秋田局地 MSM パネル（エマグラム含む）自動生成 → ZIP化 → 送付
+# 優先: GCS へ保存（Cloud Run 想定）。MAIL_TO があればメール送信。
+# すべての書き込みは /tmp 配下（Cloud Run の書き込み可能領域）を使用。
 # =============================================================================
 
 import os
@@ -13,13 +14,30 @@ import shutil
 
 from module.panel_definitions import get_panel_def_akita, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
-from module.plotter.gpv_plotter_universal import generate_universal_panel_and_notify  # 画像生成に利用（Drive機能は使わない）
+from module.plotter.gpv_plotter_universal import (
+    generate_universal_panel_and_notify,  # Drive機能は使わない
+)
 from module.utils.mail_utils import send_mail
 from module.utils.zip_utils import to_zip_bytes_from_dir
 from module.utils.slack_utils import send_slack_text
 
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
+
+# Cloud Run では /tmp のみ書き込み可
+DATA_DIR = "/tmp/data"
+OUTPUT_DIR = "/tmp/output_akita"
+
+
+def upload_to_gcs(bucket_name: str, blob_name: str, data: bytes) -> str:
+    """GCS にバイナリをアップロードして gs:// パスを返す。"""
+    from google.cloud import storage
+
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(data)
+    return f"gs://{bucket_name}/{blob_name}"
 
 
 def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
@@ -40,22 +58,28 @@ def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
                 url = f"{data_url}{fname}"
                 r = requests.head(url, timeout=10)
                 if r.status_code == 200:
-                    file_infos.append({"url": url, "local": os.path.join("./data", fname)})
+                    file_infos.append({"url": url, "local": os.path.join(DATA_DIR, fname)})
             if len(file_infos) == 2:
                 return f"{y}{m}{d}", hh, file_infos
     raise FileNotFoundError("利用可能な MSM GPV ファイルが見つかりません。")
 
 
 def main():
-    slack_channel = os.environ.get("SLACK_CHANNEL_ID")
-    output_dir = "./output_akita"
+    slack_channel = os.environ.get("SLACK_CHANNEL_ID", "").strip()
+    bucket = os.environ.get("GCS_BUCKET", "").strip()
+    mail_to = os.environ.get("MAIL_TO", "").strip()
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    gcs_uri = None
+    msg_id = None
 
     try:
         # 1) ソース取得
         ymd, hh, file_infos = find_latest_available_files_akita()
 
-        # 2) ダウンロード
-        os.makedirs("./data", exist_ok=True)
+        # 2) ダウンロード（/tmp/data）
         for info in file_infos:
             if not os.path.exists(info["local"]):
                 r = requests.get(info["url"], timeout=60)
@@ -73,7 +97,7 @@ def main():
         # 4) データセット抽出
         ds_emagram = open_isobaric_dataset(l_pall_path)
         ds_850 = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # 必要ならθe計算に差し替え
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe 計算に差し替え可
         ds_925 = open_isobaric_dataset(l_pall_path, hPa=925)
         ds_975 = open_isobaric_dataset(l_pall_path, hPa=975)
         ds_surface = open_surface_dataset(lsurf_path)
@@ -81,15 +105,12 @@ def main():
         panel_def = get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface)
         extent = REGION_EXTENTS["akita"]
 
-        # 5) パネル生成（Drive機能は使わず、出力だけ生成）
-        os.makedirs(output_dir, exist_ok=True)
-        # generate_universal_panel_and_notify は Drive/Slack を返す仕様のため、
-        # ここでは出力（panel_imgs, zip_path, drive_url）のうち panel_imgs だけ使う想定。
+        # 5) パネル生成（Drive/Slack無効）
         panel_imgs, _, _ = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
             model="MSM",
-            output_dir=output_dir,
+            output_dir=OUTPUT_DIR,
             drive_folder=None,  # 無効
             ncols=4,
             npages=4,
@@ -99,25 +120,42 @@ def main():
             extent=extent,
         )
 
-        # 6) メール送信（ZIPはメモリ上）
-        zip_bytes = to_zip_bytes_from_dir(output_dir)
+        # 6) ZIP 作成 → GCS or メール送信
+        zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
+        filename = f"akita_panel_{ymd}_UTC{hh}.zip"
         subject = f"秋田局地パネル {ymd} UTC{hh}"
-        body = "秋田局地（MSM）パネル出力一式をZIP添付します（保存なし運用）。"
+        body = "秋田局地（MSM）パネル出力一式です。"
 
-        msg_id = send_mail(
-            to_addrs=os.environ.get("MAIL_TO", ""),
-            subject=subject,
-            body=body,
-            attachment_blobs=[(f"akita_panel_{ymd}_UTC{hh}.zip", zip_bytes, "application/zip")],
-        )
-        print(f"[OK] Mail sent. Message-ID: {msg_id}")
+        if mail_to:
+            msg_id = send_mail(
+                to_addrs=mail_to,
+                subject=subject,
+                body=body,
+                attachment_blobs=[(filename, zip_bytes, "application/zip")],
+            )
+            print(f"[OK] Mail sent. Message-ID: {msg_id}")
+        elif bucket:
+            gcs_uri = upload_to_gcs(bucket, f"akita/{filename}", zip_bytes)
+            print(f"[OK] Uploaded to {gcs_uri}")
+        else:
+            # 最終退避（デバッグ用）
+            fallback = f"/tmp/{filename}"
+            with open(fallback, "wb") as f:
+                f.write(zip_bytes)
+            print(f"[OK] Saved locally in container: {fallback}")
 
+        # 7) Slack 通知（任意）
         if slack_channel:
             try:
-                fnames = ", ".join(sorted(os.listdir(output_dir)))
+                fnames = ", ".join(sorted(os.listdir(OUTPUT_DIR)))
+                note = f"files: {fnames}"
+                if gcs_uri:
+                    note += f"\nGCS: {gcs_uri}"
+                if msg_id:
+                    note += f"\nMessage-ID: {msg_id}"
                 send_slack_text(
                     channel=slack_channel,
-                    message=f":red_circle: 秋田パネル送信 {ymd} UTC{hh}\nMessage-ID: {msg_id}\nfiles: {fnames}",
+                    message=f":red_circle: 秋田パネル完了 {ymd} UTC{hh}\n{note}",
                 )
             except Exception:
                 pass
@@ -128,8 +166,10 @@ def main():
         print(f"[ERROR] {e}")
         raise
     finally:
+        # /tmp 配下を片付け
         try:
-            shutil.rmtree(output_dir, ignore_errors=True)
+            shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+            shutil.rmtree(DATA_DIR, ignore_errors=True)
         except Exception:
             pass
 
