@@ -11,6 +11,7 @@ import os
 import datetime
 import requests
 import shutil
+import inspect  # ← 追加：シグネチャ検査に使用
 
 from module.panel_definitions import get_panel_def_akita, REGION_EXTENTS
 from module.panel_utils import open_isobaric_dataset, open_surface_dataset
@@ -112,74 +113,62 @@ def main():
                 "ds_975": ds_975,
                 "ds_surface": ds_surface,
             }
-            # 1) 6引数版
             try:
                 return get_panel_def_akita(
                     ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface
                 )
             except TypeError:
                 pass
-            # 2) dict 1引数版
             try:
                 return get_panel_def_akita(datasets)
             except TypeError:
                 pass
-            # 3) 引数なし版
             try:
                 return get_panel_def_akita()
             except TypeError as e:
                 raise TypeError(
-                    "get_panel_def_akita の呼び出しに失敗しました。"
-                    "6引数・dict1個・引数なしのいずれにも一致しません。"
+                    "get_panel_def_akita の呼び出しに失敗（6引数/ dict1 / 引数なしの全てNG）"
                 ) from e
 
         panel_def = _resolve_panel_def()
-        # -------------------------------------------------------------
-
         extent = REGION_EXTENTS["akita"]
 
         # --- 互換ラッパー：generate_universal_panel_and_notify の署名差異に対応 ---
         def _call_plotter():
             """
-            返り値は環境によって
-              - panel_imgs
-              - (panel_imgs, zip_path)
-              - (panel_imgs, zip_path, drive_url)
-            などがあり得るので、最初の要素を取り出す。
+            関数のシグネチャを調べ、受け付ける引数だけを渡す。
+            返り値は (panel_imgs, …) 形式でも先頭を返す。
             """
-            candidates = [
-                # 旧：model キーあり
-                dict(
-                    ymd=ymd, hh=hh, model="MSM", output_dir=OUTPUT_DIR, drive_folder=None,
-                    ncols=4, npages=4, panel_def=panel_def, nrows=7,
-                    city_name="akita", extent=extent,
-                ),
-                # 新：model キーなし
-                dict(
-                    ymd=ymd, hh=hh, output_dir=OUTPUT_DIR, drive_folder=None,
-                    ncols=4, npages=4, panel_def=panel_def, nrows=7,
-                    city_name="akita", extent=extent,
-                ),
-                # drive_folder も無い版
-                dict(
-                    ymd=ymd, hh=hh, output_dir=OUTPUT_DIR,
-                    ncols=4, npages=4, panel_def=panel_def, nrows=7,
-                    city_name="akita", extent=extent,
-                ),
-            ]
-            last_err = None
-            for kw in candidates:
-                try:
-                    ret = generate_universal_panel_and_notify(**kw)
-                    if isinstance(ret, tuple):
-                        return ret[0]
-                    return ret
-                except TypeError as e:
-                    last_err = e
-                    continue
-            raise TypeError(
-                f"generate_universal_panel_and_notify の互換呼び出しに失敗: {last_err}"
-            )
+            params = set(inspect.signature(generate_universal_panel_and_notify).parameters.keys())
+
+            # 候補値を用意（存在する引数だけ採用）
+            candidates = {
+                "ymd": ymd,
+                "hh": hh,
+                "output_dir": OUTPUT_DIR,
+                "drive_folder": None,
+                "ncols": 4,
+                "npages": 4,
+                "nrows": 7,
+                "city_name": "akita",
+                "extent": extent,
+                # 互換のため両方用意（片方しか使われない）
+                "panel_def": panel_def,
+                "panel_defs": panel_def,
+                # 一部実装では model が存在
+                "model": "MSM",
+            }
+            kwargs = {k: v for k, v in candidates.items() if k in params}
+
+            # パネル定義名が1つも受け付けられない場合はエラーにする
+            if not ({"panel_def", "panel_defs"} & params):
+                raise TypeError(
+                    f"generate_universal_panel_and_notify の引数に "
+                    f"'panel_def' / 'panel_defs' が見つかりません（params={sorted(params)}）"
+                )
+
+            ret = generate_universal_panel_and_notify(**kwargs)
+            return ret[0] if isinstance(ret, tuple) else ret
 
         panel_imgs = _call_plotter()
         # ----------------------------------------------------------------------
