@@ -23,5 +23,12 @@ RUN pip install --no-cache-dir -r requirements.txt google-cloud-storage
 # （必要なら日本語フォント）
 # RUN apt-get update && apt-get install -y fonts-noto-cjk && rm -rf /var/lib/apt/lists/*
 
+# 追記（任意だが推奨）
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    MPLCONFIGDIR=/tmp/matplotlib
+RUN mkdir -p /tmp/matplotlib
+
+
 COPY . .
 ENTRYPOINT ["python", "scripts/gpv_panel_daily_akita.py"]
