@@ -200,4 +200,115 @@ def send_mail(
     - 複数ファイル添付OK
     - 合計サイズ > MAX_MAIL_SIZE_MB or MAIL_ATTACH_AS_ZIP=1 の場合はZIP化して1通
     """
-    #
+    # --- env 既定 ---
+    mail_from = mail_from or os.environ.get("FROM_EMAIL", "")
+    to_addrs = to_addrs or os.environ.get("TO_EMAIL", "")
+    smtp_host = smtp_host or os.environ.get("SMTP_SERVER", "")
+    smtp_port = int(smtp_port or os.environ.get("SMTP_PORT", "587"))
+    smtp_user = smtp_user or os.environ.get("SMTP_USERNAME", "")
+    smtp_pass = smtp_password or os.environ.get("SMTP_PASSWORD", "")
+    debug = os.environ.get("MAIL_DEBUG", "0") == "1"
+    subject_prefix = os.environ.get("MAIL_SUBJECT_PREFIX", "").strip()
+    if subject_prefix and not subject.startswith(subject_prefix):
+        subject = f"{subject_prefix} {subject}"
+
+    # --- 必須チェック ---
+    if not mail_from:  raise RuntimeError("FROM_EMAIL 未設定")
+    if not smtp_host:  raise RuntimeError("SMTP_SERVER 未設定")
+    if not smtp_user:  raise RuntimeError("SMTP_USERNAME 未設定")
+    if not smtp_pass:  raise RuntimeError("SMTP_PASSWORD 未設定")
+
+    to_list  = _ensure_list(to_addrs)
+    cc_list  = _ensure_list(cc_addrs)
+    bcc_list = _ensure_list(bcc_addrs)
+    recipients = [a for a in (to_list + cc_list + bcc_list) if a]
+    if not recipients:
+        raise RuntimeError("宛先がありません")
+
+    # --- 添付読み込み ---
+    src_files: List[str] = []
+    blobs: List[Tuple[str, bytes, str]] = list(attachment_blobs or [])
+
+    if attachment_paths:
+        for p in attachment_paths:
+            if not os.path.exists(p):
+                raise FileNotFoundError(f"添付が見つかりません: {p}")
+            src_files.append(p)
+
+    # 合計サイズでZIP判定
+    total_bytes = sum(os.path.getsize(p) for p in src_files) if src_files else 0
+    max_mb = float(os.environ.get("MAX_MAIL_SIZE_MB", "20"))
+    force_zip = os.environ.get("MAIL_ATTACH_AS_ZIP", "0") == "1"
+    need_zip = force_zip or _bytes_to_mb(total_bytes) > max_mb
+
+    temp_zip_path = None
+    if src_files and not need_zip:
+        # そのまま複数添付（バイナリ化）
+        for p in src_files:
+            with open(p, "rb") as f:
+                blobs.append((os.path.basename(p), f.read(), "application/octet-stream"))
+    elif src_files:
+        # ZIPにまとめて1通
+        from module.utils.zip_utils import zip_files
+        fd, tmp_path = tempfile.mkstemp(prefix="mail_attach_", suffix=".zip")
+        os.close(fd)
+        zip_files(src_files, tmp_path)
+        temp_zip_path = tmp_path
+        with open(tmp_path, "rb") as f:
+            blobs.append((os.path.basename(tmp_path), f.read(), "application/zip"))
+        if "[ZIP]" not in subject:
+            subject = f"{subject} [ZIP]"
+
+    # --- メッセージ構築 ---
+    msg = _build_message(
+        mail_from=mail_from,
+        to_addrs=to_list,
+        subject=subject,
+        body=body,
+        is_html=is_html,
+        cc_addrs=cc_list,
+        attachments=blobs,
+    )
+
+    envelope_from = smtp_user  # 認証ユーザーをEnvelope-Fromに
+
+    # 注意喚起（ドメイン不一致）
+    from_domain = mail_from.split("@")[-1].lower()
+    user_domain = smtp_user.split("@")[-1].lower()
+    if from_domain != user_domain:
+        print(f"[WARN] From({from_domain}) と SMTP_USERNAME({user_domain}) のドメインが不一致です。拒否される可能性があります。")
+
+    # --- 送信（最大2回: 587→465） ---
+    ports = [smtp_port] if smtp_port in (465, 587) else [587, 465]
+    last_err = None
+    try:
+        for attempt, port in enumerate(ports, start=1):
+            try:
+                print(f"[INFO] SMTP try#{attempt}: host={smtp_host} port={port} user={smtp_user}")
+                mid = _connect_and_send(
+                    host=smtp_host,
+                    port=port,
+                    user=smtp_user,
+                    password=smtp_pass,
+                    envelope_from=envelope_from,
+                    recipients=recipients,
+                    msg=msg,
+                    debug=debug,
+                )
+                print(f"[OK] メール送信成功（port={port}）: Message-ID={mid}")
+                _notify_slack(subject=subject, recipients=recipients, success=True, files=src_files or [blobs[0][0]])
+                return mid
+            except smtplib.SMTPResponseException as e:
+                err = f"SMTP {e.smtp_code} {e.smtp_error}"
+                print(f"[ERR] {err}")
+                last_err = err
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"
+                print(f"[ERR] SMTP送信失敗（port={port}）: {err}")
+                last_err = err
+        _notify_slack(subject=subject, recipients=recipients, success=False, files=src_files, error=str(last_err) if last_err else None)
+        raise RuntimeError(f"メール送信に失敗しました（{attempt}回試行）: {last_err}")
+    finally:
+        if temp_zip_path and os.path.exists(temp_zip_path):
+            try: os.remove(temp_zip_path)
+            except Exception: pass
