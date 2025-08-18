@@ -63,7 +63,7 @@ def _build_message(
     is_html: bool,
     cc_addrs: Iterable[str],
     attachments: List[Tuple[str, bytes, str]],
-) -> MIMEMULTIPART:
+) -> MIMEMultipart:
     msg = MIMEMultipart()
     disp = Address(display_name="", username=mail_from.split("@")[0], domain=mail_from.split("@")[1])
     msg["From"] = formataddr((str(disp), mail_from))
@@ -80,7 +80,8 @@ def _build_message(
         if ctype:
             part.add_header("Content-Type", ctype)
         msg.attach(part)
-    return msg  # type: ignore[name-defined]
+    return msg
+
 
 def _connect_and_send(
     host: str,
@@ -89,7 +90,7 @@ def _connect_and_send(
     password: str,
     envelope_from: str,
     recipients: List[str],
-    msg: MIMEMULTIPART,
+    msg: MIMEMultipart,
     debug: bool,
 ) -> str:
     """指定ポートで接続して送信。成功で Message-ID を返す。465=SMTPS, その他=STARTTLS。"""
@@ -115,6 +116,7 @@ def _connect_and_send(
             server.quit()
         except Exception:
             pass
+
 
 
 # -----------------------------------------------------------------------------
