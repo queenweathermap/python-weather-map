@@ -7,7 +7,7 @@
 #   - 既定: 各PDFの「1ページ目のみ」JPG添付（軽量運用）
 #   - 環境変数 MAIL_ATTACH_ALL_PAGES="1" で全ページJPG添付
 #   - ただし SKAISETU.pdf は常に2ページ分を添付（_1 / _2）
-# Drive 永続保存は一切しない。Slack 通知は任意。
+# Drive 永続保存は一切しない。Slack 通知は mail_utils 側で一元化。
 # =============================================================================
 
 import os
@@ -17,7 +17,6 @@ import requests
 
 from pdf2image import convert_from_bytes
 from module.utils.mail_utils import send_mail
-from module.utils.slack_utils import send_slack_text  # 任意
 
 # ---- 設定 -------------------------------------------------------
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
@@ -41,7 +40,6 @@ PDF_FILES = [
 
 USER = os.environ.get("WEATHERCASTER_USER")
 PASS = os.environ.get("WEATHERCASTER_PASS")
-SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID")  # 任意
 MAIL_TO = os.environ.get("TO_EMAIL", "")
 
 # 変換設定
@@ -143,50 +141,28 @@ def fetch_and_convert_all(today_str: str):
 def main():
     today = datetime.now().strftime("%Y%m%d")
 
-    try:
-        # 1) DL→JPG変換（メモリ）
-        attachments, errors = fetch_and_convert_all(today)
+    # 1) DL→JPG変換（メモリ）
+    attachments, errors = fetch_and_convert_all(today)
 
-        # 2) メール送信（複数JPGをそのまま添付）
-        subject = f"[Weathercaster] Weathercaster 天気図 JPG {today}"
-        mode = "全ページ" if ATTACH_ALL_PAGES else "1ページ目のみ（SKAISETUは常に2ページ）"
-        body = (
-            f"気象庁Weathercasterの天気図PDFをJPGに変換して添付します（{mode}・保存なし運用）。\n"
-            + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")
-        )
+    # 件数を Slack 通知用に環境変数へ（mail_utils 側が参照）
+    os.environ["WX_ATTACH_COUNT"] = str(len(attachments))
+    os.environ["WX_ERROR_COUNT"]  = str(len(errors))
 
-        msg_id = send_mail(
-            to_addrs=MAIL_TO,
-            subject=subject,
-            body=body,
-            attachment_blobs=attachments,  # [(filename, blob, mimetype), ...]
-        )
-        print(f"[OK] Mail sent. Message-ID: {msg_id} / files: {len(attachments)} / errors: {len(errors)}")
+    # 2) メール送信（複数JPGをそのまま添付）
+    subject = f"[Weathercaster] Weathercaster 天気図 JPG {today}"
+    mode = "全ページ" if ATTACH_ALL_PAGES else "1ページ目のみ（SKAISETUは常に2ページ）"
+    body = (
+        f"気象庁Weathercasterの天気図PDFをJPGに変換して添付します（{mode}・保存なし運用）。\n"
+        + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")
+    )
 
-        # 3) Slack 通知（まとめて1件・所望フォーマット）
-        if SLACK_CHANNEL_ID:
-            summary_lines = [
-                ":white_check_mark: Mail sent",
-                f"Subject: {subject}",
-                f"To: {MAIL_TO}",
-                f":earth_asia: 添付: {len(attachments)}件 / エラー: {len(errors)}件",
-            ]
-            # エラー詳細を付けたい場合は以下のコメントアウトを外す
-            # if errors:
-            #     summary_lines.append("```\n" + "\n".join(errors) + "\n```")
-
-            send_slack_text(
-                channel=SLACK_CHANNEL_ID,
-                message="\n".join(summary_lines),
-            )
-
-    except Exception as e:
-        if SLACK_CHANNEL_ID:
-            send_slack_text(
-                channel=SLACK_CHANNEL_ID,
-                message=f":x: Weathercaster 送信失敗: {e}"
-            )
-        raise
+    msg_id = send_mail(
+        to_addrs=MAIL_TO,
+        subject=subject,
+        body=body,
+        attachment_blobs=attachments,  # [(filename, blob, mimetype), ...]
+    )
+    print(f"[OK] Mail sent. Message-ID: {msg_id} / files: {len(attachments)} / errors: {len(errors)}")
 
 
 if __name__ == "__main__":
