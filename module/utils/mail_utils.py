@@ -146,10 +146,10 @@ def _notify_slack(subject: str, recipients: List[str], success: bool,
 
     # 日本語エイリアスの絵文字（ご希望どおり）
     lines = [
-        ":チェックマーク_緑: Mail sent" if success else ":x: Mail failed",
+        "✉️ Mail sent" if success else "❌ Mail failed",
         f"Subject: {subject}",
         f"To: {', '.join(recipients)}",
-        f":地球_アジア: 添付: {attach_count}件 / エラー: {error_count}件",
+        f"📎 添付: {attach_count}件 / エラー: {error_count}件",
     ]
     if (not success) and error:
         lines.append(f"```{(error or '')[:900]}```")
