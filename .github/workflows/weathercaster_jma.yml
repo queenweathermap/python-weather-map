@@ -44,4 +44,4 @@ jobs:
           sudo apt-get install -y poppler-utils
 
       - name: Run Weathercaster script
-        run: PYTHONPATH=. python scripts/daily_weathercaster_notify.py
+        run: PYTHONPATH=. python scripts/weathercaster_jma.py
