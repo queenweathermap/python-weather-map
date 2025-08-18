@@ -148,7 +148,7 @@ def main():
         attachments, errors = fetch_and_convert_all(today)
 
         # 2) メール送信（複数JPGをそのまま添付）
-        subject = f"Weathercaster 天気図 JPG {today}"
+        subject = f"[Weathercaster] Weathercaster 天気図 JPG {today}"
         mode = "全ページ" if ATTACH_ALL_PAGES else "1ページ目のみ（SKAISETUは常に2ページ）"
         body = (
             f"気象庁Weathercasterの天気図PDFをJPGに変換して添付します（{mode}・保存なし運用）。\n"
@@ -163,19 +163,29 @@ def main():
         )
         print(f"[OK] Mail sent. Message-ID: {msg_id} / files: {len(attachments)} / errors: {len(errors)}")
 
-        # 3) 任意: Slack 通知（結果サマリ）
+        # 3) Slack 通知（まとめて1件・所望フォーマット）
         if SLACK_CHANNEL_ID:
-            summary = f"添付: {len(attachments)}件 / エラー: {len(errors)}件"
-            if errors:
-                summary += "\n・" + "\n・".join(errors)
+            summary_lines = [
+                ":white_check_mark: Mail sent",
+                f"Subject: {subject}",
+                f"To: {MAIL_TO}",
+                f":earth_asia: 添付: {len(attachments)}件 / エラー: {len(errors)}件",
+            ]
+            # エラー詳細を付けたい場合は以下のコメントアウトを外す
+            # if errors:
+            #     summary_lines.append("```\n" + "\n".join(errors) + "\n```")
+
             send_slack_text(
                 channel=SLACK_CHANNEL_ID,
-                message=f":earth_asia: {today} Weathercaster JPG メール送信\n{summary}",
+                message="\n".join(summary_lines),
             )
 
     except Exception as e:
         if SLACK_CHANNEL_ID:
-            send_slack_text(channel=SLACK_CHANNEL_ID, message=f":x: Weathercaster 送信失敗: {e}")
+            send_slack_text(
+                channel=SLACK_CHANNEL_ID,
+                message=f":x: Weathercaster 送信失敗: {e}"
+            )
         raise
 
 
