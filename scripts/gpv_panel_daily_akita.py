@@ -68,20 +68,19 @@ def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
 
 
 def main():
-    import inspect
-
     bucket  = os.environ.get("GCS_BUCKET", "").strip()
     mail_to = os.environ.get("MAIL_TO", "").strip()
+    attach_images = os.environ.get("MAIL_ATTACH_IMAGES", "0") == "1"
 
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    gcs_uri = None
+    ymd = hh = None  # 例外時のメッセージ整形用
     try:
-        # 1) 最新ソース探索
+        # 1) ソース探索
         ymd, hh, file_infos = find_latest_available_files_akita()
 
-        # 2) ダウンロード（/tmp/data）
+        # 2) ダウンロード
         for info in file_infos:
             if not os.path.exists(info["local"]):
                 r = requests.get(info["url"], timeout=60)
@@ -90,144 +89,96 @@ def main():
                     f.write(r.content)
                 print(f"[OK] DL: {info['local']}")
 
-        # 3) 必要ファイルのパス抽出
+        # 3) 必要ファイルの仕分け
         l_pall_path = next((i["local"] for i in file_infos if "L-pall" in i["local"]), None)
         lsurf_path  = next((i["local"] for i in file_infos if "Lsurf" in i["local"]), None)
         if not (l_pall_path and lsurf_path):
             raise FileNotFoundError("必要ファイル不足（L-pall / Lsurf）")
 
-        # 4) データセットを読み出し（“データセット方式”にも備える）
-        ds_emagram    = open_isobaric_dataset(l_pall_path)
-        ds_850        = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe 計算に差し替え可
-        ds_925        = open_isobaric_dataset(l_pall_path, hPa=925)
-        ds_975        = open_isobaric_dataset(l_pall_path, hPa=975)
-        ds_surface    = open_surface_dataset(lsurf_path)
+        # 4) データセット（プロッターがパス参照でも、定義生成で使うので開く）
+        ds_emagram   = open_isobaric_dataset(l_pall_path)
+        ds_850       = open_isobaric_dataset(l_pall_path, hPa=850)
+        ds_850_thetae= open_isobaric_dataset(l_pall_path, hPa=850)
+        ds_925       = open_isobaric_dataset(l_pall_path, hPa=925)
+        ds_975       = open_isobaric_dataset(l_pall_path, hPa=975)
+        ds_surface   = open_surface_dataset(lsurf_path)
 
-        # 秋田パネル定義（どの版でも使えるよう生成しておく）
-        panel_def = get_panel_def_akita(
-            ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface
+        # 5) パネル定義
+        panel_def = get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface)
+        extent    = REGION_EXTENTS["akita"]
+
+        # 6) パネル生成（Drive無効・ファイルパス渡し）
+        panel_imgs, _, _ = generate_universal_panel_and_notify(
+            ymd=ymd,
+            hh=hh,
+            output_dir=OUTPUT_DIR,
+            drive_folder=None,
+            ncols=4,
+            npages=4,
+            city_name="akita",
+            extent=extent,
+            msm_l_pall_path=l_pall_path,
+            msm_lsurf_path=lsurf_path,
         )
-        extent = REGION_EXTENTS["akita"]
 
-        # 5) パネル生成：関数のシグネチャを見て、受理される引数だけ渡す
-        params = set(inspect.signature(generate_universal_panel_and_notify).parameters.keys())
-
-        # 候補（両方式を用意）
-        dataset_kwargs = {
-            "ds_emagram": ds_emagram,
-            "ds_850": ds_850,
-            "ds_850_thetae": ds_850_thetae,
-            "ds_925": ds_925,
-            "ds_975": ds_975,
-            "ds_surface": ds_surface,
-        }
-        path_kwargs = {
-            "msm_l_pall_path": l_pall_path,
-            "msm_lsurf_path": lsurf_path,
-        }
-        common_kwargs = {
-            "ymd": ymd,
-            "hh": hh,
-            "output_dir": OUTPUT_DIR,
-            "drive_folder": None,
-            "ncols": 4,
-            "npages": 4,
-            "city_name": "akita",
-            "extent": extent,
-            # 互換のため両方用意（片方しか受理されない）
-            "panel_def": panel_def,
-            "panel_defs": panel_def,
-            "model": "MSM",
-        }
-
-        # 実際に渡す引数を決定（存在するキーのみ採用）
-        kwargs = {k: v for k, v in common_kwargs.items() if k in params}
-
-        # 「データセット方式」を優先、受け付けない場合は「パス方式」にフォールバック
-        used_keys = []
-        if {"ds_emagram", "ds_surface"} & params:
-            for k, v in dataset_kwargs.items():
-                if k in params:
-                    kwargs[k] = v
-                    used_keys.append(k)
-        else:
-            for k, v in path_kwargs.items():
-                if k in params:
-                    kwargs[k] = v
-                    used_keys.append(k)
-
-        # panel_def / panel_defs がどちらも無い版は非対応なので検知
-        if not ({"panel_def", "panel_defs"} & params):
-            print(f"[WARN] plotterに panel_def(s) 引数がありません params={sorted(params)}")
-
-        print(f"[INFO] plotter kwargs keys used: {sorted(kwargs.keys())}")
-
-        ret = generate_universal_panel_and_notify(**kwargs)
-        panel_imgs = ret[0] if isinstance(ret, tuple) else ret
-
-
-        # 6) 画像をそのままメール添付（ZIPなし）
-        from pathlib import Path
-        
-        # OUTPUT_DIR に出力された画像を拾う（拡張子は必要に応じて追加）
-        img_paths = sorted(
-            [p for p in Path(OUTPUT_DIR).glob("*") if p.suffix.lower() in {".png", ".jpg", ".jpeg"}]
-        )
-        
-        attachments = []
-        for p in img_paths:
-            with open(p, "rb") as f:
-                attachments.append((p.name, f.read(), "image/jpeg" if p.suffix.lower() != ".png" else "image/png"))
-        
-        subject = f"秋田局地パネル {ymd} UTC{hh}"
-        body    = f"秋田局地（MSM）パネル出力（{len(attachments)}枚、保存なし運用）。"
-        
-        # Slackの件数表示用
-        os.environ["WX_ATTACH_COUNT"] = str(len(attachments))
+        # 7) 送付準備（件名・本文）
+        subject = f"[Python天気図] 秋田局地パネル {ymd} UTC{hh}"
+        body    = "秋田局地（MSM）パネル出力一式です。"
         os.environ["WX_ERROR_COUNT"]  = "0"
-        
-        if mail_to:
-            msg_id = send_mail(
-                to_addrs=mail_to,
-                subject=subject,
-                body=body,
-                attachment_blobs=attachments,   # ← 画像をそのまま添付
-            )
-            print(f"[OK] Mail sent. Message-ID: {msg_id}")
-            notify_slack(subject=subject, recipients=[mail_to], success=True,
-                         files=[a[0] for a in attachments], upload_paths=None)
-        
-        elif bucket:
-            # GCS 保存に切り替える場合は、画像を個別にアップロード（任意）
-            from google.cloud import storage
-            client = storage.Client()
-            for p in img_paths:
-                client.bucket(bucket).blob(f"akita/{p.name}").upload_from_filename(str(p))
-            print(f"[OK] Uploaded {len(img_paths)} images to gs://{bucket}/akita/")
-            notify_slack(subject=subject, recipients=["GCS"], success=True,
-                         files=[p.name for p in img_paths], upload_paths=None)
-        
-        else:
-            print(f"[OK] Saved locally in container: {OUTPUT_DIR}")
-            notify_slack(subject=subject, recipients=["local"], success=True,
-                         files=[p.name for p in img_paths], upload_paths=None)
-    
 
+        # 添付：画像 or ZIP
+        if attach_images:
+            # 画像をそのまま添付
+            attachments = []
+            for p in sorted(panel_imgs):
+                with open(p, "rb") as f:
+                    attachments.append((os.path.basename(p), f.read(), "image/jpeg"))
+            os.environ["WX_ATTACH_COUNT"] = str(len(attachments))
+
+            if mail_to:
+                msg_id = send_mail(mail_to, subject, body, attachments)
+                print(f"[OK] Mail sent. Message-ID: {msg_id}")
+                notify_slack(subject=subject, recipients=[mail_to], success=True,
+                             files=[a[0] for a in attachments], upload_paths=None)
+            elif bucket:
+                # 画像はまとめてZIPしてGCSへ（メールは送らない）
+                zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
+                gcs_uri = upload_to_gcs(bucket, f"akita/akita_panel_{ymd}_UTC{hh}.zip", zip_bytes)
+                print(f"[OK] Uploaded to {gcs_uri}")
+                os.environ["WX_ATTACH_COUNT"] = "1"
+                notify_slack(subject=subject, recipients=["GCS"], success=True,
+                             files=[f"akita_panel_{ymd}_UTC{hh}.zip"], upload_paths=None)
+            else:
+                print("[OK] No MAIL_TO/GCS_BUCKET. Skipped delivery.")
         else:
-            fallback = f"/tmp/{filename}"
-            if zip_path != fallback:
-                with open(fallback, "wb") as f:
+            # ZIP添付
+            zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
+            zip_name  = f"akita_panel_{ymd}_UTC{hh}.zip"
+            os.environ["WX_ATTACH_COUNT"] = "1"
+
+            if mail_to:
+                msg_id = send_mail(mail_to, subject, body,
+                                   [(zip_name, zip_bytes, "application/zip")])
+                print(f"[OK] Mail sent. Message-ID: {msg_id}")
+                notify_slack(subject=subject, recipients=[mail_to], success=True,
+                             files=[zip_name], upload_paths=None)
+            elif bucket:
+                gcs_uri = upload_to_gcs(bucket, f"akita/{zip_name}", zip_bytes)
+                print(f"[OK] Uploaded to {gcs_uri}")
+                notify_slack(subject=subject, recipients=["GCS"], success=True,
+                             files=[zip_name], upload_paths=None)
+            else:
+                with open(f"/tmp/{zip_name}", "wb") as f:
                     f.write(zip_bytes)
-            print(f"[OK] Saved locally in container: {fallback}")
-            notify_slack(subject=subject, recipients=["local"], success=True,
-                         files=[filename], upload_paths=[fallback])
+                print(f"[OK] Saved locally: /tmp/{zip_name}")
+                notify_slack(subject=subject, recipients=["local"], success=True,
+                             files=[zip_name], upload_paths=[f"/tmp/{zip_name}"])
 
     except Exception as e:
         os.environ["WX_ERROR_COUNT"] = "1"
         try:
             notify_slack(
-                subject=f"秋田局地パネル生成失敗 {ymd if 'ymd' in locals() else ''} UTC{hh if 'hh' in locals() else ''}",
+                subject=f"秋田局地パネル生成失敗 {ymd or ''} UTC{hh or ''}",
                 recipients=["system"],
                 success=False,
                 error=str(e),
@@ -237,12 +188,9 @@ def main():
             print(f"[ERROR] {e}")
             raise
     finally:
-        try:
-            shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-            shutil.rmtree(DATA_DIR,   ignore_errors=True)
-        except Exception:
-            pass
-
+        # 後片付け
+        shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+        shutil.rmtree(DATA_DIR,    ignore_errors=True)
 
 
 if __name__ == "__main__":
