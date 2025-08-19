@@ -34,7 +34,8 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 
-from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan
+
+from module.panel_definitions import REGION_EXTENTS, get_panel_def_japan, get_panel_def_akita
 from module.utils.zip_utils import zip_files
 
 
