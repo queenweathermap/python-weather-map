@@ -122,9 +122,18 @@ def _connect_and_send(
 # -----------------------------------------------------------------------------
 # Slack 同報（一元化・所望フォーマットで1件）
 # -----------------------------------------------------------------------------
-def notify_slack(subject: str, recipients: List[str], success: bool,
-                 files: Optional[List[str]] = None, error: Optional[str] = None):
-    """Slackへ1件だけ投稿。Weathercaster 側で WX_* を渡せば件数を正確表示。"""
+def notify_slack(
+    subject: str,
+    recipients: List[str],
+    success: bool,
+    files: Optional[List[str]] = None,
+    error: Optional[str] = None,
+    upload_paths: Optional[List[str]] = None,  # 将来のファイル送信に備えて追加
+):
+    """
+    Slackへ1件だけ投稿。Weathercaster 側で WX_* を渡せば件数を正確表示。
+    - upload_paths: 将来的にSlackへ実ファイルを添付したいときに使用予定。
+    """
     if os.environ.get("MAIL_SLACK_NOTIFY", "1") != "1":
         return
 
@@ -144,11 +153,11 @@ def notify_slack(subject: str, recipients: List[str], success: bool,
     except Exception:
         error_count = 0 if success else 1
 
-    # 日本語エイリアスの絵文字（ご希望どおり）
+    # 通知本文
     lines = [
         "✉️ Mail sent" if success else "❌ Mail failed",
         f"Subject: {subject}",
-        f"To: {', '.join(recipients)}",
+        f"To: {', '.join(recipients) if recipients else '(none)'}",
         f"📎 添付: {attach_count}件 / エラー: {error_count}件",
     ]
     if (not success) and error:
@@ -156,26 +165,18 @@ def notify_slack(subject: str, recipients: List[str], success: bool,
 
     text = "\n".join(lines)
 
-    # slack_utils があれば使用、無ければ直接API
+    # --- まずはテキスト通知のみ ---
     try:
-        from module.utils.slack_utils import send_slack_text  # type: ignore
+        from module.utils.slack_utils import send_slack_text
         send_slack_text(channel=channel, message=text)
-        return
-    except Exception:
-        pass
-
-    try:
-        import json, urllib.request
-        req = urllib.request.Request(
-            "https://slack.com/api/chat.postMessage",
-            data=json.dumps({"channel": channel, "text": text}).encode("utf-8"),
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            _ = resp.read()
     except Exception as e:
-        print(f"[WARN] Slack通知に失敗: {e}")
+        print(f"[WARN] Slackテキスト送信に失敗: {e}")
+
+    # --- 将来のファイル送信フック ---
+    if upload_paths:
+        print(f"[INFO] upload_paths={upload_paths} が指定されましたが、現時点では未対応です。")
+        # TODO: 将来的に slack_utils.upload_files_slack を呼び出す予定
+
 
 
 # -----------------------------------------------------------------------------
