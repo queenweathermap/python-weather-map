@@ -68,16 +68,18 @@ def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
 
 
 def main():
-    bucket = os.environ.get("GCS_BUCKET", "").strip()
-    mail_to = os.environ.get("MAIL_TO", "").strip()
+    import inspect
 
-    os.makedirs(DATA_DIR, exist_ok=True)
+    bucket  = os.environ.get("GCS_BUCKET", "").strip()
+    mail_to = os.environ.get("MAIL_TO",  "").strip()
+
+    os.makedirs(DATA_DIR,  exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     gcs_uri = None
 
     try:
-        # 1) ソース取得
+        # 1) 最新サイクル検出
         ymd, hh, file_infos = find_latest_available_files_akita()
 
         # 2) ダウンロード（/tmp/data）
@@ -90,56 +92,97 @@ def main():
                 print(f"[OK] DL: {info['local']}")
 
         # 3) 仕分け
-        l_pall_path = next(
-            (i["local"] for i in file_infos if "L-pall" in i["local"]), None
-        )
-        lsurf_path = next(
-            (i["local"] for i in file_infos if "Lsurf" in i["local"]), None
-        )
+        l_pall_path = next((i["local"] for i in file_infos if "L-pall" in i["local"]), None)
+        lsurf_path  = next((i["local"] for i in file_infos if "Lsurf" in i["local"]), None)
         if not (l_pall_path and lsurf_path):
             raise FileNotFoundError("必要ファイル不足（L-pall/Lsurf）")
 
-        # 4) データセット抽出
-        ds_emagram = open_isobaric_dataset(l_pall_path)
-        ds_850 = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe 計算に差し替え可
-        ds_925 = open_isobaric_dataset(l_pall_path, hPa=925)
-        ds_975 = open_isobaric_dataset(l_pall_path, hPa=975)
-        ds_surface = open_surface_dataset(lsurf_path)
-
-        # 秋田のパネル定義
-        panel_def = get_panel_def_akita(
-            ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface
-        )
+        # 4) パネル生成（署名差を吸収）
         extent = REGION_EXTENTS["akita"]
+        params = set(inspect.signature(generate_universal_panel_and_notify).parameters.keys())
 
-        # 5) パネル生成（Drive無効、ファイルパス渡し）
-        panel_imgs, _, _ = generate_universal_panel_and_notify(
-            ymd=ymd,
-            hh=hh,
-            output_dir=OUTPUT_DIR,
-            drive_folder=None,
-            ncols=4,
-            npages=4,
-            city_name="akita",
-            extent=extent,
-            # 画像生成ロジックがファイルパスを読む実装のためパスを渡す
-            msm_l_pall_path=l_pall_path,
-            msm_lsurf_path=lsurf_path,
-            # ※ 'nrows' はサポートされていないため渡さない
-        )
+        def _call_plotter_with_paths():
+            """msm_*_path を受け付ける実装ならそのまま使う（最優先）。"""
+            if {"msm_l_pall_path", "msm_lsurf_path"} <= params:
+                kwargs = {
+                    "ymd": ymd, "hh": hh,
+                    "output_dir": OUTPUT_DIR,
+                    "drive_folder": None,
+                    "city_name": "akita",
+                    "extent": extent,
+                    "msm_l_pall_path": l_pall_path,
+                    "msm_lsurf_path":  lsurf_path,
+                }
+                # あれば追加、無ければ渡さない
+                if "ncols" in params:  kwargs["ncols"]  = 4
+                if "npages" in params: kwargs["npages"] = 4
+                if "nrows" in params:  kwargs["nrows"]  = 7
+                if "model" in params:  kwargs["model"]  = "MSM"
 
-        # 6) ZIP 作成 → GCS or メール送信
+                ret = generate_universal_panel_and_notify(**kwargs)
+                return ret[0] if isinstance(ret, tuple) else ret
+            return None
+
+        panel_imgs = _call_plotter_with_paths()
+
+        if panel_imgs is None:
+            # パス渡しが不可→パネル定義が必要な実装。get_panel_def_akita を安全に呼び分け
+            # 必要になった時だけデータセットを開く
+            ds_emagram    = open_isobaric_dataset(l_pall_path)
+            ds_850        = open_isobaric_dataset(l_pall_path, hPa=850)
+            ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # 必要ならθe計算に差し替え可
+            ds_925        = open_isobaric_dataset(l_pall_path, hPa=925)
+            ds_975        = open_isobaric_dataset(l_pall_path, hPa=975)
+            ds_surface    = open_surface_dataset(lsurf_path)
+
+            panel_def = None
+            try:
+                panel_def = get_panel_def_akita()  # 0引数版
+            except TypeError:
+                try:
+                    datasets = {
+                        "ds_emagram": ds_emagram,
+                        "ds_850": ds_850,
+                        "ds_850_thetae": ds_850_thetae,
+                        "ds_925": ds_925,
+                        "ds_975": ds_975,
+                        "ds_surface": ds_surface,
+                    }
+                    panel_def = get_panel_def_akita(datasets)  # dict一個版
+                except TypeError as e:
+                    raise TypeError("get_panel_def_akita の呼び出しに失敗（0引数/ dict一個の両方NG）") from e
+
+            # panel_def / panel_defs どちらを受け付けるか判定
+            panel_key = "panel_def" if "panel_def" in params else ("panel_defs" if "panel_defs" in params else None)
+            if panel_key is None:
+                raise TypeError(f"generate_universal_panel_and_notify に 'panel_def' / 'panel_defs' がありません（params={sorted(params)}）")
+
+            kwargs = {
+                "ymd": ymd, "hh": hh,
+                "output_dir": OUTPUT_DIR,
+                "drive_folder": None,
+                "city_name": "akita",
+                "extent": extent,
+                panel_key: panel_def,
+            }
+            if "ncols" in params:  kwargs["ncols"]  = 4
+            if "npages" in params: kwargs["npages"] = 4
+            if "nrows" in params:  kwargs["nrows"]  = 7
+            if "model" in params:  kwargs["model"]  = "MSM"
+
+            ret = generate_universal_panel_and_notify(**kwargs)
+            panel_imgs = ret[0] if isinstance(ret, tuple) else ret
+
+        # 5) ZIP 作成 → GCS or メール送信
         zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
-        filename = f"akita_panel_{ymd}_UTC{hh}.zip"
-        subject = f"秋田局地パネル {ymd} UTC{hh}"
-        body = "秋田局地（MSM）パネル出力一式です。"
+        filename  = f"akita_panel_{ymd}_UTC{hh}.zip"
+        subject   = f"秋田局地パネル {ymd} UTC{hh}"
+        body      = "秋田局地（MSM）パネル出力一式です。"
 
-        # Slackの件数表示用（mail_utils 側で参照）
         os.environ["WX_ATTACH_COUNT"] = "1"
-        os.environ["WX_ERROR_COUNT"] = "0"
+        os.environ["WX_ERROR_COUNT"]  = "0"
 
-        # 将来のSlack添付に備えてZIPも一時保存
+        # 一時保存（Slack添付用の将来拡張に備え）
         zip_path = f"/tmp/{filename}"
         try:
             with open(zip_path, "wb") as f:
@@ -162,7 +205,6 @@ def main():
                 files=[filename],
                 upload_paths=[zip_path] if zip_path else None,
             )
-
         elif bucket:
             gcs_uri = upload_to_gcs(bucket, f"akita/{filename}", zip_bytes)
             print(f"[OK] Uploaded to {gcs_uri}")
@@ -173,7 +215,6 @@ def main():
                 files=[filename],
                 upload_paths=[zip_path] if zip_path else None,
             )
-
         else:
             # 最終退避（デバッグ用）
             fallback = f"/tmp/{filename}"
@@ -190,7 +231,6 @@ def main():
             )
 
     except Exception as e:
-        # 失敗件数をSlack表示用に
         os.environ["WX_ERROR_COUNT"] = "1"
         try:
             notify_slack(
@@ -204,12 +244,12 @@ def main():
             print(f"[ERROR] {e}")
             raise
     finally:
-        # /tmp 配下を片付け
         try:
             shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-            shutil.rmtree(DATA_DIR, ignore_errors=True)
+            shutil.rmtree(DATA_DIR,    ignore_errors=True)
         except Exception:
             pass
+
 
 
 if __name__ == "__main__":
