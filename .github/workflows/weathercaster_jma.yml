@@ -3,9 +3,9 @@
 name: Weathercaster JMA
 
 on:
-  schedule:
+   # schedule:
     # 毎日 13:30 JST = 04:30 UTC
-    - cron: "30 4 * * *"
+    #  - cron: "30 4 * * *"
   workflow_dispatch: {}
 
 jobs:
