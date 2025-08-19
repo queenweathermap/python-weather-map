@@ -97,7 +97,6 @@ def main():
             drive_folder=None,
             ncols=4,
             npages=4,
-            nrows=7,
             city_name="akita",
             extent=extent,
             msm_l_pall_path=l_pall_path,
