@@ -18,7 +18,7 @@ from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 from module.plotter.gpv_plotter_universal import (
     generate_universal_panel_and_notify,  # Drive機能は使わない
 )
-from module.utils.mail_utils import send_mail
+from module.utils.mail_utils import send_mail, notify_slack
 from module.utils.zip_utils import to_zip_bytes_from_dir
 from module.utils.slack_utils import send_slack_text
 
@@ -66,7 +66,7 @@ def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
 
 
 def main():
-    slack_channel = os.environ.get("SLACK_CHANNEL_ID", "").strip()
+    # Slackチャンネルは mail_utils 側で環境変数参照するため、ここでは取得しない
     bucket = os.environ.get("GCS_BUCKET", "").strip()
     mail_to = os.environ.get("MAIL_TO", "").strip()
 
@@ -179,6 +179,19 @@ def main():
         subject = f"秋田局地パネル {ymd} UTC{hh}"
         body = "秋田局地（MSM）パネル出力一式です。"
 
+        # 将来のSlack添付に備えてZIPを一旦ローカル保存しておく
+        zip_path = f"/tmp/{filename}"
+        try:
+            with open(zip_path, "wb") as f:
+                f.write(zip_bytes)
+        except Exception:
+            # 保存に失敗しても処理は継続（upload_paths は None にする）
+            zip_path = None
+
+        # Slackの件数表示用（mail_utils 側で参照）
+        os.environ["WX_ATTACH_COUNT"] = "1"
+        os.environ["WX_ERROR_COUNT"] = "0"
+
         if mail_to:
             msg_id = send_mail(
                 to_addrs=mail_to,
@@ -187,37 +200,59 @@ def main():
                 attachment_blobs=[(filename, zip_bytes, "application/zip")],
             )
             print(f"[OK] Mail sent. Message-ID: {msg_id}")
+
+            # Slack通知（mail_utils に集約）— 将来のファイル送信に備えて upload_paths を渡す
+            notify_slack(
+                subject=subject,
+                recipients=[mail_to],
+                success=True,
+                files=[filename],
+                upload_paths=[zip_path] if zip_path else None,
+            )
+
         elif bucket:
             gcs_uri = upload_to_gcs(bucket, f"akita/{filename}", zip_bytes)
             print(f"[OK] Uploaded to {gcs_uri}")
+
+            notify_slack(
+                subject=subject,
+                recipients=["GCS"],
+                success=True,
+                files=[filename],
+                upload_paths=[zip_path] if zip_path else None,
+            )
+
         else:
             # 最終退避（デバッグ用）
             fallback = f"/tmp/{filename}"
-            with open(fallback, "wb") as f:
-                f.write(zip_bytes)
+            if zip_path != fallback:
+                # zip_path が作れなかった場合に備えて保存
+                with open(fallback, "wb") as f:
+                    f.write(zip_bytes)
             print(f"[OK] Saved locally in container: {fallback}")
 
-        # 7) Slack 通知（任意）
-        if slack_channel:
-            try:
-                fnames = ", ".join(sorted(os.listdir(OUTPUT_DIR)))
-                note = f"files: {fnames}"
-                if gcs_uri:
-                    note += f"\nGCS: {gcs_uri}"
-                if msg_id:
-                    note += f"\nMessage-ID: {msg_id}"
-                send_slack_text(
-                    channel=slack_channel,
-                    message=f":red_circle: 秋田パネル完了 {ymd} UTC{hh}\n{note}",
-                )
-            except Exception:
-                pass
+            notify_slack(
+                subject=subject,
+                recipients=["local"],
+                success=True,
+                files=[filename],
+                upload_paths=[fallback],
+            )
 
     except Exception as e:
-        if slack_channel:
-            send_slack_text(channel=slack_channel, message=f":x: 秋田パネル失敗: {e}")
-        print(f"[ERROR] {e}")
-        raise
+        # 失敗件数をSlack表示用に
+        os.environ["WX_ERROR_COUNT"] = "1"
+        try:
+            notify_slack(
+                subject=f"秋田局地パネル生成失敗 {ymd if 'ymd' in locals() else ''} UTC{hh if 'hh' in locals() else ''}",
+                recipients=["system"],
+                success=False,
+                error=str(e),
+                upload_paths=None,
+            )
+        finally:
+            print(f"[ERROR] {e}")
+            raise
     finally:
         # /tmp 配下を片付け
         try:
