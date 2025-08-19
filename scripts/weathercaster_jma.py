@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-# 気象庁 Weathercaster（会員ページ）から指定PDFを保存せずにDL→JPG化→メール添付
-# 既定は各PDFの「1ページ目のみ」JPG添付。
-# MAIL_ATTACH_ALL_PAGES="1" で全ページJPG添付。
-# SKAISETU.pdf は常に2ページ添付（_1 / _2）。
-# Slack 通知はこのスクリプト内で送信（環境変数 SLACK_* があれば）。
+# scripts/weathercaster_jma.py
+# 気象庁 Weathercaster（会員ページ）PDFを保存せずにDL→JPG化
+# 出力は /tmp に展開 → ZIP化し、優先して GCS に保存。
+# MAIL_TO があればメール送信（既定は ZIP 添付、MAIL_AS_ZIP="0" ならJPGを複数添付）。
+# Slack 通知は環境変数 SLACK_* があれば送信。
 # =============================================================================
 
 import os
 import io
+import shutil
 from datetime import datetime
 from typing import List, Tuple, Optional
 
@@ -16,60 +17,46 @@ import requests
 from pdf2image import convert_from_bytes
 
 from module.utils.mail_utils import send_mail
-try:
-    from module.utils.slack_utils import send_slack_text  # 既存ユーティリティ
-except Exception:
-    send_slack_text = None  # Slack無しでも動くように
+from module.utils.zip_utils import to_zip_bytes_from_dir
+from module.utils.slack_utils import send_slack_text
 
-# ---- 設定 -------------------------------------------------------
+# --------- 設定 ---------
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
-
-# 配信対象PDF（必要に応じて編集）
 PDF_FILES = [
-    "COMP12.pdf", "COMP36.pdf", "COMP72.pdf",
-    "FXXN519.pdf", "FZCX50.pdf", "FXJP854.pdf", "FEFE19.pdf",
-    "TKAISETU.pdf", "SKAISETU.pdf",
-    # 追加分
-    "AUPA20.pdf", "AUPN30.pdf", "AXJP140.pdf",
+    "COMP12.pdf","COMP36.pdf","COMP72.pdf",
+    "FXXN519.pdf","FZCX50.pdf","FXJP854.pdf","FEFE19.pdf",
+    "TKAISETU.pdf","SKAISETU.pdf",
+    "AUPA20.pdf","AUPN30.pdf","AXJP140.pdf",
 ]
 
 USER = os.environ.get("WEATHERCASTER_USER", "")
 PASS = os.environ.get("WEATHERCASTER_PASS", "")
-MAIL_TO = os.environ.get("TO_EMAIL", "")
 
-ATTACH_ALL_PAGES = os.environ.get("MAIL_ATTACH_ALL_PAGES", "0") == "1"
+# Cloud Run 書込先
+DATA_DIR = "/tmp/jma_data"
+OUTPUT_DIR = "/tmp/weathercaster_jma"
+
+# 変換/送付オプション
+ATTACH_ALL_PAGES = os.environ.get("MAIL_ATTACH_ALL_PAGES", "0") == "1"  # JPG添付時：全ページ
+MAIL_AS_ZIP = os.environ.get("MAIL_AS_ZIP", "1") == "1"                  # 既定はZIP添付
 JPEG_DPI = 200
 JPEG_QUALITY = 85
-# ---------------------------------------------------------------
+# -----------------------
 
 Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
 
 
-def _slack_notify_ok(subject: str, files: List[Attachment], errors: List[str]) -> None:
-    channel = os.environ.get("SLACK_CHANNEL_ID", "").strip()
-    if not channel or send_slack_text is None:
-        return
-    msg = f":white_check_mark: {subject}\nfiles: {len(files)}  errors: {len(errors)}"
-    if errors:
-        msg += "\n" + "\n".join(f"- {e}" for e in errors[:10])
-    try:
-        send_slack_text(channel=channel, message=msg)
-    except Exception:
-        pass
-
-
-def _slack_notify_ng(subject: str, error: str) -> None:
-    channel = os.environ.get("SLACK_CHANNEL_ID", "").strip()
-    if not channel or send_slack_text is None:
-        return
-    try:
-        send_slack_text(channel=channel, message=f":x: {subject}\n{error}")
-    except Exception:
-        pass
+def upload_to_gcs(bucket_name: str, blob_name: str, data: bytes) -> str:
+    """GCS にアップロードして gs:// パスを返す"""
+    from google.cloud import storage
+    client = storage.Client()
+    blob = client.bucket(bucket_name).blob(blob_name)
+    blob.upload_from_string(data)
+    return f"gs://{bucket_name}/{blob_name}"
 
 
 def fetch_pdf_content(name: str) -> Optional[bytes]:
-    """Basic認証でPDFを取得し、bytesを返す。失敗時は None。"""
+    """Basic認証でPDFを取得。失敗時 None"""
     url = f"{BASE_URL}/{name}"
     try:
         r = requests.get(url, auth=(USER, PASS), timeout=60)
@@ -83,22 +70,16 @@ def fetch_pdf_content(name: str) -> Optional[bytes]:
         return None
 
 
-def pdf_bytes_to_jpg_attachments(
+def pdf_bytes_to_jpgs(
     pdf_bytes: bytes,
     base_filename: str,
     force_all: bool = False,
     simple_index: bool = False,
 ) -> List[Attachment]:
-    """
-    PDFバイト列をJPGに変換し、(filename, blob, mimetype) のリストで返す。
-      - 既定は1ページ目のみ。ATTACH_ALL_PAGES または force_all=True で全ページ。
-      - simple_index=True の場合、連番は _1, _2 ... とする（SKAISETU向け）。
-        それ以外は _p01, _p02 のようにゼロ埋め。
-    """
+    """PDFをJPGへ。返り値は (filename, blob, mimetype) の配列"""
     images = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
     if not images:
         return []
-
     atts: List[Attachment] = []
     if ATTACH_ALL_PAGES or force_all:
         for idx, im in enumerate(images, start=1):
@@ -110,70 +91,114 @@ def pdf_bytes_to_jpg_attachments(
         buf = io.BytesIO()
         images[0].save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
         atts.append((f"{base_filename}.jpg", buf.getvalue(), "image/jpeg"))
-
     return atts
 
 
-def fetch_and_convert_all(today_str: str) -> Tuple[List[Attachment], List[str]]:
-    """対象PDFを順次DL→JPG化して添付配列を構築。"""
-    all_attachments: List[Attachment] = []
+def build_outputs(today: str) -> Tuple[List[Attachment], List[str]]:
+    """全PDFをDL→JPG化。OUTPUT_DIR にファイルを書き出し、メール添付用配列も返す"""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    emails: List[Attachment] = []
     errors: List[str] = []
 
     if not USER or not PASS:
         errors.append("WEATHERCASTER_USER / PASS が未設定です")
 
     for name in PDF_FILES:
-        pdf_bytes = fetch_pdf_content(name)
-        if pdf_bytes is None:
+        pdf = fetch_pdf_content(name)
+        if pdf is None:
             errors.append(f"{name}: download failed")
             continue
 
-        base = f"{today_str}_{name.replace('.pdf', '')}"
+        base = f"{today}_{name.replace('.pdf', '')}"
         if name == "SKAISETU.pdf":
-            jpgs = pdf_bytes_to_jpg_attachments(pdf_bytes, base, force_all=True, simple_index=True)
+            imgs = pdf_bytes_to_jpgs(pdf, base, force_all=True, simple_index=True)
         else:
-            jpgs = pdf_bytes_to_jpg_attachments(pdf_bytes, base, force_all=False, simple_index=False)
+            imgs = pdf_bytes_to_jpgs(pdf, base, force_all=False, simple_index=False)
 
-        if jpgs:
-            all_attachments.extend(jpgs)
-        else:
+        if not imgs:
             errors.append(f"{name}: conversion produced no images")
+            continue
 
-    return all_attachments, errors
+        # OUTPUT_DIR に実ファイルも保存（ZIP化用）
+        for fname, blob, _ in imgs:
+            with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                f.write(blob)
+        emails.extend(imgs)
+
+    return emails, errors
 
 
 def main():
-    today = datetime.now().strftime("%Y%m%d")
-    prefix = os.environ.get("MAIL_SUBJECT_PREFIX", "").strip()
-    subject = f"{prefix} Weathercaster 天気図 JPG {today}".strip()
+    slack_ch = os.environ.get("SLACK_CHANNEL_ID", "").strip()
+    bucket = os.environ.get("GCS_BUCKET", "").strip()
+    mail_to = os.environ.get("MAIL_TO", os.environ.get("TO_EMAIL", "")).strip()  # 互換
+
+    today = datetime.utcnow().strftime("%Y%m%d")
+    prefix = os.environ.get("MAIL_SUBJECT_PREFIX", "[Weathercaster]").strip()
+    subject = f"{prefix} 天気図 JPG {today}"
+
+    gcs_uri = None
+    msg_id = None
 
     try:
-        # 1) DL→JPG変換（保存なし）
-        attachments, errors = fetch_and_convert_all(today)
+        emails, errors = build_outputs(today)
 
-        # 2) メール送信（複数JPGをそのまま添付）
-        mode = "全ページ" if ATTACH_ALL_PAGES else "1ページ目のみ（SKAISETUは常に2ページ）"
-        detail = ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")
-        body = (
-            f"気象庁Weathercasterの天気図PDFをJPGに変換して添付します（{mode}・保存なし運用）。\n"
-            f"{detail}"
-        )
+        # ZIP 作成
+        zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
+        zip_name = f"weathercaster_jma_{today}.zip"
 
-        msg_id = send_mail(
-            to_addrs=MAIL_TO,
-            subject=subject,
-            body=body,
-            attachment_blobs=attachments,
-        )
-        print(f"[OK] Mail sent. Message-ID: {msg_id} / files: {len(attachments)} / errors: {len(errors)}")
+        # 優先: GCS へ保存
+        if bucket:
+            gcs_uri = upload_to_gcs(bucket, f"weathercaster-jma/{today}/{zip_name}", zip_bytes)
+            print(f"[OK] Uploaded to {gcs_uri}")
 
-        # 3) Slack通知
-        _slack_notify_ok(subject, attachments, errors)
+        # メール送信（任意）
+        if mail_to:
+            if MAIL_AS_ZIP:
+                msg_id = send_mail(
+                    to_addrs=mail_to,
+                    subject=subject,
+                    body=("気象庁Weathercasterの天気図をJPG化しZIP添付します（保存なし運用）。\n"
+                          + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")),
+                    attachment_blobs=[(zip_name, zip_bytes, "application/zip")],
+                )
+            else:
+                msg_id = send_mail(
+                    to_addrs=mail_to,
+                    subject=subject,
+                    body=("気象庁Weathercasterの天気図をJPG化して添付します（保存なし運用）。\n"
+                          + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")),
+                    attachment_blobs=emails,
+                )
+            print(f"[OK] Mail sent. Message-ID: {msg_id}")
+
+        # Slack 通知（任意）
+        if slack_ch:
+            try:
+                files_n = len(os.listdir(OUTPUT_DIR))
+                note = f":white_check_mark: JMA完了 {today}\nfiles: {files_n}, errors: {len(errors)}"
+                if gcs_uri: note += f"\nGCS: {gcs_uri}"
+                if msg_id:  note += f"\nMessage-ID: {msg_id}"
+                send_slack_text(channel=slack_ch, message=note)
+            except Exception:
+                pass
 
     except Exception as e:
-        _slack_notify_ng(f"{subject}（失敗）", str(e))
+        if slack_ch:
+            try:
+                send_slack_text(slack_ch, f":x: JMA失敗 {today}\n{e}")
+            except Exception:
+                pass
         print(f"[ERROR] {e}")
         raise
+    finally:
+        try:
+            shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+            shutil.rmtree(DATA_DIR, ignore_errors=True)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
