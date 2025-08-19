@@ -1,0 +1,56 @@
+#.github/workflows/run_jma.yml
+
+name: Run JMA Weathercaster
+
+on:
+  schedule:
+    # 例：毎日 13:30 JST = 04:30 UTC
+    - cron: "30 4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: run-jma-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run-jma:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Tokyo
+      # メール/Slackなどはリポジトリの Secrets から渡すのが安全
+      FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+      TO_EMAIL:   ${{ secrets.TO_EMAIL }}
+      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+      SMTP_PORT:   ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      MAIL_SUBJECT_PREFIX: "[JMA]"
+    steps:
+      - uses: actions/checkout@v4
+
+      # pdf2image 用に poppler を入れる（Cartopy等は不要）
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils fonts-noto-cjk
+          sudo rm -rf /var/lib/apt/lists/*
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps (light)
+        run: |
+          python -m pip install -U pip
+          # JMA スクリプトに必要な最小セットのみ
+          pip install requests pdf2image pillow
+          # プロジェクトの共通ユーティリティを使うなら、ローカルを editable で
+          pip install -e .
+
+      - name: Run JMA script
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python scripts/weathercaster_jma.py
