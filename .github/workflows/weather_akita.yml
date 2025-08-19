@@ -1,3 +1,5 @@
+#.github/workflows/weather_akita.yml
+
 name: Akita Weather Panel
 
 on:
