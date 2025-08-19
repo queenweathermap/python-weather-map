@@ -1,4 +1,4 @@
-name: Akita Weather Panel – Build & Deploy
+name: Akita Weather Panel
 
 on:
   push:
