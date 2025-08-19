@@ -68,7 +68,7 @@ def get_panel_def_japan(var_dict):
 
 def get_panel_def_akita(var_dict):
     """
-    秋田局地用パネル定義
+    秋田局地用パネル定義（panel_datasets で用意した個別キーを束ねて渡す）
     """
     from module.plot.plot_emagram import plot_emagram
     from module.plot.plot_850hpa_temp_wind_700hpa_w import plot_850hpa_temp_wind_700hpa_w
@@ -77,16 +77,79 @@ def get_panel_def_akita(var_dict):
     from module.plot.plot_975hpa_temp_wind_dindex import plot_975hpa_temp_wind_dindex
     from module.plot.plot_surface_pressure_wind_precip import plot_surface_pressure_and_wind_msm
 
-    return [
-        (plot_emagram, var_dict.get("emagram"), "エマグラム"),
-        (plot_850hpa_temp_wind_700hpa_w, var_dict.get("ds_850"), "850hPa気温・風・700hPa鉛直流"),
-        (plot_850hpa_thetae_stream, var_dict.get("ds_850_thetae"), "850hPa相当温位・流線"),
-        (plot_925hpa_temp_wind_dindex, var_dict.get("ds_925"), "925hPa気温・風・湿数"),
-        (plot_975hpa_temp_wind_dindex, var_dict.get("ds_975"), "975hPa気温・風・湿数"),
-        (plot_surface_pressure_and_wind_msm, var_dict.get("ds_surface"), "地上"),
-        (None, None, ""),  # 7段目空欄
-        (None, None, ""),  # 8段目空欄
-    ]
+    rows = []
+
+    # 1段目：エマグラム（あれば）
+    if var_dict.get("emagram") is not None:
+        rows.append((plot_emagram, {"emagram": var_dict.get("emagram")}, "エマグラム"))
+    else:
+        rows.append((None, None, ""))  # 無ければ空欄
+
+    # 2段目：850hPa 気温・風 + 700hPa 鉛直流
+    rows.append((
+        plot_850hpa_temp_wind_700hpa_w,
+        {
+            "t_850": var_dict.get("t_850"),
+            "u_850": var_dict.get("u_850"),
+            "v_850": var_dict.get("v_850"),
+            "w_700": var_dict.get("w_700"),
+        },
+        "850hPa気温・風・700hPa鉛直流"
+    ))
+
+    # 3段目：850hPa θe 流線
+    rows.append((
+        plot_850hpa_thetae_stream,
+        {
+            "t_850": var_dict.get("t_850"),
+            "r_850": var_dict.get("r_850"),
+            "u_850": var_dict.get("u_850"),
+            "v_850": var_dict.get("v_850"),
+        },
+        "850hPa相当温位・流線"
+    ))
+
+    # 4段目：925hPa（用意できるなら）
+    rows.append((
+        plot_925hpa_temp_wind_dindex,
+        {
+            "t_925": var_dict.get("t_925"),
+            "r_925": var_dict.get("r_925"),
+            "u_925": var_dict.get("u_925"),
+            "v_925": var_dict.get("v_925"),
+        },
+        "925hPa気温・風・湿数"
+    ))
+
+    # 5段目：975hPa（用意できるなら）
+    rows.append((
+        plot_975hpa_temp_wind_dindex,
+        {
+            "t_975": var_dict.get("t_975"),
+            "r_975": var_dict.get("r_975"),
+            "u_975": var_dict.get("u_975"),
+            "v_975": var_dict.get("v_975"),
+        },
+        "975hPa気温・風・湿数"
+    ))
+
+    # 6段目：地上
+    rows.append((
+        plot_surface_pressure_and_wind_msm,
+        {
+            "prmsl": var_dict.get("prmsl"),
+            "u10":   var_dict.get("u10"),
+            "v10":   var_dict.get("v10"),
+            # "apcp":  var_dict.get("apcp"),  # 必要なら有効化
+        },
+        "地上気圧・風・降水量"
+    ))
+
+    # 7・8段目は空欄でパディング
+    rows.append((None, None, ""))
+    rows.append((None, None, ""))
+    return rows
+
 
 def get_panel_def_local(var_items, total_rows=8):
     """
