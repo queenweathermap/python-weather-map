@@ -161,30 +161,15 @@ def open_grib2_var_auto(
     type_of_level=None, stepType=None,
     rh_fallback_func=None, apcp_3hr_func=None,
 ):
-    print(f"\n[DEBUG] open_grib2_var_auto: var={varname}, level={level}, type_of_level={type_of_level}, stepType={stepType}")
-
-    # --- ファイル自動判定 ---
-    if varname in ["gh", "u", "v", "t", "r"]:
-        if level in [300, 500, 700]:
-            file_path = gsm_path
-        elif level == 850:
-            file_path = msm_pall_path
-        else:
-            file_path = msm_pall_path
-    elif varname == "w" and level == 700:
-        file_path = msm_pall_path
-    elif varname in ["u10", "v10"]:
+    # --- ファイル自動判定（等圧面は MSM L-pall を使う） ---
+    if varname in ["gh", "u", "v", "t", "r", "w"]:
+        file_path = msm_pall_path                        # ← ここを一律 MSM に
+    elif varname in ["u10", "v10", "prmsl", "apcp"]:
         file_path = msm_lsurf_path
-    elif varname == "prmsl":
-        file_path = msm_lsurf_path
-    elif varname == "apcp":
-        file_path = msm_lsurf_path
-        # ...（apcp のフォールバック部は現状のままでOK）
-        # 省略
     else:
         file_path = msm_pall_path
 
-    # --- filter_by_keys を必ず初期化してから使う ---
+    # --- filter_by_keys ---
     filter_keys = {}
     if varname in ["gh", "u", "v", "t", "r", "w"]:
         filter_keys = {"typeOfLevel": "isobaricInhPa", "level": level}
@@ -193,28 +178,29 @@ def open_grib2_var_auto(
     elif varname == "prmsl":
         filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant"}
 
-    print(f"[DEBUG] open_grib2_var_auto: using file_path={file_path}, filter_by_keys={filter_keys}")
-
     try:
         ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
-        print(f"[DEBUG] ds.variables: {list(ds.variables.keys())}")
         if varname in ds:
-            print(f"[OK] {varname} shape={ds[varname].shape}")
             return ds[varname]
+
         # 相対湿度フォールバック
         if varname == "r" and rh_fallback_func is not None:
-            print(f"[WARN] r missing → fallback get_rh_fallback()")
-            try:
-                rh = rh_fallback_func(ds, level_hPa=level)
-                if rh is not None:
-                    print(f"[OK] r fallback shape={rh.shape}")
-                    return rh
-            except Exception as e:
-                print(f"[FAIL] get_rh_fallback failed: {e}")
-        print(f"[WARN] {varname} not found in dataset.")
+            rh = rh_fallback_func(ds, level_hPa=level)
+            if rh is not None:
+                return rh
+
+        # 降水量フォールバック（累積→3h差分）
+        if varname == "apcp" and apcp_3hr_func is not None and msm_lsurf_path:
+            return apcp_3hr_func(msm_lsurf_path)
+
         return None
     except Exception as e:
-        # ここで filter_keys を安全に参照できる（初期化済み）
+        # ↓ apcp はファイルオープンが失敗してもフォールバックを最後に試す
+        if varname == "apcp" and apcp_3hr_func is not None and msm_lsurf_path:
+            try:
+                return apcp_3hr_func(msm_lsurf_path)
+            except Exception:
+                pass
         print(f"[FAIL] open_grib2_var_auto: file={file_path}, filter={filter_keys}, err={e}")
         return None
 
@@ -257,25 +243,26 @@ def generate_universal_panel_and_notify(
     # --- データ抽出（必要変数だけ開く） ----------------------------------------
     print("\n[DEBUG] --- パネル用データ抽出開始 ---")
     panel_datasets = {
-        "gh_300": open_grib2_var_auto("gh", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, rh_fallback_func=rh_fallback_func),
-        "u_300":  open_grib2_var_auto("u", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "v_300":  open_grib2_var_auto("v", 300, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "gh_500": open_grib2_var_auto("gh", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "u_500":  open_grib2_var_auto("u", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "v_500":  open_grib2_var_auto("v", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "t_700":  open_grib2_var_auto("t", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "r_700":  open_grib2_var_auto("r", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, rh_fallback_func=r_fallback_func if (r_fallback_func:=rh_fallback_func) else None),  # noqa: E731
-        "t_500":  open_grib2_var_auto("t", 500, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "t_850":  open_grib2_var_auto("t", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "u_850":  open_grib2_var_auto("u", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "v_850":  open_grib2_var_auto("v", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "w_700":  open_grib2_var_auto("w", 700, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "r_850":  open_grib2_var_auto("r", 850, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, rh_fallback_func=rh_fallback_func),
-        "u10":    open_grib2_var_auto("u10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "v10":    open_grib2_var_auto("v10", 10, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
-        "apcp":   open_grib2_var_auto("apcp", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path, apcp_3hr_func=apcp_3hr_func),
-        "prmsl":  open_grib2_var_auto("prmsl", None, gsm_l_pall_path, msm_l_pall_path, msm_lsurf_path),
+        "gh_300": open_grib2_var_auto("gh", 300, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
+        "u_300":  open_grib2_var_auto("u", 300,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "v_300":  open_grib2_var_auto("v", 300,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "gh_500": open_grib2_var_auto("gh", 500, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "u_500":  open_grib2_var_auto("u", 500,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "v_500":  open_grib2_var_auto("v", 500,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "t_700":  open_grib2_var_auto("t", 700,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "r_700":  open_grib2_var_auto("r", 700,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),  # ← 変数名を素直に
+        "t_500":  open_grib2_var_auto("t", 500,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "t_850":  open_grib2_var_auto("t", 850,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "u_850":  open_grib2_var_auto("u", 850,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "v_850":  open_grib2_var_auto("v", 850,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "w_700":  open_grib2_var_auto("w", 700,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "r_850":  open_grib2_var_auto("r", 850,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
+        "u10":    open_grib2_var_auto("u10", 10, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "v10":    open_grib2_var_auto("v10", 10, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "apcp":   open_grib2_var_auto("apcp", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, apcp_3hr_func=apcp_3hr_func),
+        "prmsl":  open_grib2_var_auto("prmsl", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
     }
+
 
     print("\n[DEBUG] --- panel_datasets summary ---")
     for k, v in panel_datasets.items():
@@ -376,19 +363,18 @@ def make_universal_weather_panel(
         panel_def = panel_def + [(None, None, "")] * (nrows - len(panel_def))
 
     fig, axes = plt.subplots(
-        nrows=nrows,
-        ncols=ncols,
-        figsize=(ncols * 3, nrows * 3),
+        nrows=nrows, ncols=ncols,
+        figsize=(ncols * PANEL_FIGSIZE_UNIT, nrows * PANEL_FIGSIZE_UNIT),
         constrained_layout=True,
         subplot_kw=dict(projection=ccrs.PlateCarree()),
     )
-
+    # 1行 or 1列のときは 2次元に正規化
     if nrows == 1 and ncols == 1:
-        axes = np.array([[axes]])  # type: ignore[index]
+        axes = np.array([[axes]])
     elif nrows == 1:
-        axes = axes[np.newaxis, :]  # type: ignore[index]
+        axes = axes[np.newaxis, :]
     elif ncols == 1:
-        axes = axes[:, np.newaxis]  # type: ignore[index]
+        axes = axes[:, np.newaxis]
 
     # 描画
     for row, (plot_func, ds, title) in enumerate(panel_def):
