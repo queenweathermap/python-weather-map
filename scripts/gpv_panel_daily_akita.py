@@ -95,17 +95,36 @@ def main():
         if not (l_pall_path and lsurf_path):
             raise FileNotFoundError("必要ファイル不足（L-pall / Lsurf）")
 
-        # 4) データセット（プロッターがパス参照でも、定義生成で使うので開く）
-        ds_emagram   = open_isobaric_dataset(l_pall_path)
-        ds_850       = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae= open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_925       = open_isobaric_dataset(l_pall_path, hPa=925)
-        ds_975       = open_isobaric_dataset(l_pall_path, hPa=975)
-        ds_surface   = open_surface_dataset(lsurf_path)
+
+        # 4) データセット抽出
+        ds_emagram    = open_isobaric_dataset(l_pall_path)
+        ds_850        = open_isobaric_dataset(l_pall_path, hPa=850)
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)
+        ds_925        = open_isobaric_dataset(l_pall_path, hPa=925)
+        ds_975        = open_isobaric_dataset(l_pall_path, hPa=975)
+        ds_surface    = open_surface_dataset(lsurf_path)
 
         # 5) パネル定義
-        panel_def = get_panel_def_akita(ds_emagram, ds_850, ds_850_thetae, ds_925, ds_975, ds_surface)
-        extent    = REGION_EXTENTS["akita"]
+        # --- 秋田のパネル定義（互換ラッパー） ---
+        datasets = {
+            "ds_emagram": ds_emagram,
+            "ds_850": ds_850,
+            "ds_850_thetae": ds_850_thetae,
+            "ds_925": ds_925,
+            "ds_975": ds_975,
+            "ds_surface": ds_surface,
+        }
+        try:
+            # まずは「辞書1個をpositionalで渡す」想定
+            panel_def = get_panel_def_akita(datasets)
+        except TypeError:
+            # 実装によっては引数なしで内部取得する版もある
+            try:
+                panel_def = get_panel_def_akita()
+            except TypeError as e:
+                raise TypeError("get_panel_def_akita の呼び出しに失敗（dict/引数なしの両方NG）") from e
+        
+        extent = REGION_EXTENTS["akita"]
 
         # 6) パネル生成（Drive無効・ファイルパス渡し）
         panel_imgs, _, _ = generate_universal_panel_and_notify(
