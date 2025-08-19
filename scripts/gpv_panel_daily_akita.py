@@ -166,38 +166,53 @@ def main():
         ret = generate_universal_panel_and_notify(**kwargs)
         panel_imgs = ret[0] if isinstance(ret, tuple) else ret
 
-        # 6) ZIP → 送付（既存のまま）
-        zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
-        filename  = f"akita_panel_{ymd}_UTC{hh}.zip"
-        subject   = f"秋田局地パネル {ymd} UTC{hh}"
-        body      = "秋田局地（MSM）パネル出力一式です。"
 
-        os.environ["WX_ATTACH_COUNT"] = "1"
+        # 6) 画像をそのままメール添付（ZIPなし）
+        from pathlib import Path
+        
+        # OUTPUT_DIR に出力された画像を拾う（拡張子は必要に応じて追加）
+        img_paths = sorted(
+            [p for p in Path(OUTPUT_DIR).glob("*") if p.suffix.lower() in {".png", ".jpg", ".jpeg"}]
+        )
+        
+        attachments = []
+        for p in img_paths:
+            with open(p, "rb") as f:
+                attachments.append((p.name, f.read(), "image/jpeg" if p.suffix.lower() != ".png" else "image/png"))
+        
+        subject = f"秋田局地パネル {ymd} UTC{hh}"
+        body    = f"秋田局地（MSM）パネル出力（{len(attachments)}枚、保存なし運用）。"
+        
+        # Slackの件数表示用
+        os.environ["WX_ATTACH_COUNT"] = str(len(attachments))
         os.environ["WX_ERROR_COUNT"]  = "0"
-
-        zip_path = f"/tmp/{filename}"
-        try:
-            with open(zip_path, "wb") as f:
-                f.write(zip_bytes)
-        except Exception:
-            zip_path = None
-
+        
         if mail_to:
             msg_id = send_mail(
                 to_addrs=mail_to,
                 subject=subject,
                 body=body,
-                attachment_blobs=[(filename, zip_bytes, "application/zip")],
+                attachment_blobs=attachments,   # ← 画像をそのまま添付
             )
             print(f"[OK] Mail sent. Message-ID: {msg_id}")
             notify_slack(subject=subject, recipients=[mail_to], success=True,
-                         files=[filename], upload_paths=[zip_path] if zip_path else None)
-
+                         files=[a[0] for a in attachments], upload_paths=None)
+        
         elif bucket:
-            gcs_uri = upload_to_gcs(bucket, f"akita/{filename}", zip_bytes)
-            print(f"[OK] Uploaded to {gcs_uri}")
+            # GCS 保存に切り替える場合は、画像を個別にアップロード（任意）
+            from google.cloud import storage
+            client = storage.Client()
+            for p in img_paths:
+                client.bucket(bucket).blob(f"akita/{p.name}").upload_from_filename(str(p))
+            print(f"[OK] Uploaded {len(img_paths)} images to gs://{bucket}/akita/")
             notify_slack(subject=subject, recipients=["GCS"], success=True,
-                         files=[filename], upload_paths=[zip_path] if zip_path else None)
+                         files=[p.name for p in img_paths], upload_paths=None)
+        
+        else:
+            print(f"[OK] Saved locally in container: {OUTPUT_DIR}")
+            notify_slack(subject=subject, recipients=["local"], success=True,
+                         files=[p.name for p in img_paths], upload_paths=None)
+    
 
         else:
             fallback = f"/tmp/{filename}"
