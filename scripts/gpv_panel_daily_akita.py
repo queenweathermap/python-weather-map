@@ -2,9 +2,10 @@
 # =============================================================================
 # scripts/gpv_panel_daily_akita.py
 # -----------------------------------------------------------------------------
-# 秋田局地 MSM パネル（エマグラム含む）自動生成 → ZIP化 → 送付
+# 秋田局地 MSM パネル（エマグラム含む）自動生成 → 送付
 # 優先: GCS へ保存（Cloud Run 想定）。MAIL_TO があればメール送信。
 # すべての書き込みは /tmp 配下（Cloud Run の書き込み可能領域）を使用。
+# 添付形式は MAIL_ATTACH_IMAGES=1 で「画像複数」、未設定なら ZIP。
 # =============================================================================
 
 import os
@@ -68,7 +69,7 @@ def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
 
 
 def main():
-    bucket  = os.environ.get("GCS_BUCKET", "").strip()
+    bucket = os.environ.get("GCS_BUCKET", "").strip()
     mail_to = os.environ.get("MAIL_TO", "").strip()
     attach_images = os.environ.get("MAIL_ATTACH_IMAGES", "0") == "1"
 
@@ -95,17 +96,15 @@ def main():
         if not (l_pall_path and lsurf_path):
             raise FileNotFoundError("必要ファイル不足（L-pall / Lsurf）")
 
-
         # 4) データセット抽出
         ds_emagram    = open_isobaric_dataset(l_pall_path)
         ds_850        = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe計算に差替え可
         ds_925        = open_isobaric_dataset(l_pall_path, hPa=925)
         ds_975        = open_isobaric_dataset(l_pall_path, hPa=975)
         ds_surface    = open_surface_dataset(lsurf_path)
 
-        # 5) パネル定義
-        # --- 秋田のパネル定義（互換ラッパー） ---
+        # 5) パネル定義（互換ラッパー）
         datasets = {
             "ds_emagram": ds_emagram,
             "ds_850": ds_850,
@@ -115,19 +114,17 @@ def main():
             "ds_surface": ds_surface,
         }
         try:
-            # まずは「辞書1個をpositionalで渡す」想定
-            panel_def = get_panel_def_akita(datasets)
+            panel_def = get_panel_def_akita(datasets)  # dict 1個を渡す版
         except TypeError:
-            # 実装によっては引数なしで内部取得する版もある
             try:
-                panel_def = get_panel_def_akita()
+                panel_def = get_panel_def_akita()       # 引数なし版
             except TypeError as e:
                 raise TypeError("get_panel_def_akita の呼び出しに失敗（dict/引数なしの両方NG）") from e
-        
+
         extent = REGION_EXTENTS["akita"]
 
         # 6) パネル生成（Drive無効・ファイルパス渡し）
-        panel_imgs, _, _ = generate_universal_panel_and_notify(
+        result = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
             output_dir=OUTPUT_DIR,
@@ -136,14 +133,17 @@ def main():
             npages=4,
             city_name="akita",
             extent=extent,
+            # 画像生成ロジックがファイルパスを読む実装のためパスを渡す
             msm_l_pall_path=l_pall_path,
             msm_lsurf_path=lsurf_path,
         )
+        # 戻り型の吸収（list / tuple(panel_imgs, _, _) どちらでもOKに）
+        panel_imgs = result[0] if isinstance(result, tuple) else result
 
         # 7) 送付準備（件名・本文）
         subject = f"[Python天気図] 秋田局地パネル {ymd} UTC{hh}"
         body    = "秋田局地（MSM）パネル出力一式です。"
-        os.environ["WX_ERROR_COUNT"]  = "0"
+        os.environ["WX_ERROR_COUNT"] = "0"
 
         # 添付：画像 or ZIP
         if attach_images:
@@ -155,18 +155,33 @@ def main():
             os.environ["WX_ATTACH_COUNT"] = str(len(attachments))
 
             if mail_to:
-                msg_id = send_mail(mail_to, subject, body, attachments)
+                msg_id = send_mail(
+                    to_addrs=mail_to,
+                    subject=subject,
+                    body=body,
+                    attachment_blobs=attachments,
+                )
                 print(f"[OK] Mail sent. Message-ID: {msg_id}")
-                notify_slack(subject=subject, recipients=[mail_to], success=True,
-                             files=[a[0] for a in attachments], upload_paths=None)
+                notify_slack(
+                    subject=subject,
+                    recipients=[mail_to],
+                    success=True,
+                    files=[a[0] for a in attachments],
+                    upload_paths=None,
+                )
             elif bucket:
-                # 画像はまとめてZIPしてGCSへ（メールは送らない）
+                # 画像をまとめてZIPしてGCSへ（メールは送らない）
                 zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
                 gcs_uri = upload_to_gcs(bucket, f"akita/akita_panel_{ymd}_UTC{hh}.zip", zip_bytes)
                 print(f"[OK] Uploaded to {gcs_uri}")
                 os.environ["WX_ATTACH_COUNT"] = "1"
-                notify_slack(subject=subject, recipients=["GCS"], success=True,
-                             files=[f"akita_panel_{ymd}_UTC{hh}.zip"], upload_paths=None)
+                notify_slack(
+                    subject=subject,
+                    recipients=["GCS"],
+                    success=True,
+                    files=[f"akita_panel_{ymd}_UTC{hh}.zip"],
+                    upload_paths=None,
+                )
             else:
                 print("[OK] No MAIL_TO/GCS_BUCKET. Skipped delivery.")
         else:
@@ -176,22 +191,41 @@ def main():
             os.environ["WX_ATTACH_COUNT"] = "1"
 
             if mail_to:
-                msg_id = send_mail(mail_to, subject, body,
-                                   [(zip_name, zip_bytes, "application/zip")])
+                msg_id = send_mail(
+                    to_addrs=mail_to,
+                    subject=subject,
+                    body=body,
+                    attachment_blobs=[(zip_name, zip_bytes, "application/zip")],
+                )
                 print(f"[OK] Mail sent. Message-ID: {msg_id}")
-                notify_slack(subject=subject, recipients=[mail_to], success=True,
-                             files=[zip_name], upload_paths=None)
+                notify_slack(
+                    subject=subject,
+                    recipients=[mail_to],
+                    success=True,
+                    files=[zip_name],
+                    upload_paths=None,
+                )
             elif bucket:
                 gcs_uri = upload_to_gcs(bucket, f"akita/{zip_name}", zip_bytes)
                 print(f"[OK] Uploaded to {gcs_uri}")
-                notify_slack(subject=subject, recipients=["GCS"], success=True,
-                             files=[zip_name], upload_paths=None)
+                notify_slack(
+                    subject=subject,
+                    recipients=["GCS"],
+                    success=True,
+                    files=[zip_name],
+                    upload_paths=None,
+                )
             else:
                 with open(f"/tmp/{zip_name}", "wb") as f:
                     f.write(zip_bytes)
                 print(f"[OK] Saved locally: /tmp/{zip_name}")
-                notify_slack(subject=subject, recipients=["local"], success=True,
-                             files=[zip_name], upload_paths=[f"/tmp/{zip_name}"])
+                notify_slack(
+                    subject=subject,
+                    recipients=["local"],
+                    success=True,
+                    files=[zip_name],
+                    upload_paths=[f"/tmp/{zip_name}"],
+                )
 
     except Exception as e:
         os.environ["WX_ERROR_COUNT"] = "1"
