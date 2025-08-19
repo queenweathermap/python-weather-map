@@ -299,7 +299,7 @@ def send_mail(
                     debug=debug,
                 )
                 print(f"[OK] メール送信成功（port={port}）: Message-ID={mid}")
-                _notify_slack(subject=subject, recipients=recipients, success=True, files=src_files or [blobs[0][0]])
+                notify_slack(subject=subject, recipients=recipients, success=True, files=src_files or [blobs[0][0]])
                 return mid
             except smtplib.SMTPResponseException as e:
                 err = f"SMTP {e.smtp_code} {e.smtp_error}"
@@ -309,7 +309,7 @@ def send_mail(
                 err = f"{type(e).__name__}: {e}"
                 print(f"[ERR] SMTP送信失敗（port={port}）: {err}")
                 last_err = err
-        _notify_slack(subject=subject, recipients=recipients, success=False, files=src_files, error=str(last_err) if last_err else None)
+        notify_slack(subject=subject, recipients=recipients, success=False, files=src_files, error=str(last_err) if last_err else None)
         raise RuntimeError(f"メール送信に失敗しました（{attempt}回試行）: {last_err}")
     finally:
         if temp_zip_path and os.path.exists(temp_zip_path):
