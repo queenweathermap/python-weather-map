@@ -52,6 +52,7 @@ jobs:
           image: ${{ env.IMAGE }}
           region: ${{ env.REGION }}
           flags: >-
+            --args="scripts/gpv_panel_daily_akita.py"
             --memory=16Gi
             --cpu=4
             --max-retries=1
@@ -65,10 +66,12 @@ jobs:
           image: ${{ env.IMAGE }}
           region: ${{ env.REGION }}
           flags: >-
+            --args="scripts/weathercaster_jma.py"
             --memory=16Gi
             --cpu=4
             --max-retries=1
             --task-timeout=3600
+
 
       # （任意）デプロイ後スモーク実行：成功/失敗をCIで検知したい場合に有効化
       # - name: Smoke run Akita job once
