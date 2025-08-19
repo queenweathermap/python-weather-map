@@ -140,29 +140,56 @@ def fetch_and_convert_all(today_str: str):
 
 def main():
     today = datetime.now().strftime("%Y%m%d")
-
-    # 1) DL→JPG変換（メモリ）
-    attachments, errors = fetch_and_convert_all(today)
-
-    # 件数を Slack 通知用に環境変数へ（mail_utils 側が参照）
-    os.environ["WX_ATTACH_COUNT"] = str(len(attachments))
-    os.environ["WX_ERROR_COUNT"]  = str(len(errors))
-
-    # 2) メール送信（複数JPGをそのまま添付）
     subject = f"[Weathercaster] Weathercaster 天気図 JPG {today}"
-    mode = "全ページ" if ATTACH_ALL_PAGES else "1ページ目のみ（SKAISETUは常に2ページ）"
-    body = (
-        f"気象庁Weathercasterの天気図PDFをJPGに変換して添付します（{mode}・保存なし運用）。\n"
-        + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")
-    )
 
-    msg_id = send_mail(
-        to_addrs=MAIL_TO,
-        subject=subject,
-        body=body,
-        attachment_blobs=attachments,  # [(filename, blob, mimetype), ...]
-    )
-    print(f"[OK] Mail sent. Message-ID: {msg_id} / files: {len(attachments)} / errors: {len(errors)}")
+    try:
+        # 1) DL→JPG変換（メモリのみ／保存なし）
+        attachments, errors = fetch_and_convert_all(today)
+
+        # Slack表示用の件数（mail_utils 側が参照）
+        os.environ["WX_ATTACH_COUNT"] = str(len(attachments))
+        os.environ["WX_ERROR_COUNT"]  = str(len(errors))
+
+        # 2) メール送信（複数JPGをそのまま添付）
+        mode = "全ページ" if ATTACH_ALL_PAGES else "1ページ目のみ（SKAISETUは常に2ページ）"
+        body = (
+            f"気象庁Weathercasterの天気図PDFをJPGに変換して添付します（{mode}・保存なし運用）。\n"
+            + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")
+        )
+
+        msg_id = send_mail(
+            to_addrs=MAIL_TO,
+            subject=subject,
+            body=body,
+            attachment_blobs=attachments,  # [(filename, blob, mimetype), ...]
+        )
+        print(f"[OK] Mail sent. Message-ID: {msg_id} / files: {len(attachments)} / errors: {len(errors)}")
+
+        # 3) Slack通知（mail_utils に集約）
+        notify_slack(
+            subject=subject,
+            recipients=[MAIL_TO] if MAIL_TO else [],
+            success=True,
+            files=[name for (name, _blob, _mime) in attachments],
+            upload_paths=None  # 将来のファイル添付対応用（保存しない方針のため現状は None）
+        )
+
+    except Exception as e:
+        # 失敗時のSlack通知（mail_utils に集約）
+        try:
+            # 失敗件数を上書き（最低1件として通知）
+            os.environ["WX_ERROR_COUNT"] = str(max(1, int(os.environ.get("WX_ERROR_COUNT", "0"))))
+            notify_slack(
+                subject=f"{subject}（失敗）",
+                recipients=[MAIL_TO] if MAIL_TO else [],
+                success=False,
+                error=str(e),
+                upload_paths=None
+            )
+        finally:
+            print(f"[ERROR] {e}")
+            raise
+
 
 
 if __name__ == "__main__":
