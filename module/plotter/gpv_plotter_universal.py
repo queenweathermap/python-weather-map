@@ -211,14 +211,14 @@ def generate_universal_panel_and_notify(
         "prmsl":  open_grib2_var_auto("prmsl", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
 
         # 必要に応じて 925/975 を有効化
-        # "t_925": open_grib2_var_auto("t", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        # "u_925": open_grib2_var_auto("u", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        # "v_925": open_grib2_var_auto("v", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        # "r_925": open_grib2_var_auto("r", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
-        # "t_975": open_grib2_var_auto("t", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        # "u_975": open_grib2_var_auto("u", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        # "v_975": open_grib2_var_auto("v", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        # "r_975": open_grib2_var_auto("r", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
+        "t_925": open_grib2_var_auto("t", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "u_925": open_grib2_var_auto("u", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "v_925": open_grib2_var_auto("v", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "r_925": open_grib2_var_auto("r", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
+        "t_975": open_grib2_var_auto("t", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "u_975": open_grib2_var_auto("u", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "v_975": open_grib2_var_auto("v", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        "r_975": open_grib2_var_auto("r", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
     }
 
     print("\n[DEBUG] --- panel_datasets summary ---")
