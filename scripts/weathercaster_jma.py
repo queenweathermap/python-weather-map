@@ -16,7 +16,7 @@ import io
 import requests
 
 from pdf2image import convert_from_bytes
-from module.utils.mail_utils import send_mail
+from module.utils.mail_utils import send_mail, notify_slack
 
 # ---- 設定 -------------------------------------------------------
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
