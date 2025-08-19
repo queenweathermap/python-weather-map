@@ -4,8 +4,7 @@ name: Run JMA Weathercaster
 
 on:
   schedule:
-    # 例：毎日 13:30 JST = 04:30 UTC
-    - cron: "30 4 * * *"
+    - cron: "30 4 * * *"   # 13:30 JST
   workflow_dispatch: {}
 
 concurrency:
@@ -18,7 +17,7 @@ jobs:
     env:
       TZ: Asia/Tokyo
       PYTHONUNBUFFERED: "1"
-      PYTHONPATH: ${{ github.workspace }}   # ← これを追加
+      PYTHONPATH: ${{ github.workspace }}   # ← repo直下の module を解決
       FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
       TO_EMAIL:   ${{ secrets.TO_EMAIL }}
       SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
@@ -45,7 +44,7 @@ jobs:
       - name: Install Python deps (light)
         run: |
           python -m pip install -U pip
-          pip install requests pdf2image pillow
+          pip install requests pdf2image pillow python-dotenv   # ← 追加
 
       - name: Run JMA script
         run: python scripts/weathercaster_jma.py
