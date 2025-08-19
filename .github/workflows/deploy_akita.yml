@@ -10,7 +10,6 @@ on:
       - "Dockerfile"
       - ".github/workflows/deploy_akita.yml"
   workflow_dispatch: {}
-  # （任意）定期デプロイが要る場合はコメントアウトを外す
   # schedule:
   #   - cron: "0 3 * * *"  # 12:00 JST = 03:00 UTC
 
@@ -27,12 +26,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --- GCP 認証 ---
+      # GCP auth
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      # --- Build & Push（Artifact Registry）---
+      # Build & Push to Artifact Registry
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -45,9 +44,7 @@ jobs:
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
 
-      # --- Cloud Run Job（Akita）を最新イメージに更新 ---
-      # ここでは“イメージ差し替え”とリソース設定のみ。コマンド／引数／環境変数は
-      # Console 側（ジョブ設定）に保持しておきます。
+      # Update Cloud Run Job image + resources + env vars
       - name: Deploy Akita Job
         uses: google-github-actions/deploy-cloudrun@v2
         with:
@@ -59,3 +56,15 @@ jobs:
             --memory=16Gi
             --task-timeout=3600
             --max-retries=1
+          env_vars: |
+            MAIL_TO=${{ secrets.TO_EMAIL }}
+            GCS_BUCKET=akita-weather-panels
+            PYTHONPATH=/app
+            MPLCONFIGDIR=/tmp/matplotlib
+            FROM_EMAIL=${{ secrets.FROM_EMAIL }}
+            SMTP_SERVER=${{ secrets.SMTP_SERVER }}
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USERNAME=${{ secrets.SMTP_USERNAME }}
+            SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+            SLACK_BOT_TOKEN=${{ secrets.SLACK_BOT_TOKEN }}
+            SLACK_CHANNEL_ID=${{ secrets.SLACK_CHANNEL_ID }}
