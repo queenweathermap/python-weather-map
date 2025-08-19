@@ -131,72 +131,53 @@ def build_outputs(today: str) -> Tuple[List[Attachment], List[str]]:
 
 
 def main():
-    slack_ch = os.environ.get("SLACK_CHANNEL_ID", "").strip()
-    bucket = os.environ.get("GCS_BUCKET", "").strip()
-    mail_to = os.environ.get("MAIL_TO", os.environ.get("TO_EMAIL", "")).strip()  # 互換
+    # ---- 環境変数 ----
+    slack_mode = os.environ.get("SLACK_MODE", "success").strip()   # "off" / "error_only" / "success"
+    mail_to    = os.environ.get("MAIL_TO", os.environ.get("TO_EMAIL", "")).strip()
+    prefix     = os.environ.get("MAIL_SUBJECT_PREFIX", "[JMA]").strip()
 
-    today = datetime.utcnow().strftime("%Y%m%d")
-    prefix = os.environ.get("MAIL_SUBJECT_PREFIX", "[Weathercaster]").strip()
+    # 件名は従来どおり（UTC基準の yyyymmdd）
+    today   = datetime.utcnow().strftime("%Y%m%d")
     subject = f"{prefix} 天気図 JPG {today}"
 
-    gcs_uri = None
     msg_id = None
 
     try:
+        # 画像生成・JPG化（emails: [(filename, bytes, mime), ...], errors: [str, ...]）
         emails, errors = build_outputs(today)
 
-        # ZIP 作成
-        zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
-        zip_name = f"weathercaster_jma_{today}.zip"
+        # ---- メール送信（ZIPにしない：個別13ファイルをそのまま添付）----
+        body = (
+            "気象庁Weathercasterの天気図をJPG化して添付します（保存なし運用）。\n"
+            + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")
+        )
 
-        # 優先: GCS へ保存
-        if bucket:
-            gcs_uri = upload_to_gcs(bucket, f"weathercaster-jma/{today}/{zip_name}", zip_bytes)
-            print(f"[OK] Uploaded to {gcs_uri}")
-
-        # メール送信（任意）
         if mail_to:
-            if MAIL_AS_ZIP:
-                msg_id = send_mail(
-                    to_addrs=mail_to,
-                    subject=subject,
-                    body=("気象庁Weathercasterの天気図をJPG化しZIP添付します（保存なし運用）。\n"
-                          + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")),
-                    attachment_blobs=[(zip_name, zip_bytes, "application/zip")],
-                )
-            else:
-                msg_id = send_mail(
-                    to_addrs=mail_to,
-                    subject=subject,
-                    body=("気象庁Weathercasterの天気図をJPG化して添付します（保存なし運用）。\n"
-                          + ("\n".join(f"- ERROR: {e}" for e in errors) if errors else "")),
-                    attachment_blobs=emails,
-                )
+            msg_id = send_mail(
+                to_addrs=mail_to,
+                subject=subject,
+                body=body,
+                attachment_blobs=emails,     # ← 個別添付
+                slack_mode=slack_mode,       # ← 成否に応じて mail_utils 側で1回だけ通知
+            )
             print(f"[OK] Mail sent. Message-ID: {msg_id}")
 
-        # Slack 通知（任意）
-        if slack_ch:
-            try:
-                files_n = len(os.listdir(OUTPUT_DIR))
-                note = f":white_check_mark: JMA完了 {today}\nfiles: {files_n}, errors: {len(errors)}"
-                if gcs_uri: note += f"\nGCS: {gcs_uri}"
-                if msg_id:  note += f"\nMessage-ID: {msg_id}"
-                send_slack_text(channel=slack_ch, message=note)
-            except Exception:
-                pass
-
     except Exception as e:
-        if slack_ch:
-            try:
-                send_slack_text(slack_ch, f":x: JMA失敗 {today}\n{e}")
-            except Exception:
-                pass
+        # メール送信前に失敗した場合だけ、必要ならSlackに1回だけ通知（mail_utils 実装に依存）
+        try:
+            from module.utils.mail_utils import notify_slack  # ある場合のみ
+            if callable(notify_slack):
+                notify_slack(subject=f"{subject} 失敗", recipients=[mail_to] if mail_to else None,
+                             success=False, files=None, error=str(e))
+        except Exception:
+            pass
         print(f"[ERROR] {e}")
         raise
     finally:
+        # 後片付け
         try:
             shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-            shutil.rmtree(DATA_DIR, ignore_errors=True)
+            shutil.rmtree(DATA_DIR,   ignore_errors=True)
         except Exception:
             pass
 
