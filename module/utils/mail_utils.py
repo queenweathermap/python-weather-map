@@ -122,8 +122,8 @@ def _connect_and_send(
 # -----------------------------------------------------------------------------
 # Slack 同報（一元化・所望フォーマットで1件）
 # -----------------------------------------------------------------------------
-def _notify_slack(subject: str, recipients: List[str], success: bool,
-                  files: Optional[List[str]] = None, error: Optional[str] = None):
+def notify_slack(subject: str, recipients: List[str], success: bool,
+                 files: Optional[List[str]] = None, error: Optional[str] = None):
     """Slackへ1件だけ投稿。Weathercaster 側で WX_* を渡せば件数を正確表示。"""
     if os.environ.get("MAIL_SLACK_NOTIFY", "1") != "1":
         return
