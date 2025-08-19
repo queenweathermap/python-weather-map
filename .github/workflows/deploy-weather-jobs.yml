@@ -1,4 +1,4 @@
-#.github/workflows/weather_akita.yml
+#.github/workflows/deploy-weather-jobs.yml
 
 name: Akita Weather Panel
 
