@@ -2,34 +2,40 @@
 # =============================================================================
 # module/plotter/gpv_plotter_universal.py
 # -----------------------------------------------------------------------------
-# “ローカル（秋田／任意地）優先” のユニバーサル パネル生成コア。
-#   - panel="akita"（既定）: ds_850 等の辞書を用いるローカル描画
-#   - panel="synoptic": 変数名ベース（t_850 等）の全国描画
+# 全国／秋田／任意局地に共通で使える “ユニバーサル” パネル生成コア。
+# 2025-08 改訂：外部からの var_dict / panel_def を受け取り、内部抽出をスキップ可
 # =============================================================================
 
 from __future__ import annotations
 
 import os
 import datetime
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 
 import numpy as np
 import xarray as xr
+import matplotlib
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
+
+# 日本語フォントをデフォルトに（Cloud Run に fonts-noto-cjk が入っている前提）
+try:
+    matplotlib.rcParams["font.family"] = "Noto Sans CJK JP"
+except Exception:
+    pass
+matplotlib.rcParams["axes.unicode_minus"] = False  # －が豆腐になるのを防ぐ
 
 from module.panel_definitions import (
     REGION_EXTENTS,
     get_panel_def_japan,
-    get_panel_def_akita,
 )
 from module.utils.zip_utils import zip_files
-from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 
 # ---------------------------------------------------------------------
-# cfgrib open の簡易キャッシュ（synoptic でのみ使用）
-_OPEN_CACHE: Dict[Any, xr.Dataset] = {}
-def _open_cfgrib_once(path, filter_by_keys):
+# cfgrib open の簡易キャッシュ
+_OPEN_CACHE: Dict[Tuple[str, frozenset], xr.Dataset] = {}
+
+def _open_cfgrib_once(path: str, filter_by_keys: Optional[dict]) -> xr.Dataset:
     key = (path, frozenset((filter_by_keys or {}).items()))
     if key in _OPEN_CACHE:
         return _OPEN_CACHE[key]
@@ -37,7 +43,7 @@ def _open_cfgrib_once(path, filter_by_keys):
     _OPEN_CACHE[key] = ds
     return ds
 
-# --- Drive 依存を安全に無効化（存在しない場合は no-op 関数に置き換え） ---
+# --- Drive 依存は存在しなければ no-op に ---
 try:
     from module.utils.drive_utils import upload_to_drive, delete_old_files_from_drive
 except ImportError:
@@ -49,7 +55,7 @@ except ImportError:
         return None
 
 # =============================================================================
-# 相対湿度のフォールバック
+# 相対湿度フォールバック
 # =============================================================================
 def get_rh_fallback(ds: xr.Dataset, level_hPa: Optional[int] = None) -> Optional[xr.DataArray]:
     if "r" in ds.variables:
@@ -61,7 +67,7 @@ def get_rh_fallback(ds: xr.Dataset, level_hPa: Optional[int] = None) -> Optional
             from metpy.units import units
             q = ds["q"].sel(isobaricInhPa=level_hPa) if level_hPa else ds["q"]
             t = ds["t"].sel(isobaricInhPa=level_hPa) if level_hPa else ds["t"]
-            q_u = (q.values * units("dimensionless"))
+            q_u = (q.values * units.dimensionless)
             t_u = (t.values * units.kelvin)
             p_u = ((level_hPa if level_hPa is not None else ds["isobaricInhPa"].values) * units.hectopascal)
             rh = mpcalc.relative_humidity_from_specific_humidity(q_u, t_u, p_u)
@@ -77,7 +83,7 @@ def get_rh_fallback(ds: xr.Dataset, level_hPa: Optional[int] = None) -> Optional
     return None
 
 # =============================================================================
-# 降水量（3時間差分）フォールバック（synoptic 用）
+# 降水量（3時間差分）フォールバック
 # =============================================================================
 def get_apcp_3hr(file_path: str) -> xr.DataArray:
     last_exc: Optional[Exception] = None
@@ -85,12 +91,14 @@ def get_apcp_3hr(file_path: str) -> xr.DataArray:
         try:
             ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys={"stepType": step_type})
             key = next((k for k in ("apcp", "APCP", "PRECIP", "precip") if k in ds.variables), None)
+
             if key is None and "unknown" in ds.variables:
                 attrs = ds["unknown"].attrs
                 sn = attrs.get("GRIB_shortName", "").lower()
                 pn = attrs.get("GRIB_paramName", "").lower()
                 if any(x in sn or x in pn for x in ("apcp", "precip")):
                     key = "unknown"
+
             if key:
                 da = ds[key]
                 apcp = da.copy()
@@ -98,6 +106,7 @@ def get_apcp_3hr(file_path: str) -> xr.DataArray:
                 apcp.values[0] = np.nan
                 apcp.name = "apcp_3hr"
                 return apcp
+
             last_exc = Exception(f"apcp/precip 系が見つからない stepType={step_type}")
         except Exception as e:
             last_exc = e
@@ -105,7 +114,7 @@ def get_apcp_3hr(file_path: str) -> xr.DataArray:
     raise last_exc if last_exc else RuntimeError("get_apcp_3hr: 不明なエラー")
 
 # =============================================================================
-# 変数ユニバーサルオープナ（synoptic 用）
+# 変数ユニバーサルオープナ
 # =============================================================================
 def open_grib2_var_auto(
     varname, level=None,
@@ -121,7 +130,6 @@ def open_grib2_var_auto(
     else:
         file_path = msm_pall_path
 
-    # --- filter_by_keys ---
     filter_keys = {}
     if varname in ["gh", "u", "v", "t", "r", "w"]:
         filter_keys = {"typeOfLevel": "isobaricInhPa", "level": level}
@@ -155,6 +163,31 @@ def open_grib2_var_auto(
         print(f"[FAIL] open_grib2_var_auto: file={file_path}, filter={filter_keys}, err={e}")
         return None
 
+# ---------------------------------------------------------------------
+def _infer_n_steps(ds_like) -> int:
+    """step 次元が無くても 1 とみなして描画できるようにする。"""
+    if ds_like is None:
+        return 0
+    # dict: どれか一つの DataArray を代表に
+    if isinstance(ds_like, dict):
+        any_da = next((v for v in ds_like.values() if v is not None), None)
+        if any_da is None:
+            return 0
+        dims = getattr(any_da, "dims", ())
+        sizes = getattr(any_da, "sizes", {})
+        if "step" in sizes:
+            return int(sizes["step"])
+        if "time" in sizes:
+            return int(sizes["time"])
+        return 1  # 次元不明なら単一とみなす
+    # DataArray
+    sizes = getattr(ds_like, "sizes", {})
+    if "step" in sizes:
+        return int(sizes["step"])
+    if "time" in sizes:
+        return int(sizes["time"])
+    return 1
+
 # =============================================================================
 # まとめ生成（Drive は任意）
 # =============================================================================
@@ -162,23 +195,26 @@ def generate_universal_panel_and_notify(
     ymd: str,
     hh: str,
     *,
+    # 自動抽出で使うソース
     gsm_l_pall_path: Optional[str] = None,
     msm_l_pall_path: Optional[str] = None,
     msm_lsurf_path: Optional[str] = None,
+    # 事前に用意済みの変数セット／パネル定義（あればこちらを優先）
+    prebuilt_var_dict: Optional[dict] = None,
+    panel_def_override: Optional[list] = None,
+    # 出力・表示パラメータ
     output_dir: str = "./data",
     drive_folder: Optional[str] = None,
     ncols: int = 3,
     npages: int = 3,
-    city_name: str = "akita",
+    city_name: str = "japan",
     extent: Optional[list[float]] = None,
     log_callback=None,
-    rh_fallback_func: Callable = get_rh_fallback,
-    apcp_3hr_func: Callable = get_apcp_3hr,
-    panel: str = "auto",                       # "auto" | "akita" | "synoptic"
-    panel_def_func: Optional[Callable] = None, # 明示したいときは関数を渡す（引数: dict）
+    rh_fallback_func=get_rh_fallback,
+    apcp_3hr_func=get_apcp_3hr,
 ):
     """
-    ローカル（秋田／任意地）または全国のパネル生成 → Zip → （任意で）Drive アップロード。
+    全国・秋田・任意パネル生成 → Zip → （任意で）Drive アップロード。
     戻り値: (panel_imgs: list[str], zip_path: str, drive_url: str)
     """
     def log(msg: str):
@@ -191,35 +227,12 @@ def generate_universal_panel_and_notify(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- パネル種別の自動判定 -------------------------------------------------
-    if panel == "auto":
-        panel = "synoptic" if city_name.lower() == "japan" else "akita"
-
-    # --- データ準備 -----------------------------------------------------------
-    print(f"\n[DEBUG] --- データ抽出開始 panel={panel} ---")
-
-    if panel == "akita":
-        # ローカル（秋田/任意）: ds_850 等の辞書キーで用意
-        if not msm_l_pall_path or not msm_lsurf_path:
-            raise ValueError("akita パネルには msm_l_pall_path と msm_lsurf_path が必要です。")
-
-        panel_datasets = {
-            "emagram":      open_isobaric_dataset(msm_l_pall_path),
-            "ds_850":       open_isobaric_dataset(msm_l_pall_path, hPa=850),
-            "ds_850_thetae":open_isobaric_dataset(msm_l_pall_path, hPa=850),  # θe は描画側で計算
-            "ds_925":       open_isobaric_dataset(msm_l_pall_path, hPa=925),
-            "ds_975":       open_isobaric_dataset(msm_l_pall_path, hPa=975),
-            "ds_surface":   open_surface_dataset(msm_lsurf_path),
-        }
-
-        # パネル定義
-        if panel_def_func is None:
-            panel_def = get_panel_def_akita(panel_datasets)
-        else:
-            panel_def = panel_def_func(panel_datasets)
-
+    # --- 変数セットの準備 -----------------------------------------------------
+    if prebuilt_var_dict is not None:
+        panel_datasets = prebuilt_var_dict
+        print("[DEBUG] prebuilt_var_dict を使用して描画します。内部抽出はスキップ。")
     else:
-        # 全国（synoptic）：変数名ベース
+        print("\n[DEBUG] --- パネル用データ抽出開始（自動） ---")
         panel_datasets = {
             "gh_300": open_grib2_var_auto("gh", 300, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
             "u_300":  open_grib2_var_auto("u", 300,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
@@ -240,9 +253,7 @@ def generate_universal_panel_and_notify(
             "apcp":   open_grib2_var_auto("apcp", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, apcp_3hr_func=apcp_3hr_func),
             "prmsl":  open_grib2_var_auto("prmsl", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
         }
-        panel_def = get_panel_def_japan(panel_datasets) if panel_def_func is None else panel_def_func(panel_datasets)
 
-    # ログ
     print("\n[DEBUG] --- panel_datasets summary ---")
     for k, v in panel_datasets.items():
         if v is None:
@@ -250,14 +261,21 @@ def generate_universal_panel_and_notify(
         else:
             print(f"[OK] {k}: shape={getattr(v, 'shape', None)} dims={getattr(v, 'dims', None)}")
 
-    # --- 描画 -----------------------------------------------------------------
+    # --- パネル定義 -----------------------------------------------------------
+    if panel_def_override is not None:
+        panel_def = panel_def_override
+        print("[DEBUG] panel_def_override を使用します。")
+    else:
+        print("\n[DEBUG] --- パネル定義呼び出し（全国デフォルト） ---")
+        panel_def = get_panel_def_japan(panel_datasets)
+
     nrows = len(panel_def)
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
     PANEL_FIGSIZE_UNIT = 2.0
     PANEL_DPI = 200
 
-    panel_imgs: list[str] = []
+    panel_imgs: List[str] = []
     for page in range(npages):
         fig, axes = plt.subplots(
             nrows=nrows,
@@ -268,17 +286,7 @@ def generate_universal_panel_and_notify(
         )
 
         for row, (plot_func, ds, title) in enumerate(panel_def):
-            # dict でも step 数を推定
-            if isinstance(ds, dict):
-                any_da = next((v for v in ds.values() if v is not None), None)
-                n_steps = (any_da.sizes["step"]
-                           if (any_da is not None and hasattr(any_da, "sizes") and "step" in any_da.sizes)
-                           else 0)
-            else:
-                n_steps = (ds.sizes["step"]
-                           if (ds is not None and hasattr(ds, "sizes") and "step" in ds.sizes)
-                           else 0)
-
+            n_steps = _infer_n_steps(ds)
             for col in range(ncols):
                 step = page * ncols + col
                 ax = axes[row, col]
@@ -291,23 +299,30 @@ def generate_universal_panel_and_notify(
                     continue
 
                 try:
-                    # どの panel でも、各 plot_func は (ax, ds, step=) で統一
-                    plot_func(ax, ds, step=step)
+                    # plot_* 側が (ax, ds, step=) も (ax, ds.isel(step=...)) も受けられる想定
+                    if isinstance(ds, dict):
+                        plot_func(ax, ds, step=step)
+                    else:
+                        # DataArray なら可能なら step 抜き出し、それ以外はそのまま渡す
+                        if "step" in getattr(ds, "coords", {}):
+                            plot_func(ax, ds.isel(step=step))
+                        else:
+                            plot_func(ax, ds)
                     ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
                 except Exception as e:
                     print(f"[WARN] パネル描画失敗: {title} step={step} :: {e}")
                     ax.axis("off")
                     ax.set_title(f"{title} (error)", fontsize=7)
 
-        fig.suptitle(f"{city_name} 天気図パネル（{ymd} UTC{hh}） p{page+1}", fontsize=14)
+        fig.suptitle(f"{city_name} 天気図パネル（{ymd} UTC{hh}） p{page+1}", fontsize=12)
         out_name = f"panel_{city_name}_{ymd}_UTC{hh}_p{page+1}.jpg"
         out_path = os.path.join(output_dir, out_name)
         fig.savefig(out_path, dpi=PANEL_DPI)
         plt.close(fig)
-        print(f"[OK] 保存: {out_path}")
+        log(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
-    # --- Zip & Drive（任意） ---------------------------------------------------
+    # --- Zip & Drive（任意） --------------------------------------------------
     zip_name = f"panel_{city_name}_{ymd}_UTC{hh}.zip"
     zip_path = os.path.join(output_dir, zip_name)
     zip_files(panel_imgs, zip_path)
@@ -320,14 +335,14 @@ def generate_universal_panel_and_notify(
             print(f"[WARN] Drive cleanup skipped: {e}")
         try:
             drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
-            print(f"[OK] Drive URL: {drive_url}")
+            log(f"[OK] Drive URL: {drive_url}")
         except Exception as e:
             print(f"[WARN] Drive upload failed: {e}")
 
     return panel_imgs, zip_path, drive_url
 
 # =============================================================================
-# 1枚パネル（横に時刻を並べる or 単一 step を 1 枚だけ）
+# 1枚パネル（横に時刻を並べる or 単一 step）
 # =============================================================================
 def make_universal_weather_panel(
     save_dir: str,
@@ -335,7 +350,7 @@ def make_universal_weather_panel(
     times,  # 互換のため残す（未使用）
     init_time_str: str,
     *,
-    city_name: str = "akita",
+    city_name: str = "japan",
     ncols: int = 16,
     nrows: int = 6,
     extent: Optional[list[float]] = None,
@@ -363,12 +378,7 @@ def make_universal_weather_panel(
         axes = axes[:, np.newaxis]
 
     for row, (plot_func, ds, title) in enumerate(panel_def):
-        if isinstance(ds, dict):
-            arr = next((v for v in ds.values() if v is not None), None)
-            n_steps = (arr.sizes["step"] if (arr is not None and "step" in getattr(arr, "sizes", {})) else 0)
-        else:
-            n_steps = (ds.sizes["step"] if (ds is not None and "step" in getattr(ds, "sizes", {})) else 0)
-
+        n_steps = _infer_n_steps(ds)
         step_indices = [step] if step is not None else range(ncols)
         for idx, col in enumerate(step_indices):
             ax = axes[row, idx]
@@ -384,7 +394,10 @@ def make_universal_weather_panel(
                 if isinstance(ds, dict):
                     plot_func(ax, ds, step=col)
                 else:
-                    plot_func(ax, ds.isel(step=col))
+                    if "step" in getattr(ds, "coords", {}):
+                        plot_func(ax, ds.isel(step=col))
+                    else:
+                        plot_func(ax, ds)
                 ax.set_title(f"{title} (+{col*3}h)")
             except Exception as e:
                 print(f"[WARN] make_universal_weather_panel: {title} col={col} :: {e}")
@@ -396,12 +409,12 @@ def make_universal_weather_panel(
     base_dt = datetime.datetime.strptime(ymd + hh, "%Y%m%d%H")
     if step is not None:
         t = base_dt + datetime.timedelta(hours=step * 3)
-        fig.text(0.5, 0.01, t.strftime("%Y%m%d %HUTC"), ha="center", va="bottom", fontsize=11, color="gray", alpha=0.95)
+        fig.text(0.5, 0.01, t.strftime("%Y%m%d %HUTC"), ha="center", va="bottom", fontsize=10, color="gray", alpha=0.95)
     else:
         for col in range(ncols):
             t = base_dt + datetime.timedelta(hours=col * 3)
             x = (col + 0.5) / ncols
-            fig.text(x, 0.01, t.strftime("%Y%m%d %HUTC"), ha="center", va="bottom", fontsize=11, color="gray", alpha=0.95)
+            fig.text(x, 0.01, t.strftime("%Y%m%d %HUTC"), ha="center", va="bottom", fontsize=10, color="gray", alpha=0.95)
 
     out_path = os.path.join(save_dir, f"panel_{city_name}_{init_time_str}_p1.jpg")
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
@@ -410,7 +423,7 @@ def make_universal_weather_panel(
     return panel_imgs
 
 # =============================================================================
-# デバッグ用：そのファイルで参照可能な cfgrib 変数をざっと列挙
+# デバッグ：そのファイルで参照可能な cfgrib 変数をざっと列挙
 # =============================================================================
 def dump_grib_vars_auto(file_path: str) -> None:
     combos = [
