@@ -229,6 +229,7 @@ def main():
 
     except Exception as e:
         os.environ["WX_ERROR_COUNT"] = "1"
+        traceback.print_exc()      # ★ これでstderrにスタックトレースが必ず出る
         try:
             notify_slack(
                 subject=f"秋田局地パネル生成失敗 {ymd or ''} UTC{hh or ''}",
@@ -238,8 +239,8 @@ def main():
                 upload_paths=None,
             )
         finally:
-            print(f"[ERROR] {e}")
-            raise
+            print(f"[ERROR] {e}", flush=True)
+        raise
     finally:
         # 後片付け
         shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
