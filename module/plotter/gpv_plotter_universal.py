@@ -2,14 +2,16 @@
 # =============================================================================
 # module/plotter/gpv_plotter_universal.py
 # -----------------------------------------------------------------------------
-# 全国／秋田／任意局地に共通で使える “ユニバーサル” パネル生成コア。
+# “ローカル（秋田／任意地）優先” のユニバーサル パネル生成コア。
+#   - panel="akita"（既定）: ds_850 等の辞書を用いるローカル描画
+#   - panel="synoptic": 変数名ベース（t_850 等）の全国描画
 # =============================================================================
 
 from __future__ import annotations
 
 import os
 import datetime
-from typing import Optional
+from typing import Optional, Callable, Dict, Any
 
 import numpy as np
 import xarray as xr
@@ -22,10 +24,11 @@ from module.panel_definitions import (
     get_panel_def_akita,
 )
 from module.utils.zip_utils import zip_files
+from module.panel_utils import open_isobaric_dataset, open_surface_dataset
 
 # ---------------------------------------------------------------------
-# cfgrib open の簡易キャッシュ（必要なら利用）
-_OPEN_CACHE = {}
+# cfgrib open の簡易キャッシュ（synoptic でのみ使用）
+_OPEN_CACHE: Dict[Any, xr.Dataset] = {}
 def _open_cfgrib_once(path, filter_by_keys):
     key = (path, frozenset((filter_by_keys or {}).items()))
     if key in _OPEN_CACHE:
@@ -58,12 +61,14 @@ def get_rh_fallback(ds: xr.Dataset, level_hPa: Optional[int] = None) -> Optional
             from metpy.units import units
             q = ds["q"].sel(isobaricInhPa=level_hPa) if level_hPa else ds["q"]
             t = ds["t"].sel(isobaricInhPa=level_hPa) if level_hPa else ds["t"]
-            q_u = (q.values * units.dimensionless)
+            q_u = (q.values * units("dimensionless"))
             t_u = (t.values * units.kelvin)
             p_u = ((level_hPa if level_hPa is not None else ds["isobaricInhPa"].values) * units.hectopascal)
             rh = mpcalc.relative_humidity_from_specific_humidity(q_u, t_u, p_u)
-            return xr.DataArray(rh.magnitude, dims=q.dims, coords=q.coords, name="rh_calc",
-                                attrs={"long_name": "relative humidity"})
+            return xr.DataArray(
+                rh.magnitude, dims=q.dims, coords=q.coords, name="rh_calc",
+                attrs={"long_name": "relative humidity"}
+            )
         except Exception as e:
             print(f"[WARN] RH fallback計算失敗: {e}")
             return None
@@ -72,7 +77,7 @@ def get_rh_fallback(ds: xr.Dataset, level_hPa: Optional[int] = None) -> Optional
     return None
 
 # =============================================================================
-# 降水量（3時間差分）フォールバック
+# 降水量（3時間差分）フォールバック（synoptic 用）
 # =============================================================================
 def get_apcp_3hr(file_path: str) -> xr.DataArray:
     last_exc: Optional[Exception] = None
@@ -100,7 +105,7 @@ def get_apcp_3hr(file_path: str) -> xr.DataArray:
     raise last_exc if last_exc else RuntimeError("get_apcp_3hr: 不明なエラー")
 
 # =============================================================================
-# 変数ユニバーサルオープナ
+# 変数ユニバーサルオープナ（synoptic 用）
 # =============================================================================
 def open_grib2_var_auto(
     varname, level=None,
@@ -121,30 +126,14 @@ def open_grib2_var_auto(
     if varname in ["gh", "u", "v", "t", "r", "w"]:
         filter_keys = {"typeOfLevel": "isobaricInhPa", "level": level}
     elif varname == "u10":
-        filter_keys = {
-            "typeOfLevel": "heightAboveGround",
-            "level": 10,
-            "stepType": "instant",
-            "shortName": "10u",     # ★ 追加
-        }
+        filter_keys = {"typeOfLevel": "heightAboveGround", "level": 10, "stepType": "instant", "shortName": "10u"}
     elif varname == "v10":
-        filter_keys = {
-            "typeOfLevel": "heightAboveGround",
-            "level": 10,
-            "stepType": "instant",
-            "shortName": "10v",     # ★ 追加
-        }
+        filter_keys = {"typeOfLevel": "heightAboveGround", "level": 10, "stepType": "instant", "shortName": "10v"}
     elif varname == "prmsl":
-        filter_keys = {
-            "typeOfLevel": "meanSea",
-            "stepType": "instant",
-            "shortName": "prmsl",   # ★ 追加
-        }
+        filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant", "shortName": "prmsl"}
 
-    
     try:
-        # ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
-        ds = _open_cfgrib_once(file_path, filter_keys)  # ★ キャッシュ版
+        ds = _open_cfgrib_once(file_path, filter_keys)
         if varname in ds:
             return ds[varname]
 
@@ -180,14 +169,16 @@ def generate_universal_panel_and_notify(
     drive_folder: Optional[str] = None,
     ncols: int = 3,
     npages: int = 3,
-    city_name: str = "japan",
+    city_name: str = "akita",
     extent: Optional[list[float]] = None,
     log_callback=None,
-    rh_fallback_func=get_rh_fallback,
-    apcp_3hr_func=get_apcp_3hr,
+    rh_fallback_func: Callable = get_rh_fallback,
+    apcp_3hr_func: Callable = get_apcp_3hr,
+    panel: str = "auto",                       # "auto" | "akita" | "synoptic"
+    panel_def_func: Optional[Callable] = None, # 明示したいときは関数を渡す（引数: dict）
 ):
     """
-    全国・秋田・任意パネル生成 → Zip → （任意で）Drive アップロード。
+    ローカル（秋田／任意地）または全国のパネル生成 → Zip → （任意で）Drive アップロード。
     戻り値: (panel_imgs: list[str], zip_path: str, drive_url: str)
     """
     def log(msg: str):
@@ -200,46 +191,58 @@ def generate_universal_panel_and_notify(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- データ抽出 -----------------------------------------------------------
-    print("\n[DEBUG] --- パネル用データ抽出開始 ---")
-    panel_datasets = {
-        "gh_300": open_grib2_var_auto("gh", 300, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
-        "u_300":  open_grib2_var_auto("u", 300, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "v_300":  open_grib2_var_auto("v", 300, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+    # --- パネル種別の自動判定 -------------------------------------------------
+    if panel == "auto":
+        panel = "synoptic" if city_name.lower() == "japan" else "akita"
 
-        "gh_500": open_grib2_var_auto("gh", 500, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "u_500":  open_grib2_var_auto("u", 500, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "v_500":  open_grib2_var_auto("v", 500, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+    # --- データ準備 -----------------------------------------------------------
+    print(f"\n[DEBUG] --- データ抽出開始 panel={panel} ---")
 
-        "t_700":  open_grib2_var_auto("t", 700, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "r_700":  open_grib2_var_auto("r", 700, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
+    if panel == "akita":
+        # ローカル（秋田/任意）: ds_850 等の辞書キーで用意
+        if not msm_l_pall_path or not msm_lsurf_path:
+            raise ValueError("akita パネルには msm_l_pall_path と msm_lsurf_path が必要です。")
 
-        "t_500":  open_grib2_var_auto("t", 500, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        panel_datasets = {
+            "emagram":      open_isobaric_dataset(msm_l_pall_path),
+            "ds_850":       open_isobaric_dataset(msm_l_pall_path, hPa=850),
+            "ds_850_thetae":open_isobaric_dataset(msm_l_pall_path, hPa=850),  # θe は描画側で計算
+            "ds_925":       open_isobaric_dataset(msm_l_pall_path, hPa=925),
+            "ds_975":       open_isobaric_dataset(msm_l_pall_path, hPa=975),
+            "ds_surface":   open_surface_dataset(msm_lsurf_path),
+        }
 
-        "t_850":  open_grib2_var_auto("t", 850, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "u_850":  open_grib2_var_auto("u", 850, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "v_850":  open_grib2_var_auto("v", 850, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        # パネル定義
+        if panel_def_func is None:
+            panel_def = get_panel_def_akita(panel_datasets)
+        else:
+            panel_def = panel_def_func(panel_datasets)
 
-        "w_700":  open_grib2_var_auto("w", 700, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+    else:
+        # 全国（synoptic）：変数名ベース
+        panel_datasets = {
+            "gh_300": open_grib2_var_auto("gh", 300, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
+            "u_300":  open_grib2_var_auto("u", 300,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "v_300":  open_grib2_var_auto("v", 300,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "gh_500": open_grib2_var_auto("gh", 500, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "u_500":  open_grib2_var_auto("u", 500,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "v_500":  open_grib2_var_auto("v", 500,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "t_700":  open_grib2_var_auto("t", 700,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "r_700":  open_grib2_var_auto("r", 700,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
+            "t_500":  open_grib2_var_auto("t", 500,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "t_850":  open_grib2_var_auto("t", 850,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "u_850":  open_grib2_var_auto("u", 850,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "v_850":  open_grib2_var_auto("v", 850,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "w_700":  open_grib2_var_auto("w", 700,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "r_850":  open_grib2_var_auto("r", 850,  msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
+            "u10":    open_grib2_var_auto("u10", 10, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "v10":    open_grib2_var_auto("v10", 10, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+            "apcp":   open_grib2_var_auto("apcp", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, apcp_3hr_func=apcp_3hr_func),
+            "prmsl":  open_grib2_var_auto("prmsl", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
+        }
+        panel_def = get_panel_def_japan(panel_datasets) if panel_def_func is None else panel_def_func(panel_datasets)
 
-        "r_850":  open_grib2_var_auto("r", 850, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
-
-        "u10":    open_grib2_var_auto("u10", 10, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "v10":    open_grib2_var_auto("v10", 10, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "apcp":   open_grib2_var_auto("apcp", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, apcp_3hr_func=apcp_3hr_func),
-        "prmsl":  open_grib2_var_auto("prmsl", None, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-
-        # 必要に応じて 925/975 を有効化
-        "t_925": open_grib2_var_auto("t", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "u_925": open_grib2_var_auto("u", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "v_925": open_grib2_var_auto("v", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "r_925": open_grib2_var_auto("r", 925, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
-        "t_975": open_grib2_var_auto("t", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "u_975": open_grib2_var_auto("u", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "v_975": open_grib2_var_auto("v", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path),
-        "r_975": open_grib2_var_auto("r", 975, msm_pall_path=msm_l_pall_path, msm_lsurf_path=msm_lsurf_path, rh_fallback_func=rh_fallback_func),
-    }
-
+    # ログ
     print("\n[DEBUG] --- panel_datasets summary ---")
     for k, v in panel_datasets.items():
         if v is None:
@@ -247,13 +250,7 @@ def generate_universal_panel_and_notify(
         else:
             print(f"[OK] {k}: shape={getattr(v, 'shape', None)} dims={getattr(v, 'dims', None)}")
 
-    # --- パネル定義（地域別に選択） -------------------------------------------
-    print("\n[DEBUG] --- パネル定義呼び出し ---")
-    if city_name.lower() == "akita":
-        panel_def = get_panel_def_akita(panel_datasets)
-    else:
-        panel_def = get_panel_def_japan(panel_datasets)
-
+    # --- 描画 -----------------------------------------------------------------
     nrows = len(panel_def)
     extent = extent or REGION_EXTENTS.get(city_name, REGION_EXTENTS["japan"])
 
@@ -294,6 +291,7 @@ def generate_universal_panel_and_notify(
                     continue
 
                 try:
+                    # どの panel でも、各 plot_func は (ax, ds, step=) で統一
                     plot_func(ax, ds, step=step)
                     ax.set_title(f"{title}\n(+{step*3}h)", fontsize=7)
                 except Exception as e:
@@ -306,7 +304,7 @@ def generate_universal_panel_and_notify(
         out_path = os.path.join(output_dir, out_name)
         fig.savefig(out_path, dpi=PANEL_DPI)
         plt.close(fig)
-        log(f"[OK] 保存: {out_path}")
+        print(f"[OK] 保存: {out_path}")
         panel_imgs.append(out_path)
 
     # --- Zip & Drive（任意） ---------------------------------------------------
@@ -322,7 +320,7 @@ def generate_universal_panel_and_notify(
             print(f"[WARN] Drive cleanup skipped: {e}")
         try:
             drive_url = upload_to_drive(zip_path, folder_id=drive_folder)
-            log(f"[OK] Drive URL: {drive_url}")
+            print(f"[OK] Drive URL: {drive_url}")
         except Exception as e:
             print(f"[WARN] Drive upload failed: {e}")
 
@@ -337,7 +335,7 @@ def make_universal_weather_panel(
     times,  # 互換のため残す（未使用）
     init_time_str: str,
     *,
-    city_name: str = "japan",
+    city_name: str = "akita",
     ncols: int = 16,
     nrows: int = 6,
     extent: Optional[list[float]] = None,
@@ -350,7 +348,7 @@ def make_universal_weather_panel(
     if len(panel_def) < nrows:
         panel_def = panel_def + [(None, None, "")] * (nrows - len(panel_def))
 
-    PANEL_FIGSIZE_UNIT = 2.0  # この関数内でも使う
+    PANEL_FIGSIZE_UNIT = 2.0
     fig, axes = plt.subplots(
         nrows=nrows, ncols=ncols,
         figsize=(ncols * PANEL_FIGSIZE_UNIT, nrows * PANEL_FIGSIZE_UNIT),
