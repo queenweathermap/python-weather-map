@@ -116,16 +116,35 @@ def open_grib2_var_auto(
     else:
         file_path = msm_pall_path
 
+    # --- filter_by_keys ---
     filter_keys = {}
     if varname in ["gh", "u", "v", "t", "r", "w"]:
         filter_keys = {"typeOfLevel": "isobaricInhPa", "level": level}
-    elif varname in ["u10", "v10"]:
-        filter_keys = {"typeOfLevel": "heightAboveGround", "level": 10, "stepType": "instant"}
+    elif varname == "u10":
+        filter_keys = {
+            "typeOfLevel": "heightAboveGround",
+            "level": 10,
+            "stepType": "instant",
+            "shortName": "10u",     # ★ 追加
+        }
+    elif varname == "v10":
+        filter_keys = {
+            "typeOfLevel": "heightAboveGround",
+            "level": 10,
+            "stepType": "instant",
+            "shortName": "10v",     # ★ 追加
+        }
     elif varname == "prmsl":
-        filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant"}
+        filter_keys = {
+            "typeOfLevel": "meanSea",
+            "stepType": "instant",
+            "shortName": "prmsl",   # ★ 追加
+        }
 
+    
     try:
-        ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
+        # ds = xr.open_dataset(file_path, engine="cfgrib", filter_by_keys=filter_keys)
+        ds = _open_cfgrib_once(file_path, filter_keys)  # ★ キャッシュ版
         if varname in ds:
             return ds[varname]
 
