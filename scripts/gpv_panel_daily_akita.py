@@ -3,7 +3,8 @@
 # scripts/gpv_panel_daily_akita.py
 # -----------------------------------------------------------------------------
 # 秋田局地 MSM パネル（エマグラム含む）自動生成 → 送付
-# 添付形式は MAIL_ATTACH_IMAGES=1 で「画像複数」、未設定なら ZIP。
+#  - Cloud Run Jobs / GitHub Actions 兼用
+#  - 画像はそのまま添付（MAIL_ATTACH_IMAGES=1）または ZIP
 # =============================================================================
 
 import os
@@ -21,7 +22,7 @@ from module.utils.zip_utils import to_zip_bytes_from_dir
 BASE_URL = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 CYCLE_HOURS = [21, 18, 15, 12, 9, 6, 3, 0]
 
-DATA_DIR = "/tmp/data"          # Cloud Run は /tmp のみ書込可
+DATA_DIR = "/tmp/data"
 OUTPUT_DIR = "/tmp/output_akita"
 
 def upload_to_gcs(bucket_name: str, blob_name: str, data: bytes) -> str:
@@ -33,7 +34,7 @@ def upload_to_gcs(bucket_name: str, blob_name: str, data: bytes) -> str:
     return f"gs://{bucket_name}/{blob_name}"
 
 def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
-    """直近で取得可能な MSM GPV(Rjp L-pall/Lsurf) を探す。"""
+    """直近で取得可能な MSM GPV (Rjp L-pall/Lsurf) を探す。"""
     now = datetime.datetime.utcnow()
     for day_delta in range(max_days + 1):
         day = now - datetime.timedelta(days=day_delta)
@@ -60,7 +61,7 @@ def find_latest_available_files_akita(base_url=BASE_URL, max_days=2):
     raise FileNotFoundError("利用可能な MSM GPV ファイルが見つかりません。")
 
 def main():
-    bucket  = os.environ.get("GCS_BUCKET", "").strip()
+    bucket = os.environ.get("GCS_BUCKET", "").strip()
     mail_to = os.environ.get("MAIL_TO", "").strip()
     attach_images = os.environ.get("MAIL_ATTACH_IMAGES", "0") == "1"
 
@@ -81,50 +82,53 @@ def main():
                     f.write(r.content)
                 print(f"[OK] DL: {info['local']}")
 
-        # 3) 必要ファイルの仕分け
+        # 3) パス仕分け
         l_pall_path = next((i["local"] for i in file_infos if "L-pall" in i["local"]), None)
         lsurf_path  = next((i["local"] for i in file_infos if "Lsurf" in i["local"]), None)
         if not (l_pall_path and lsurf_path):
             raise FileNotFoundError("必要ファイル不足（L-pall / Lsurf）")
 
-        # 4) データセット抽出（秋田パネル用）
+        # 4) データセット抽出（秋田レイアウト用）
         ds_emagram    = open_isobaric_dataset(l_pall_path)
         ds_850        = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)  # θe 計算は plot 側で
+        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)
         ds_925        = open_isobaric_dataset(l_pall_path, hPa=925)
         ds_975        = open_isobaric_dataset(l_pall_path, hPa=975)
         ds_surface    = open_surface_dataset(lsurf_path)
 
-        var_dict = {
-            "emagram": ds_emagram,
+        datasets = {
+            "ds_emagram": ds_emagram,
             "ds_850": ds_850,
             "ds_850_thetae": ds_850_thetae,
             "ds_925": ds_925,
             "ds_975": ds_975,
             "ds_surface": ds_surface,
         }
-        panel_def = get_panel_def_akita(var_dict)
+        try:
+            panel_def = get_panel_def_akita(datasets)  # dict 1個を渡す版
+        except TypeError:
+            panel_def = get_panel_def_akita()           # 引数なし版（実装差対応）
 
         extent = REGION_EXTENTS["akita"]
 
-        # 5) パネル生成（prebuilt_var_dict と panel_def_override を渡す）
+        # 5) パネル生成（★ 秋田レイアウトをそのまま使う）
         panel_imgs, _, _ = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
             output_dir=OUTPUT_DIR,
             drive_folder=None,
-            ncols=4,
-            npages=4,
+            ncols=4, npages=4,
             city_name="akita",
             extent=extent,
-            prebuilt_var_dict=var_dict,
-            panel_def_override=panel_def,
+            msm_l_pall_path=l_pall_path,
+            msm_lsurf_path=lsurf_path,
+            panel_def_override=panel_def,   # ← これが肝
         )
 
         # 6) 送付
         subject = f"[Python天気図] 秋田局地パネル {ymd} UTC{hh}"
         body    = "秋田局地（MSM）パネル出力一式です。"
-        os.environ["WX_ERROR_COUNT"]  = "0"
+        os.environ["WX_ERROR_COUNT"] = "0"
 
         if attach_images:
             attachments = []
@@ -134,7 +138,7 @@ def main():
             os.environ["WX_ATTACH_COUNT"] = str(len(attachments))
 
             if mail_to:
-                msg_id = send_mail(to_addrs=mail_to, subject=subject, body=body, attachment_blobs=attachments)
+                msg_id = send_mail(mail_to, subject, body, attachments)
                 print(f"[OK] Mail sent. Message-ID: {msg_id}")
                 notify_slack(subject=subject, recipients=[mail_to], success=True,
                              files=[a[0] for a in attachments], upload_paths=None)
@@ -155,8 +159,7 @@ def main():
             os.environ["WX_ATTACH_COUNT"] = "1"
 
             if mail_to:
-                msg_id = send_mail(to_addrs=mail_to, subject=subject, body=body,
-                                   attachment_blobs=[(zip_name, zip_bytes, "application/zip")])
+                msg_id = send_mail(mail_to, subject, body, [(zip_name, zip_bytes, "application/zip")])
                 print(f"[OK] Mail sent. Message-ID: {msg_id}")
                 notify_slack(subject=subject, recipients=[mail_to], success=True,
                              files=[zip_name], upload_paths=None)
@@ -176,13 +179,8 @@ def main():
         os.environ["WX_ERROR_COUNT"] = "1"
         traceback.print_exc()
         try:
-            notify_slack(
-                subject=f"秋田局地パネル生成失敗 {ymd or ''} UTC{hh or ''}",
-                recipients=["system"],
-                success=False,
-                error=str(e),
-                upload_paths=None,
-            )
+            notify_slack(subject=f"秋田局地パネル生成失敗 {ymd or ''} UTC{hh or ''}",
+                         recipients=["system"], success=False, error=str(e), upload_paths=None)
         finally:
             print(f"[ERROR] {e}", flush=True)
         raise
