@@ -72,3 +72,12 @@ jobs:
             SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
             SLACK_BOT_TOKEN=${{ secrets.SLACK_BOT_TOKEN }}
             SLACK_CHANNEL_ID=${{ secrets.SLACK_CHANNEL_ID }}
+
+      # .github/workflows/deploy_akita.yml の Deploy Akita Job の後に追記
+      - name: Execute Akita Job now
+        run: |
+          gcloud run jobs execute akita-panels \
+            --region "${{ env.REGION }}" \
+            --wait \
+            --format json
+
