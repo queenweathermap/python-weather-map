@@ -3,29 +3,6 @@
 # module/utils/mail_utils.py
 # -----------------------------------------------------------------------------
 # SMTPメール送信（複数添付/ZIP自動化/再試行/Slack同報・一回だけ）
-#
-# 既定の環境変数（統一名）
-#   FROM_EMAIL        : 差出人（表示用 From）
-#   TO_EMAIL          : 既定の宛先（引数で上書き可）
-#   SMTP_SERVER       : 例 smtp.gmail.com
-#   SMTP_PORT         : 587(STARTTLS) / 465(SSL)
-#   SMTP_USERNAME     : 認証ユーザー（Return-Path/Envelope-From に使用）
-#   SMTP_PASSWORD     : 認証パスワード（Gmailはアプリパスワード）
-#   MAIL_SUBJECT_PREFIX : 件名の先頭につける文字列（例 "[Japan]"）
-#   MAIL_DEBUG        : "1" で smtplib のデバッグ
-#
-# オプション環境変数
-#   MAIL_ATTACH_AS_ZIP : "1" で常にZIP化して1通で送る（既定 "0"）
-#   MAX_MAIL_SIZE_MB   : 添付合計の上限MB（既定 20）。超えたらZIP化して1通
-#   MAIL_SLACK_NOTIFY  : "0" でSlack同報を抑止（既定 "1"）
-#
-# Slack（任意）
-#   SLACK_BOT_TOKEN   : Bot User OAuth Token (xoxb-...)
-#   SLACK_CHANNEL_ID  : 投稿先チャンネルID
-#
-# Weathercaster からの付加情報（任意）
-#   WX_ATTACH_COUNT   : 添付ファイル数（int文字列）
-#   WX_ERROR_COUNT    : 変換等のエラー件数（int文字列）
 # =============================================================================
 import os
 import smtplib
@@ -36,21 +13,15 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from email.headerregistry import Address
-from email.utils import formataddr, formatdate
-from email.utils import formataddr, formatdate, make_msgid  # ← make_msgid 追加
+from email.utils import formataddr, formatdate, make_msgid
 from dotenv import load_dotenv
 
 load_dotenv()
 
-
-# -----------------------------------------------------------------------------
-# 内部ユーティリティ
-# -----------------------------------------------------------------------------
+# ---------- utils ----------
 def _ensure_list(x) -> List[str]:
-    if x is None:
-        return []
-    if isinstance(x, (list, tuple)):
-        return list(x)
+    if x is None: return []
+    if isinstance(x, (list, tuple)): return list(x)
     return [str(x)]
 
 def _bytes_to_mb(n: int) -> float:
@@ -66,29 +37,26 @@ def _build_message(
     attachments: List[Tuple[str, bytes, str]],
 ) -> MIMEMultipart:
     msg = MIMEMultipart()
-    disp = Address(display_name="", username=mail_from.split("@")[0], domain=mail_from.split("@")[1])
-    msg["From"] = formataddr((str(disp), mail_from))
+    localpart, _, domain = mail_from.partition("@")
+    msg["From"] = formataddr((str(Address(display_name="", username=localpart, domain=domain)), mail_from))
     msg["To"] = ", ".join(to_addrs)
     if cc_addrs:
         msg["Cc"] = ", ".join(cc_addrs)
     msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid()  # ★ 付与
+    msg["Message-ID"] = make_msgid()
+
     msg.attach(MIMEText(body, "html" if is_html else "plain", "utf-8"))
 
-    # 添付
     for name, blob, ctype in attachments:
         if ctype:
             maintype, _, subtype = ctype.partition("/")
-            # MIMEApplication の _subtype に渡す（Content-Type を後付けしない）
             part = MIMEApplication(blob, _subtype=(subtype or "octet-stream"), Name=name)
         else:
             part = MIMEApplication(blob, Name=name)
         part.add_header("Content-Disposition", "attachment", filename=name)
         msg.attach(part)
     return msg
-
-
 
 def _connect_and_send(
     host: str,
@@ -100,49 +68,34 @@ def _connect_and_send(
     msg: MIMEMultipart,
     debug: bool,
 ) -> str:
-    """
-    指定ポートで接続して送信。成功で Message-ID を返す。
-    465=SMTPS、587 などは STARTTLS（SMTP_STARTTLS=0 で無効化可能）。
-    """
+    """465=SMTPS、それ以外は STARTTLS（SMTP_STARTTLS=0 で無効）。"""
     use_starttls_env = os.environ.get("SMTP_STARTTLS", "1").strip().lower()
     use_starttls = (port != 465) and (use_starttls_env in ("1", "true", "on"))
 
-    if port == 465:
-        server = smtplib.SMTP_SSL(host, port, timeout=60)
-    else:
-        server = smtplib.SMTP(host, port, timeout=60)
-
+    server = smtplib.SMTP_SSL(host, port, timeout=60) if port == 465 else smtplib.SMTP(host, port, timeout=60)
     try:
         if debug:
             server.set_debuglevel(1)
-
         localname = socket.getfqdn() or "localhost"
         server.ehlo(localname)
 
         if use_starttls:
-            # サーバが STARTTLS をサポートしているか確認
             if server.has_extn("starttls"):
                 server.starttls()
                 server.ehlo(localname)
             else:
                 raise RuntimeError("SMTP server does not support STARTTLS (set SMTP_STARTTLS=0 or use port 465).")
 
-        # 認証（必要な場合）
         if user:
             server.login(user, password)
 
         server.sendmail(envelope_from, recipients, msg.as_string())
         return msg.get("Message-ID") or "(sent)"
     finally:
-        try:
-            server.quit()
-        except Exception:
-            pass
+        try: server.quit()
+        except Exception: pass
 
-
-# -----------------------------------------------------------------------------
-# Slack 同報（一元化・所望フォーマットで1件）
-# -----------------------------------------------------------------------------
+# ---------- Slack notify ----------
 def notify_slack(
     subject: str,
     recipients: List[str],
@@ -151,30 +104,22 @@ def notify_slack(
     error: Optional[str] = None,
     upload_paths: Optional[List[str]] = None,
 ):
-    """
-    Slackへ1件だけ投稿。Weathercaster 側で WX_* を渡せば件数を正確表示。
-    - upload_paths: 将来的にSlackへ実ファイルを添付したいときに使用予定。
-    """
     if os.environ.get("MAIL_SLACK_NOTIFY", "1") != "1":
         return
-
     token = os.environ.get("SLACK_BOT_TOKEN")
     channel = os.environ.get("SLACK_CHANNEL_ID")
     if not (token and channel):
         return
 
-    # 件数（環境変数優先。無ければ推定／失敗時は1）
     try:
         attach_count = int((os.environ.get("WX_ATTACH_COUNT") or "").strip())
     except Exception:
         attach_count = len(files) if files else 0
-
     try:
         error_count = int((os.environ.get("WX_ERROR_COUNT") or "").strip())
     except Exception:
         error_count = 0 if success else 1
 
-    # 通知本文
     lines = [
         "✉️ Mail sent" if success else "❌ Mail failed",
         f"Subject: {subject}",
@@ -183,7 +128,6 @@ def notify_slack(
     ]
     if (not success) and error:
         lines.append(f"```{(error or '')[:900]}```")
-
     text = "\n".join(lines)
 
     try:
@@ -191,15 +135,10 @@ def notify_slack(
         send_slack_text(channel=channel, message=text)
     except Exception as e:
         print(f"[WARN] Slackテキスト送信に失敗: {e}")
-
     if upload_paths:
-        print(f"[INFO] upload_paths={upload_paths} が指定されましたが、現時点では未対応です。")
+        print(f"[INFO] upload_paths={upload_paths} は未対応。")
 
-
-
-# -----------------------------------------------------------------------------
-# 公開関数（1通でまとめて送る）
-# -----------------------------------------------------------------------------
+# ---------- public API ----------
 def send_mail(
     to_addrs=None,
     subject: str = "",
@@ -217,13 +156,6 @@ def send_mail(
     is_html: bool = False,
     slack_mode: str = "off",  # "off" / "error_only" / "success"
 ) -> str:
-    """
-    メール送信。成功時 Message-ID を返す。
-    - 複数ファイル添付OK
-    - 合計サイズ > MAX_MAIL_SIZE_MB or MAIL_ATTACH_AS_ZIP=1 の場合はZIP化して1通
-    - slack_mode: "off" / "error_only" / "success"
-    """
-    # --- env 既定 ---
     mail_from = mail_from or os.environ.get("FROM_EMAIL", "")
     to_addrs = to_addrs or os.environ.get("TO_EMAIL", "")
     smtp_host = smtp_host or os.environ.get("SMTP_SERVER", "")
@@ -235,11 +167,9 @@ def send_mail(
     if subject_prefix and not subject.startswith(subject_prefix):
         subject = f"{subject_prefix} {subject}"
 
-    # Slack有効/モード（MAIL_SLACK_NOTIFY="0" なら常にoff）
     _slack_enabled = os.environ.get("MAIL_SLACK_NOTIFY", "1") == "1"
     _effective_slack_mode = "off" if not _slack_enabled else slack_mode
 
-    # --- 必須チェック ---
     if not mail_from:  raise RuntimeError("FROM_EMAIL 未設定")
     if not smtp_host:  raise RuntimeError("SMTP_SERVER 未設定")
     if not smtp_user:  raise RuntimeError("SMTP_USERNAME 未設定")
@@ -252,10 +182,8 @@ def send_mail(
     if not recipients:
         raise RuntimeError("宛先がありません")
 
-    # --- 添付読み込み ---
     src_files: List[str] = []
     blobs: List[Tuple[str, bytes, str]] = list(attachment_blobs or [])
-
     if attachment_paths:
         for p in attachment_paths:
             if not os.path.exists(p):
@@ -298,12 +226,10 @@ def send_mail(
     from_domain = mail_from.split("@")[-1].lower()
     user_domain = smtp_user.split("@")[-1].lower()
     if from_domain != user_domain:
-        print(f"[WARN] From({from_domain}) と SMTP_USERNAME({user_domain}) のドメインが不一致です。拒否される可能性があります。")
+        print(f"[WARN] From({from_domain}) と SMTP_USERNAME({user_domain}) のドメインが不一致です。拒否の可能性あり。")
 
     ports = [smtp_port] if smtp_port in (465, 587) else [587, 465]
     last_err = None
-
-    # Slack用にファイル名リストを準備
     _slack_files = src_files if src_files else [name for (name, _, _) in blobs]
 
     try:
@@ -311,14 +237,8 @@ def send_mail(
             try:
                 print(f"[INFO] SMTP try#{attempt}: host={smtp_host} port={port} user={smtp_user}")
                 mid = _connect_and_send(
-                    host=smtp_host,
-                    port=port,
-                    user=smtp_user,
-                    password=smtp_pass,
-                    envelope_from=envelope_from,
-                    recipients=recipients,
-                    msg=msg,
-                    debug=debug,
+                    host=smtp_host, port=port, user=smtp_user, password=smtp_pass,
+                    envelope_from=envelope_from, recipients=recipients, msg=msg, debug=debug,
                 )
                 print(f"[OK] メール送信成功（port={port}）: Message-ID={mid}")
                 if _effective_slack_mode == "success":
@@ -326,20 +246,13 @@ def send_mail(
                 return mid
             except smtplib.SMTPResponseException as e:
                 err = f"SMTP {e.smtp_code} {e.smtp_error}"
-                print(f"[ERR] {err}")
-                last_err = err
+                print(f"[ERR] {err}"); last_err = err
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
-                print(f"[ERR] SMTP送信失敗（port={port}）: {err}")
-                last_err = err
+                print(f"[ERR] SMTP送信失敗（port={port}）: {err}"); last_err = err
+
         if _effective_slack_mode in ("success", "error_only"):
-            notify_slack(
-                subject=subject,
-                recipients=recipients,
-                success=False,
-                files=_slack_files,
-                error=str(last_err) if last_err else None,
-            )
+            notify_slack(subject=subject, recipients=recipients, success=False, files=_slack_files, error=str(last_err) if last_err else None)
         raise RuntimeError(f"メール送信に失敗しました（{attempt}回試行）: {last_err}")
     finally:
         if temp_zip_path and os.path.exists(temp_zip_path):
