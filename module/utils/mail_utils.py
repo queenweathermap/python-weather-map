@@ -37,6 +37,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from email.headerregistry import Address
 from email.utils import formataddr, formatdate
+from email.utils import formataddr, formatdate, make_msgid  # ← make_msgid 追加
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -72,15 +73,21 @@ def _build_message(
         msg["Cc"] = ", ".join(cc_addrs)
     msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid()  # ★ 付与
     msg.attach(MIMEText(body, "html" if is_html else "plain", "utf-8"))
 
+    # 添付
     for name, blob, ctype in attachments:
-        part = MIMEApplication(blob, Name=name)
-        part.add_header("Content-Disposition", "attachment", filename=name)
         if ctype:
-            part.add_header("Content-Type", ctype)
+            maintype, _, subtype = ctype.partition("/")
+            # MIMEApplication の _subtype に渡す（Content-Type を後付けしない）
+            part = MIMEApplication(blob, _subtype=(subtype or "octet-stream"), Name=name)
+        else:
+            part = MIMEApplication(blob, Name=name)
+        part.add_header("Content-Disposition", "attachment", filename=name)
         msg.attach(part)
     return msg
+
 
 
 def _connect_and_send(
@@ -93,7 +100,13 @@ def _connect_and_send(
     msg: MIMEMultipart,
     debug: bool,
 ) -> str:
-    """指定ポートで接続して送信。成功で Message-ID を返す。465=SMTPS, その他=STARTTLS。"""
+    """
+    指定ポートで接続して送信。成功で Message-ID を返す。
+    465=SMTPS、587 などは STARTTLS（SMTP_STARTTLS=0 で無効化可能）。
+    """
+    use_starttls_env = os.environ.get("SMTP_STARTTLS", "1").strip().lower()
+    use_starttls = (port != 465) and (use_starttls_env in ("1", "true", "on"))
+
     if port == 465:
         server = smtplib.SMTP_SSL(host, port, timeout=60)
     else:
@@ -102,13 +115,22 @@ def _connect_and_send(
     try:
         if debug:
             server.set_debuglevel(1)
+
         localname = socket.getfqdn() or "localhost"
         server.ehlo(localname)
-        if port != 465:
-            server.starttls()
-            server.ehlo(localname)
 
-        server.login(user, password)
+        if use_starttls:
+            # サーバが STARTTLS をサポートしているか確認
+            if server.has_extn("starttls"):
+                server.starttls()
+                server.ehlo(localname)
+            else:
+                raise RuntimeError("SMTP server does not support STARTTLS (set SMTP_STARTTLS=0 or use port 465).")
+
+        # 認証（必要な場合）
+        if user:
+            server.login(user, password)
+
         server.sendmail(envelope_from, recipients, msg.as_string())
         return msg.get("Message-ID") or "(sent)"
     finally:
@@ -116,7 +138,6 @@ def _connect_and_send(
             server.quit()
         except Exception:
             pass
-
 
 
 # -----------------------------------------------------------------------------
