@@ -70,10 +70,8 @@ def main():
 
     ymd = hh = None
     try:
-        # 1) ソース探索
         ymd, hh, file_infos = find_latest_available_files_akita()
 
-        # 2) ダウンロード
         for info in file_infos:
             if not os.path.exists(info["local"]):
                 r = requests.get(info["url"], timeout=60)
@@ -82,40 +80,14 @@ def main():
                     f.write(r.content)
                 print(f"[OK] DL: {info['local']}")
 
-        # 3) パス仕分け
         l_pall_path = next((i["local"] for i in file_infos if "L-pall" in i["local"]), None)
         lsurf_path  = next((i["local"] for i in file_infos if "Lsurf" in i["local"]), None)
         if not (l_pall_path and lsurf_path):
             raise FileNotFoundError("必要ファイル不足（L-pall / Lsurf）")
 
-        # 4) データセット抽出（秋田レイアウト用）
-        ds_emagram    = open_isobaric_dataset(l_pall_path)
-        ds_850        = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_850_thetae = open_isobaric_dataset(l_pall_path, hPa=850)
-        ds_925        = open_isobaric_dataset(l_pall_path, hPa=925)
-        ds_975        = open_isobaric_dataset(l_pall_path, hPa=975)
-        ds_surface    = open_surface_dataset(lsurf_path)
-
-        datasets = {
-            "ds_emagram": ds_emagram,
-            "ds_850": ds_850,
-            "ds_850_thetae": ds_850_thetae,
-            "ds_925": ds_925,
-            "ds_975": ds_975,
-            "ds_surface": ds_surface,
-        }
-        # 互換のため取得はしておく（generate_* 側で city_name="akita" を見て使い分け）
-        try:
-            _ = get_panel_def_akita(datasets)
-        except TypeError:
-            try:
-                _ = get_panel_def_akita()
-            except TypeError:
-                pass
-
+        # （データセット作成は省略可：generate_* 内で panel_datasets を作る）
         extent = REGION_EXTENTS["akita"]
 
-        # 5) パネル生成（秋田レイアウト）
         panel_imgs, _, _ = generate_universal_panel_and_notify(
             ymd=ymd,
             hh=hh,
@@ -128,13 +100,11 @@ def main():
             msm_lsurf_path=lsurf_path,
         )
 
-        # 6) 送付
         subject = f"[Python天気図] 秋田局地パネル {ymd} UTC{hh}"
         body    = "秋田局地（MSM）パネル出力一式です。"
         os.environ["WX_ERROR_COUNT"] = "0"
 
         if attach_images:
-            # 画像添付
             attachments = []
             for p in sorted(panel_imgs):
                 with open(p, "rb") as f:
@@ -146,34 +116,22 @@ def main():
                     to_addrs=mail_to,
                     subject=subject,
                     body=body,
-                    attachment_blobs=attachments,   # ★ 位置引数ではなくキーワード引数
+                    attachment_blobs=attachments,
                 )
                 print(f"[OK] Mail sent. Message-ID: {msg_id}")
-                notify_slack(
-                    subject=subject,
-                    recipients=[mail_to],
-                    success=True,
-                    files=[a[0] for a in attachments],
-                    upload_paths=None,
-                )
+                notify_slack(subject=subject, recipients=[mail_to], success=True,
+                             files=[a[0] for a in attachments], upload_paths=None)
             elif bucket:
-                # GCS へ ZIP で保存（メールは送らない）
                 from module.utils.zip_utils import to_zip_bytes_from_dir
                 zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
                 gcs_uri = upload_to_gcs(bucket, f"akita/akita_panel_{ymd}_UTC{hh}.zip", zip_bytes)
                 print(f"[OK] Uploaded to {gcs_uri}")
                 os.environ["WX_ATTACH_COUNT"] = "1"
-                notify_slack(
-                    subject=subject,
-                    recipients=["GCS"],
-                    success=True,
-                    files=[f"akita_panel_{ymd}_UTC{hh}.zip"],
-                    upload_paths=None,
-                )
+                notify_slack(subject=subject, recipients=["GCS"], success=True,
+                             files=[f"akita_panel_{ymd}_UTC{hh}.zip"], upload_paths=None)
             else:
                 print("[OK] No MAIL_TO/GCS_BUCKET. Skipped delivery.")
         else:
-            # ZIP 添付
             from module.utils.zip_utils import to_zip_bytes_from_dir
             zip_bytes = to_zip_bytes_from_dir(OUTPUT_DIR)
             zip_name  = f"akita_panel_{ymd}_UTC{hh}.zip"
@@ -184,53 +142,34 @@ def main():
                     to_addrs=mail_to,
                     subject=subject,
                     body=body,
-                    attachment_blobs=[(zip_name, zip_bytes, "application/zip")],  # ★ キーワード引数
+                    attachment_blobs=[(zip_name, zip_bytes, "application/zip")],
                 )
                 print(f"[OK] Mail sent. Message-ID: {msg_id}")
-                notify_slack(
-                    subject=subject,
-                    recipients=[mail_to],
-                    success=True,
-                    files=[zip_name],
-                    upload_paths=None,
-                )
+                notify_slack(subject=subject, recipients=[mail_to], success=True,
+                             files=[zip_name], upload_paths=None)
             elif bucket:
                 gcs_uri = upload_to_gcs(bucket, f"akita/{zip_name}", zip_bytes)
                 print(f"[OK] Uploaded to {gcs_uri}")
-                notify_slack(
-                    subject=subject,
-                    recipients=["GCS"],
-                    success=True,
-                    files=[zip_name],
-                    upload_paths=None,
-                )
+                notify_slack(subject=subject, recipients=["GCS"], success=True,
+                             files=[zip_name], upload_paths=None)
             else:
                 with open(f"/tmp/{zip_name}", "wb") as f:
                     f.write(zip_bytes)
                 print(f"[OK] Saved locally: /tmp/{zip_name}")
-                notify_slack(
-                    subject=subject,
-                    recipients=["local"],
-                    success=True,
-                    files=[zip_name],
-                    upload_paths=[f"/tmp/{zip_name}"],
-                )
+                notify_slack(subject=subject, recipients=["local"], success=True,
+                             files=[zip_name], upload_paths=[f"/tmp/{zip_name}"])
 
     except Exception as e:
         os.environ["WX_ERROR_COUNT"] = "1"
         traceback.print_exc()
         try:
-            notify_slack(
-                subject=f"秋田局地パネル生成失敗 {ymd or ''} UTC{hh or ''}",
-                recipients=["system"],
-                success=False,
-                error=str(e),
-                upload_paths=None,
-            )
+            notify_slack(subject=f"秋田局地パネル生成失敗 {ymd or ''} UTC{hh or ''}",
+                         recipients=["system"], success=False, error=str(e), upload_paths=None)
         finally:
             print(f"[ERROR] {e}", flush=True)
         raise
     finally:
         shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
         shutil.rmtree(DATA_DIR,    ignore_errors=True)
+
 
