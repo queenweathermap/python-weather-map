@@ -11,6 +11,7 @@ requests
 python-dotenv
 slack_sdk
 line-bot-sdk
+google-cloud-storage
 google-api-python-client
 google-auth-httplib2
 google-auth
