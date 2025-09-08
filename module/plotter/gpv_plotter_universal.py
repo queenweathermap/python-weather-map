@@ -5,7 +5,7 @@
 # 全国／秋田／任意局地に共通で使える “ユニバーサル” パネル生成コア。
 #   - 秋田や任意地レイアウトを優先：panel_def を外部から渡せる panel_def_override を追加
 #   - 日本語フォント（Noto CJK）を既定に
-#   - 地上要素の cfgrib フィルタ厳密化（10u/10v/msl）
+#   - 地上要素の cfgrib フィルタ厳密化（10u/10v）。prmsl は shortName を固定せず別名解決で対応
 #   - apcp は累積 → 3h 差分フォールバック
 # =============================================================================
 
@@ -25,7 +25,7 @@ import cartopy.crs as ccrs
 matplotlib.rcParams["font.sans-serif"] = [
     "Noto Sans CJK JP", "Noto Sans CJK JP Regular",
     "IPAexGothic", "Hiragino Sans", "Yu Gothic", "Meiryo",
-    "DejaVu Sans"
+    "DejaVu Sans",
 ]
 matplotlib.rcParams["font.family"] = "sans-serif"
 matplotlib.rcParams["axes.unicode_minus"] = False
@@ -68,7 +68,8 @@ def get_rh_fallback(ds: xr.Dataset, level_hPa: Optional[int] = None) -> Optional
             from metpy.units import units
             q = ds["q"].sel(isobaricInhPa=level_hPa) if level_hPa is not None else ds["q"]
             t = ds["t"].sel(isobaricInhPa=level_hPa) if level_hPa is not None else ds["t"]
-            q_u = q.values * units.dimensionless
+            # NOTE: dimensionless は attribute ではなく callable の方が環境差が少ない
+            q_u = q.values * units("dimensionless")
             t_u = t.values * units.kelvin
             p_u = ((level_hPa if level_hPa is not None else ds["isobaricInhPa"].values) * units.hectopascal)
             rh = mpcalc.relative_humidity_from_specific_humidity(q_u, t_u, p_u)
@@ -139,17 +140,20 @@ def open_grib2_var_auto(
     elif varname == "v10":
         filter_keys = {"typeOfLevel": "heightAboveGround", "level": 10, "stepType": "instant", "shortName": "10v"}
     elif varname == "prmsl":
-        # JMA MSM は shortName が "msl" のことが多い
-        filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant", "shortName": "msl"}
+        # prmsl はデータにより shortName が "prmsl" または "msl"。
+        # ここでは shortName を指定せずに読み、後段の alias 解決で拾う。
+        filter_keys = {"typeOfLevel": "meanSea", "stepType": "instant"}
+    # apcp は stepType が acc/avg/instant で散らばるのでここでは縛らない（別処理でフォールバック）
 
     try:
         ds = _open_cfgrib_once(file_path, filter_keys)
+
         # 期待名がそのまま無い場合の別名解決
         alias_map = {
-            "prmsl": ["prmsl", "msl"],
+            "prmsl": ["msl", "prmsl"],
             "u10": ["u10", "10u"],
             "v10": ["v10", "10v"],
-            "apcp": ["apcp", "tp"]
+            "apcp": ["apcp", "tp"],
         }
         names = [varname] + alias_map.get(varname, [])
         for nm in names:
