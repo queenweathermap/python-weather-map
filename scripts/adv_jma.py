@@ -209,22 +209,23 @@ def build_ft_list(max_ft: int, step: int) -> List[int]:
 
 
 def load_model_groups() -> Dict[str, ModelCfg]:
-    gsm_max  = env_int("GSM_MAX_FT", 27)   # GSMは27時間まで
-    gsm_step = env_int("GSM_FT_STEP", 3)
+    gsm_max  = env_int("GSM_MAX_FT", 27)   # GSM 0..27
+    gsm_step = env_int("GSM_FT_STEP", 3)   # 3h刻み
 
-    msm_max  = env_int("MSM_MAX_FT", 0)    # まずはinitのみ
+    msm_max  = env_int("MSM_MAX_FT", 0)    # まずは0（initのみ）
     msm_step = env_int("MSM_FT_STEP", 1)
 
-    lfm_max  = env_int("LFM_MAX_FT", 0)    # まずはinitのみ
+    lfm_max  = env_int("LFM_MAX_FT", 0)    # まずは0（initのみ）
     lfm_step = env_int("LFM_FT_STEP", 1)
 
     groups: Dict[str, ModelCfg] = {
         "GSM": ModelCfg(
             base="https://www.jma.go.jp/bosai/tgv/data/GSMWide",
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
-            ft_step_hours=gsm_step,                 # ← これをINIT探索の丸めにも使う想定
-            ft_list=build_ft_list(gsm_max, gsm_step),
+            ft_step_hours=gsm_step,                  # ✅ 3
+            ft_list=build_ft_list(gsm_max, gsm_step),# ✅ [0,3,6..27]
             items=[
+                # view_candidates は「FT=0のベースVIEW」だけ持つ（後でFTで加算）
                 Item(label="300hPa",   layer="300",  view_candidates=["3002000"], jpg_prefix="GSM_300"),
                 Item(label="300hPa-2", layer="3002", view_candidates=["3102000"], jpg_prefix="GSM_3002"),
             ],
@@ -232,7 +233,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "MSM": ModelCfg(
             base="https://www.jma.go.jp/bosai/tgv/data/MSMNarrow",
             referer="https://www.jma.go.jp/bosai/tgv/MSM/",
-            ft_step_hours=msm_step,                 # MSMは1h
+            ft_step_hours=msm_step,                  # ✅ 1
             ft_list=build_ft_list(msm_max, msm_step),
             items=[
                 Item(label="500hPa",   layer="500",  view_candidates=["500200"], jpg_prefix="MSM_500"),
@@ -243,19 +244,32 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "LFM": ModelCfg(
             base="https://www.jma.go.jp/bosai/tgv/data/LFMNarrow",
             referer="https://www.jma.go.jp/bosai/tgv/LFM/",
-            ft_step_hours=lfm_step,                 # LFMは1h
+            ft_step_hours=lfm_step,                  # ✅ 1
             ft_list=build_ft_list(lfm_max, lfm_step),
             items=[
-                Item(label="850hPa",   layer="850",  view_candidates=["850200", "850201"], jpg_prefix="LFM_850"),
-                Item(label="850hPa-2", layer="8502", view_candidates=["860200", "860201"], jpg_prefix="LFM_8502"),
-                Item(label="925hPa",   layer="925",  view_candidates=["920200", "920201"], jpg_prefix="LFM_925"),
-                Item(label="975hPa",   layer="975",  view_candidates=["970200", "970201"], jpg_prefix="LFM_975"),
-                Item(label="sfc",      layer="sfc",  view_candidates=["000200", "000201"], jpg_prefix="LFM_sfc"),
-                Item(label="sfc-2",    layer="sfc2", view_candidates=["010200", "010201"], jpg_prefix="LFM_sfc2"),
+                Item(label="850hPa",   layer="850",  view_candidates=["850200","850201"], jpg_prefix="LFM_850"),
+                Item(label="850hPa-2", layer="8502", view_candidates=["860200","860201"], jpg_prefix="LFM_8502"),
+                Item(label="925hPa",   layer="925",  view_candidates=["920200","920201"], jpg_prefix="LFM_925"),
+                Item(label="975hPa",   layer="975",  view_candidates=["970200","970201"], jpg_prefix="LFM_975"),
+                Item(label="sfc",      layer="sfc",  view_candidates=["000200","000201"], jpg_prefix="LFM_sfc"),
+                Item(label="sfc-2",    layer="sfc2", view_candidates=["010200","010201"], jpg_prefix="LFM_sfc2"),
             ],
         ),
     }
     return groups
+
+
+def view_for_ft(base_view: str, ft_hours: int, step_hours: int) -> str:
+    """
+    base_view: '3002000' や '500200' など、FT=0 のVIEW番号
+    FT=0→そのまま
+    FT=3（GSM）→ +1
+    FT=6（GSM）→ +2
+    FT=1（MSM/LFM）→ +1
+    """
+    idx = ft_hours // step_hours
+    return str(int(base_view) + idx)
+
 
 
 # =============================================================================
@@ -319,27 +333,21 @@ def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
 
 
 def run_model(model_name: str, cfg: ModelCfg, init_dt: datetime) -> Tuple[List[Attachment], List[str]]:
-    """
-    1モデル分を回して取得する。
-    成功：attachment_blobs（JPGの個別添付用）
-    失敗：errors（Slack用ログ）
-    """
     jpg_quality = env_int("JPG_QUALITY", 85)
 
     attachments: List[Attachment] = []
     errors: List[str] = []
 
+    rjtd = fmt_rjtd(init_dt)  # ✅ RJTDはinit固定
+
     for it in cfg.items:
         for ft in cfg.ft_list:
-            # FTで時刻を進める（UTC、分=00固定）
-            target_dt = init_dt + timedelta(hours=ft)
-            rjtd = fmt_rjtd(target_dt)
-
-            # view code は候補を順に試す（200/201揺れ対策）
             ok = False
-            last_status = None
+            last_status: Optional[int] = None
 
-            for view_code in it.view_candidates:
+            for base_view in it.view_candidates:
+                # ✅ FTでVIEWを進める
+                view_code = view_for_ft(base_view, ft, cfg.ft_step_hours)
                 url = build_png_url(cfg.base, it.layer, view_code, rjtd)
 
                 try:
@@ -347,47 +355,34 @@ def run_model(model_name: str, cfg: ModelCfg, init_dt: datetime) -> Tuple[List[A
                     last_status = status
 
                     if status == 200:
-                        # HTMLが返ってくる事故（=認証ページ等）を軽く検知
                         if "text/html" in (ctype or "") or content[:20].lower().startswith(b"<!doctype html"):
                             errors.append(f"[{model_name}] {it.label} ft={ft}: got HTML (auth?) url={url}")
-                            ok = False
                             break
 
-                        # PNG→JPG
                         jpg = png_bytes_to_jpg_bytes(content, quality=jpg_quality)
-
-                        # ファイル名（並べ替えしやすい：model_layer_ft）
                         fname = f"{it.jpg_prefix}_ft{ft:03d}.jpg"
                         attachments.append((fname, jpg, "image/jpeg"))
-                        ok = True
                         print(f"[OK] {model_name} {it.label} ft={ft} -> {fname}")
+                        ok = True
                         break
 
-                    # 認証系は即止め（候補viewを変えても意味がない）
                     if status in (401, 403):
                         errors.append(f"[{model_name}] {it.label} ft={ft}: HTTP{status} auth/forbidden url={url}")
-                        ok = False
                         break
 
-                    # 404は「まだ無い」可能性があるので次候補へ
                     if status == 404:
-                        # 次の view_code へ
-                        continue
+                        continue  # 候補view（200/201など）を試す
 
-                    # その他ステータスはログ
                     errors.append(f"[{model_name}] {it.label} ft={ft}: HTTP{status} url={url}")
 
                 except Exception as e:
                     errors.append(f"[{model_name}] {it.label} ft={ft}: {type(e).__name__}: {e} url={url}")
 
             if not ok:
-                # view候補を全部試してダメだった場合（404が多いはず）
-                if last_status is None:
-                    errors.append(f"[{model_name}] {it.label} ft={ft}: no response (network?)")
-                else:
-                    errors.append(f"[{model_name}] {it.label} ft={ft}: failed (last HTTP{last_status})")
+                errors.append(f"[{model_name}] {it.label} ft={ft}: failed (last HTTP{last_status})")
 
     return attachments, errors
+
 
 
 # =============================================================================
