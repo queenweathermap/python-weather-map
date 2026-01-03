@@ -1,22 +1,29 @@
 """
 JMA 防災情報アドバイザー向け「専門天気図（tgv）」を
-GitHub Actions 上で自動取得し、メールで送信するスクリプト。
+GitHub Actions 上で自動取得し、メールで送信するスクリプト（Safari互換）。
 
-【設計方針（重要）】
-- Safari の Network タブで観測された挙動を忠実に再現する
-- GSM / MSM / LFM すべてで
-    Authorization: Basic xxxx
-    Referer: モデル別URL
-  が付与されていることを前提とする
-- 個人利用・非公開前提
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【このスクリプトの狙い】
+- Safari の Network タブで確認した挙動（Authorization + Referer）を再現
+- GitHub Actions（サーバ実行）でも同じPNGを取得できるようにする
+- 取得した PNG をメールに添付して送信する
 
-【対応済みの落とし穴】
-- キャッシュ差異による 401 回避
-- Referer 不一致による 401 回避
-- GitHub Secrets の改行混入対策
+【認証の扱い（重要）】
+このサイトは Basic 認証相当の Authorization ヘッダが必要です。
+運用上の安全性と柔軟性のため、以下の優先順位で認証情報を用意します。
+
+(優先) 1) JMA_ADV_USER / JMA_ADV_PASS から毎回 Basic を生成
+(予備) 2) JMA_AUTH_BASIC をそのまま利用（フォールバック）
+
+→ これにより
+  - USER/PASSを正として管理できる
+  - Safariで観測したJMA_AUTH_BASICも残して比較・退避できる
+  - どちらかが未設定でも止まりにくい（設定漏れ耐性）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import os
+import base64
 import requests
 from email.message import EmailMessage
 import smtplib
@@ -25,9 +32,10 @@ from datetime import datetime
 
 
 # ============================================================
-# 取得したい専門天気図の定義
+# 取得したい専門天気図（PNG）の定義
 # ============================================================
-# Safari のネットワークタブで確認した PNG URL をそのまま使う
+# ここは「あなたが送りたい図」に合わせて差し替えます。
+# URL は Safari のネットワークタブで取れたものをそのまま貼るのが確実です。
 MAPS = [
     {
         "title": "GSMWide 300hPa",
@@ -48,12 +56,12 @@ MAPS = [
 
 
 # ============================================================
-# 環境変数取得（必須チェック付き）
+# 環境変数の必須チェック
 # ============================================================
 def must_env(name: str) -> str:
     """
-    環境変数が未設定の場合は即エラーにする。
-    GitHub Actions の Secrets 設定漏れを早期検出するため。
+    必須の環境変数が未設定なら即エラーにして止める。
+    GitHub Actions の Secrets 設定漏れを早期に検知するため。
     """
     value = os.getenv(name)
     if not value:
@@ -62,79 +70,104 @@ def must_env(name: str) -> str:
 
 
 # ============================================================
-# URLに応じて Safari と同じ HTTP ヘッダを生成
+# Basic 認証（Authorization: Basic ...）の生成
 # ============================================================
+def make_basic_auth(user: str, password: str) -> str:
+    """
+    user:password を base64 して Authorization ヘッダ値を作る。
+    例: "Basic YWR2...="
+    """
+    token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    return f"Basic {token}"
+
+
+def get_auth_basic() -> str:
+    """
+    認証情報の用意（優先順位つき）
+      1) JMA_ADV_USER / JMA_ADV_PASS があれば、そこから生成（推奨）
+      2) なければ JMA_AUTH_BASIC をそのまま使う（フォールバック）
+
+    Secrets に改行が混ざると認証が壊れるので strip() で吸収。
+    """
+    user = os.getenv("JMA_ADV_USER")
+    pw = os.getenv("JMA_ADV_PASS")
+
+    if user and pw:
+        return make_basic_auth(user.strip(), pw.strip())
+
+    # フォールバック（Safariで拾った "Basic ...." を Secrets に入れている場合）
+    return must_env("JMA_AUTH_BASIC").strip()
+
+
+# ============================================================
+# URL に応じて Safari と同じ Referer を切り替える
+# ============================================================
+def referer_for(url: str) -> str:
+    """
+    Safariで観測された Referer をモデル別に合わせる。
+    Referer 不一致は 401 / 403 の原因になることがあるため重要。
+    """
+    if "/tgv/data/GSMWide/" in url:
+        return "https://www.jma.go.jp/bosai/tgv/GSM/"
+    if "/tgv/data/MSMNarrow/" in url:
+        return "https://www.jma.go.jp/bosai/tgv/MSM/"
+    if "/tgv/data/LFMNarrow/" in url:
+        return "https://www.jma.go.jp/bosai/tgv/LFM/"
+    return "https://www.jma.go.jp/bosai/tgv/"
+
+
 def headers_for(url: str) -> dict:
     """
-    Safari の実際の通信を再現したヘッダを返す。
-
-    - Authorization: Basic は全モデル共通で付与
-    - Referer はモデル別に切り替える（401回避の最重要ポイント）
+    Safari互換のヘッダを作る。
+    - Authorization は get_auth_basic() で統一
+    - Referer は URLごとに切替
+    - Cache-Control/Pragma はキャッシュ差で挙動が変わるのを避けたい時に有効
     """
-    auth_basic = must_env("JMA_AUTH_BASIC").strip()
-
-    # モデル別 Referer 切替
-    if "/tgv/data/GSMWide/" in url:
-        referer = "https://www.jma.go.jp/bosai/tgv/GSM/"
-    elif "/tgv/data/MSMNarrow/" in url:
-        referer = "https://www.jma.go.jp/bosai/tgv/MSM/"
-    elif "/tgv/data/LFMNarrow/" in url:
-        referer = "https://www.jma.go.jp/bosai/tgv/LFM/"
-    else:
-        referer = "https://www.jma.go.jp/bosai/tgv/"
-
     return {
-        # Safari で観測された認証方式
-        "Authorization": auth_basic,
-
-        # User-Agent は必須（無いと弾かれるケースあり）
+        "Authorization": get_auth_basic(),
         "User-Agent": "Mozilla/5.0",
-
-        # Referer 不一致は 401 の原因になる
-        "Referer": referer,
-
-        # キャッシュ挙動差による不安定さを回避
+        "Referer": referer_for(url),
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
 
 
 # ============================================================
-# 専門天気図を取得してローカルに保存
+# PNG 取得
 # ============================================================
 def fetch_images() -> list[Path]:
     """
-    MAPS で定義された PNG をすべて取得する。
+    MAPS に定義された PNG を取得し、ファイルとして保存して返す。
     """
     saved_files: list[Path] = []
 
     for m in MAPS:
+        url = m["url"]
         print(f"Fetching: {m['title']}")
-        headers = headers_for(m["url"])
 
-        response = requests.get(
-            m["url"],
-            headers=headers,
+        r = requests.get(
+            url,
+            headers=headers_for(url),
             timeout=30,
         )
 
-        # 401 / 403 / 404 等はここで例外として止まる
-        response.raise_for_status()
+        # 401/403/404 などはここで例外になる（Actionsログに出る）
+        r.raise_for_status()
 
         path = Path(m["filename"])
-        path.write_bytes(response.content)
+        path.write_bytes(r.content)
         saved_files.append(path)
 
     return saved_files
 
 
 # ============================================================
-# メール送信処理
+# メール送信
 # ============================================================
 def send_mail(files: list[Path]) -> None:
     """
     取得した PNG を添付してメール送信する。
-    SMTP 設定は既存 run_jma.yml と共通。
+    SMTP 設定は GitHub Secrets から受け取る（.env は不要）。
     """
     mail_from = must_env("FROM_EMAIL")
     mail_to = must_env("TO_EMAIL")
@@ -153,13 +186,12 @@ def send_mail(files: list[Path]) -> None:
     msg["To"] = mail_to
 
     msg.set_content(
-        "防災情報アドバイザー向け 専門天気図（tgv）です。\n"
-        "・Safariと同一条件で取得\n"
-        "・個人利用\n"
-        "・非公開\n"
+        "JMA 防災情報アドバイザー向け 専門天気図（tgv）を自動取得しました。\n"
+        "・個人利用・非公開\n"
+        "・GitHub Actions 実行\n"
     )
 
-    # 画像をすべて添付
+    # PNG を添付
     for f in files:
         msg.add_attachment(
             f.read_bytes(),
@@ -168,14 +200,14 @@ def send_mail(files: list[Path]) -> None:
             filename=f.name,
         )
 
-    # SMTP 送信
+    # SMTP（SSL）で送信
     with smtplib.SMTP_SSL(smtp_server, smtp_port) as smtp:
         smtp.login(smtp_user, smtp_pass)
         smtp.send_message(msg)
 
 
 # ============================================================
-# エントリーポイント
+# メイン
 # ============================================================
 if __name__ == "__main__":
     print("=== Start fetching JMA TGV maps ===")
@@ -184,5 +216,4 @@ if __name__ == "__main__":
     print("Fetched files:", [f.name for f in files])
 
     send_mail(files)
-
     print("=== Mail sent successfully ===")
