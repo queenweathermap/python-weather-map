@@ -211,29 +211,29 @@ def build_ft_list(max_ft: int, step: int) -> List[int]:
 def load_model_groups() -> Dict[str, ModelCfg]:
     """
     ✅ “GSMから拡張→MSM拡張→LFM拡張” に対応するため、
-    各モデルの最大FTは環境変数で調整できるようにしてあります。
+    各モデルの最大FTは環境変数で調整可能。
 
     - GSM_MAX_FT (default=27) / GSM_FT_STEP (default=3)
     - MSM_MAX_FT (default=0)  / MSM_FT_STEP (default=1)
     - LFM_MAX_FT (default=0)  / LFM_FT_STEP (default=1)
 
-    まずは GSM だけ伸ばす運用：
+    まずは GSM だけ伸ばす：
       GSM_MAX_FT=27, MSM_MAX_FT=0, LFM_MAX_FT=0
     """
-    gsm_max = env_int("GSM_MAX_FT", 27)   # ← 今回の希望：GSMは27時間まで
-    gsm_step = env_int("GSM_FT_STEP", 3)
+    gsm_max  = env_int("GSM_MAX_FT", 27)   # GSMは27時間まで
+    gsm_step = env_int("GSM_FT_STEP", 3)   # 0,3,6,...,27
 
-    msm_max = env_int("MSM_MAX_FT", 0)    # ← まずは0（initのみ）推奨
+    msm_max  = env_int("MSM_MAX_FT", 0)    # まずは0（initのみ）
     msm_step = env_int("MSM_FT_STEP", 1)
 
-    lfm_max = env_int("LFM_MAX_FT", 0)    # ← まずは0（initのみ）推奨
+    lfm_max  = env_int("LFM_MAX_FT", 0)    # まずは0（initのみ）
     lfm_step = env_int("LFM_FT_STEP", 1)
 
     groups: Dict[str, ModelCfg] = {
         "GSM": ModelCfg(
             base="https://www.jma.go.jp/bosai/tgv/data/GSMWide",
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
-            ft_step_hours=3,  # init探索の丸めに使う（GSMは3h）
+            ft_step_hours=gsm_step,                 # ← 固定3ではなく env と一致
             ft_list=build_ft_list(gsm_max, gsm_step),
             items=[
                 Item(label="300hPa",   layer="300",  view_candidates=["3002000"], jpg_prefix="GSM_300"),
@@ -243,7 +243,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "MSM": ModelCfg(
             base="https://www.jma.go.jp/bosai/tgv/data/MSMNarrow",
             referer="https://www.jma.go.jp/bosai/tgv/MSM/",
-            ft_step_hours=1,
+            ft_step_hours=msm_step,                 # ← env と一致
             ft_list=build_ft_list(msm_max, msm_step),
             items=[
                 Item(label="500hPa",   layer="500",  view_candidates=["500200"], jpg_prefix="MSM_500"),
@@ -254,7 +254,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "LFM": ModelCfg(
             base="https://www.jma.go.jp/bosai/tgv/data/LFMNarrow",
             referer="https://www.jma.go.jp/bosai/tgv/LFM/",
-            ft_step_hours=1,
+            ft_step_hours=lfm_step,                 # ← env と一致
             ft_list=build_ft_list(lfm_max, lfm_step),
             items=[
                 Item(label="850hPa",   layer="850",  view_candidates=["850200", "850201"], jpg_prefix="LFM_850"),
