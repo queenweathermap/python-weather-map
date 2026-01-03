@@ -2,148 +2,92 @@
 # =============================================================================
 # scripts/adv_jma.py
 #
-# JMA 防災情報アドバイザー向け「専門天気図（tgv）」PNG を自動取得し、
-# GSM / MSM / LFM それぞれ “別メール（合計3通）” で送信する。
+# JMA 防災情報アドバイザー向け「専門天気図（tgv）」を
+# GitHub Actions 上で自動取得し、モデル別にメール（3通）で送る。
 #
-# 【設計方針】
-# - Safari の Network タブで観測した挙動を再現（Authorization + Referer）
-# - 画像が増える前提：モデルごとに ZIP でまとめて送る（= 3通）
-# - 404/一部欠損があってもジョブ全体を止めない（取れるものだけ送る）
-# - メール送信は既存 module.utils.mail_utils.send_mail を利用（587=STARTTLS対応）
+# ✅ 方針（あなたの要件を反映）
+# - JMAからは PNG を取得（Authorization / Referer をSafari互換で付与）
+# - メール送信は JPG 個別添付（PNGは保存しない）
+# - GSM / MSM / LFM それぞれ1通（合計3通）
+# - FT（予報時間）をリストで回し、RJTD_ の時刻（mmddhh）を自動生成
+# - 404 は VIEW番号揺れ対策（200/201など）や「2系」(3002/8502等)を候補として試行
+# - 401/403/404等の失敗は Slack にログ（設定がある場合のみ）
 #
-# 【認証の扱い（重要）】
-#   優先 1) JMA_ADV_USER / JMA_ADV_PASS から Basic を生成（推奨）
-#   予備 2) JMA_AUTH_BASIC をそのまま使用（Safariで拾った値の退避）
-#
-# 【注意】
-# - .env を GitHub に置くのはNG（漏洩リスク）。Actions Secrets を正にする。
-# - URL は “今見えているPNGの直URL” を増やしていく運用が最も確実。
+# ✅ 重要：module/ を import できるようにする（Actions直叩き対策）
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# GitHub Actions / 直叩き実行でも module/ を import できるようにする
-# （scripts/ 配下から python scripts/adv_jma.py で動かしてもOKにする）
-# -----------------------------------------------------------------------------
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]  # scripts/ の1つ上 = リポジトリ直下
 sys.path.insert(0, str(REPO_ROOT))
 
-# -----------------------------------------------------------------------------
-# 標準ライブラリ
-# -----------------------------------------------------------------------------
 import os
+import io
 import base64
-import shutil
-import time
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Tuple, Optional
 
-# -----------------------------------------------------------------------------
-# サードパーティ
-# -----------------------------------------------------------------------------
 import requests
+from PIL import Image
 
-# -----------------------------------------------------------------------------
-# 既存モジュール（ここが “揃える” ポイント）
-# -----------------------------------------------------------------------------
 from module.utils.mail_utils import send_mail
-from module.utils.zip_utils import to_zip_bytes_from_dir
 from module.utils.slack_utils import send_slack_text
 
+# =============================================================================
+# 0) ここだけ編集すれば「増やしていける」設定（dict管理）
+# =============================================================================
+# URLの構造：
+#   https://www.jma.go.jp/bosai/tgv/data/<MODEL>/<LAYER>/images/VIEW<view>_RJTD_<mmddhh>00.png
+#
+# - <mmddhh> は「有効時刻（UTC）の 月日＋時」
+# - 例：01/03 06UTC → "0306" → RJTD_030600
+#
+# view番号は揺れることがあるので、候補を複数持って順に試します。
+# （例：LFMの8502が860200/860201で揺れる、など）
+# =============================================================================
 
-# =============================================================================
-# 1) ここに “送りたいPNG URL” を追加していく（運用の中心）
-# =============================================================================
-# - group_key: "GSM" / "MSM" / "LFM" の3つを想定
-# - referer: Safariで見えた Referer に合わせる（重要）
-# - maps: title はメール本文/ログ用、url は直URL、filename はZIP内の名前
-GROUPS: Dict[str, Dict] = {
+MODEL_GROUPS: Dict[str, Dict] = {
     "GSM": {
-        "label": "GSM",
+        "base": "https://www.jma.go.jp/bosai/tgv/data/GSMWide",
         "referer": "https://www.jma.go.jp/bosai/tgv/GSM/",
-        "maps": [
-            # --- GSMWide（例：300hPa + 300hPa-2 など） ---
-            {
-                "title": "GSMWide 300hPa",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3002000_RJTD_030600.png",
-                "filename": "GSM_300_VIEW3002000_RJTD_030600.png",
-            },
-            {
-                "title": "GSMWide 300hPa-2",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/GSMWide/3002/images/VIEW3102000_RJTD_030600.png",
-                "filename": "GSM_3002_VIEW3102000_RJTD_030600.png",
-            },
+        # GSMは 0〜72h を 3h刻み などにしたいならここを増やす
+        "ft_list": [0],  # まずはINITだけ。後で [0, 3, 6, ..., 72] に。
+        "items": [
+            # 例に合わせて：300 と 3002 の2系（あなたの提示URL）
+            {"label": "300hPa",  "layer": "300",  "view_candidates": ["3002000"], "jpg_prefix": "GSM_300"},
+            {"label": "300hPa-2","layer": "3002", "view_candidates": ["3102000"], "jpg_prefix": "GSM_3002"},
         ],
     },
-
     "MSM": {
-        "label": "MSM",
+        "base": "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow",
         "referer": "https://www.jma.go.jp/bosai/tgv/MSM/",
-        "maps": [
-            # --- MSMNarrow（例：500hPa / 500hPa-2 / 700hPa など） ---
-            {
-                "title": "MSMNarrow 500hPa",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow/500/images/VIEW500200_RJTD_030900.png",
-                "filename": "MSM_500_VIEW500200_RJTD_030900.png",
-            },
-            {
-                "title": "MSMNarrow 500hPa-2",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow/5002/images/VIEW510200_RJTD_030900.png",
-                "filename": "MSM_5002_VIEW510200_RJTD_030900.png",
-            },
-            {
-                "title": "MSMNarrow 700hPa",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow/700/images/VIEW700200_RJTD_030900.png",
-                "filename": "MSM_700_VIEW700200_RJTD_030900.png",
-            },
+        "ft_list": [0],  # 後で [0..27] を回す（例：0〜27h）
+        "items": [
+            {"label": "500hPa",  "layer": "500",  "view_candidates": ["500200"],  "jpg_prefix": "MSM_500"},
+            {"label": "500hPa-2","layer": "5002", "view_candidates": ["510200"],  "jpg_prefix": "MSM_5002"},
+            {"label": "700hPa",  "layer": "700",  "view_candidates": ["700200"],  "jpg_prefix": "MSM_700"},
         ],
     },
-
     "LFM": {
-        "label": "LFM",
+        "base": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow",
         "referer": "https://www.jma.go.jp/bosai/tgv/LFM/",
-        "maps": [
-            # --- LFMNarrow（例：850/8502/925/975/sfc/sfc-2 など） ---
-            {
-                "title": "LFMNarrow 850hPa",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow/850/images/VIEW850200_RJTD_031100.png",
-                "filename": "LFM_850_VIEW850200_RJTD_031100.png",
-            },
-            {
-                "title": "LFMNarrow 850hPa-2",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow/8502/images/VIEW860200_RJTD_031100.png",
-                "filename": "LFM_8502_VIEW860200_RJTD_031100.png",
-            },
-            {
-                "title": "LFMNarrow 925hPa",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow/925/images/VIEW920200_RJTD_031100.png",
-                "filename": "LFM_925_VIEW920200_RJTD_031100.png",
-            },
-            {
-                "title": "LFMNarrow 975hPa",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow/975/images/VIEW970200_RJTD_031100.png",
-                "filename": "LFM_975_VIEW970200_RJTD_031100.png",
-            },
-            {
-                "title": "LFMNarrow sfc",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow/sfc/images/VIEW000200_RJTD_031100.png",
-                "filename": "LFM_sfc_VIEW000200_RJTD_031100.png",
-            },
-            {
-                "title": "LFMNarrow sfc-2",
-                "url": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow/sfc2/images/VIEW010200_RJTD_031100.png",
-                "filename": "LFM_sfc2_VIEW010200_RJTD_031100.png",
-            },
+        "ft_list": [0],  # 後で 0〜10h など
+        "items": [
+            {"label": "850hPa",  "layer": "850",  "view_candidates": ["850200", "850201"], "jpg_prefix": "LFM_850"},
+            {"label": "850hPa-2","layer": "8502", "view_candidates": ["860200", "860201"], "jpg_prefix": "LFM_8502"},
+            {"label": "925hPa",  "layer": "925",  "view_candidates": ["920200", "920201"], "jpg_prefix": "LFM_925"},
+            {"label": "975hPa",  "layer": "975",  "view_candidates": ["970200", "970201"], "jpg_prefix": "LFM_975"},
+            {"label": "sfc",     "layer": "sfc",  "view_candidates": ["000200", "000201"], "jpg_prefix": "LFM_sfc"},
+            {"label": "sfc-2",   "layer": "sfc2", "view_candidates": ["010200", "010201"], "jpg_prefix": "LFM_sfc2"},
         ],
     },
 }
 
+# =============================================================================
+# 1) 環境変数ユーティリティ
+# =============================================================================
 
-# =============================================================================
-# 2) 環境変数ユーティリティ（設定漏れの早期検知）
-# =============================================================================
 def must_env(name: str) -> str:
     v = os.getenv(name)
     if not v:
@@ -152,12 +96,12 @@ def must_env(name: str) -> str:
 
 
 # =============================================================================
-# 3) 認証：JMA_ADV_USER/PASS → Basic生成、なければ JMA_AUTH_BASIC
+# 2) 認証：JMA_ADV_USER/JMA_ADV_PASS を正、JMA_AUTH_BASIC は予備
 # =============================================================================
+
 def make_basic_auth(user: str, password: str) -> str:
     token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
     return f"Basic {token}"
-
 
 def get_auth_basic() -> str:
     user = os.getenv("JMA_ADV_USER")
@@ -168,193 +112,198 @@ def get_auth_basic() -> str:
 
 
 # =============================================================================
-# 4) リクエストヘッダ（Safari互換）
+# 3) Slack（設定がある時だけ送る）
 # =============================================================================
-def headers_for(url: str, referer: str) -> Dict[str, str]:
-    return {
-        "Authorization": get_auth_basic(),
-        "User-Agent": "Mozilla/5.0",
-        "Referer": referer,
-        # キャッシュの “当たり外れ” を避けたい時に効くことがある
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-    }
 
-
-# =============================================================================
-# 5) PNG 取得（“失敗しても止めない” が重要）
-# =============================================================================
-def fetch_one(url: str, referer: str, timeout: int = 30) -> Tuple[Optional[bytes], Optional[str]]:
-    """
-    1枚取得する。
-    戻り値:
-      (bytes, None)  = 成功
-      (None, reason) = 失敗（例: "404 Not Found"）
-    """
-    try:
-        r = requests.get(url, headers=headers_for(url, referer), timeout=timeout)
-        # 認証系はここが原因なので詳細ログに出したい
-        if r.status_code in (401, 403):
-            return None, f"{r.status_code} Auth/Forbidden"
-        if r.status_code == 404:
-            return None, "404 Not Found"
-        r.raise_for_status()
-
-        # 画像じゃないもの（HTMLなど）を拾った時の保険
-        ctype = (r.headers.get("Content-Type") or "").lower()
-        if "image" not in ctype:
-            return None, f"Unexpected Content-Type: {ctype}"
-
-        return r.content, None
-
-    except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
-
-
-def fetch_group(out_dir: Path, group_key: str, group: Dict) -> Tuple[List[Path], List[str]]:
-    """
-    group（GSM/MSM/LFM）単位でまとめて取得する。
-    - 取れるものは保存
-    - 取れないものは errors に入れて継続
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    saved: List[Path] = []
-    errors: List[str] = []
-
-    referer = group["referer"]
-    maps = group["maps"]
-
-    print(f"--- Fetch group: {group_key} ({len(maps)} maps) ---")
-    for m in maps:
-        title = m["title"]
-        url = m["url"]
-        filename = m["filename"]
-
-        print(f"Fetching: {title}")
-        blob, err = fetch_one(url, referer)
-
-        if blob is None:
-            # 404 は “時間がズレてる/差し替わった” ことが多いので、
-            # 一応ちょっと待って再試行（CDN反映待ち対策）
-            if err == "404 Not Found":
-                for i in range(2):  # 追加で2回だけ
-                    wait = 10
-                    print(f"  404 retry {i+1}/2 wait {wait}s: {url}")
-                    time.sleep(wait)
-                    blob, err = fetch_one(url, referer)
-                    if blob is not None:
-                        break
-
-            if blob is None:
-                msg = f"[{group_key}] FAIL: {title} | {err} | {url}"
-                print(msg)
-                errors.append(msg)
-                continue  # ←ここが“止めない”ポイント
-
-        path = out_dir / filename
-        path.write_bytes(blob)
-        saved.append(path)
-
-    return saved, errors
-
-
-# =============================================================================
-# 6) ZIP化 → メール送信（1グループ=1通）
-# =============================================================================
-def send_group_mail(group_key: str, out_dir: Path, saved_files: List[Path], errors: List[str]) -> None:
-    """
-    - 画像が1枚も取れなかった場合：
-        送らない（運用的に “空メール” が邪魔になりやすい）
-      ただし、Slack通知は任意で出す。
-    """
-    if not saved_files:
-        print(f"[{group_key}] No files fetched. Skip sending mail.")
-        slack_notify(f"⚠️ {group_key}: 0 files fetched. (check URLs/time) \n" + "\n".join(errors[:20]))
-        return
-
-    subject_prefix = (os.getenv("MAIL_SUBJECT_PREFIX") or os.getenv("EMAIL_SUBJECT_PREFIX") or "JMA").strip()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    subject = f"{subject_prefix} {group_key} 専門天気図（tgv） {now}"
-
-    body_lines = [
-        f"JMA 防災情報アドバイザー向け 専門天気図（tgv）を自動取得しました。",
-        f"Group: {group_key}",
-        f"Fetched: {len(saved_files)} files",
-        "",
-        "・個人利用・非公開",
-        "・GitHub Actions 実行",
-    ]
-    if errors:
-        body_lines += [
-            "",
-            "---- 取得できなかったもの（抜粋）----",
-            *errors[:30],  # 多すぎると読めないので上限
-        ]
-    body = "\n".join(body_lines)
-
-    # ZIPは “グループ単位” で作る（この out_dir は group専用フォルダ）
-    zip_name = f"tgv_{group_key}_{datetime.now().strftime('%Y%m%d_%H%M')}.zip"
-    zip_bytes = to_zip_bytes_from_dir(str(out_dir))
-
-    # 既存 mail_utils を使う（587=STARTTLS も 465 も mail_utils 側で吸収）
-    send_mail(
-        subject=subject,
-        body=body,
-        attachment_blobs=[(zip_name, zip_bytes, "application/zip")],
-        is_html=False,
-        slack_mode="off",  # mail_utils でSlackを使うなら "error_only" 等に
-    )
-
-    slack_notify(f"✅ {group_key}: mail sent ({len(saved_files)} files) / errors={len(errors)}")
-
-
-# =============================================================================
-# 7) Slack通知（任意：SLACK_BOT_TOKEN/SLACK_CHANNEL_ID がある時だけ）
-# =============================================================================
-def slack_notify(message: str) -> None:
+def slack_log(text: str) -> None:
     token = os.getenv("SLACK_BOT_TOKEN")
     channel = os.getenv("SLACK_CHANNEL_ID")
     if not (token and channel):
         return
     try:
-        send_slack_text(channel=channel, message=message)
+        send_slack_text(channel=channel, message=text)
     except Exception as e:
-        print(f"[WARN] Slack notify failed: {e}")
+        print(f"[WARN] Slack failed: {e}")
 
 
 # =============================================================================
-# 8) main：GSM/MSM/LFM を順に処理して “3通” 送る
+# 4) 時刻（INIT と FT）
 # =============================================================================
-def main() -> None:
-    print("=== Start ADV JMA (tgv) ===")
+# INITは「固定」か「追随」かで考え方が変わりますが、
+# まずは “ENVで指定できるようにして、未指定なら現在UTCを使う” で堅くいきます。
+#
+# INIT_UTC の形式：YYYYMMDDHH（例：2026010306）
+# =============================================================================
 
-    # 1回の実行の作業場（/tmp が安全）
-    base_dir = Path("/tmp") / "adv_jma_tgv"
-    if base_dir.exists():
-        shutil.rmtree(base_dir, ignore_errors=True)
-    base_dir.mkdir(parents=True, exist_ok=True)
+def parse_init_utc() -> datetime:
+    s = os.getenv("INIT_UTC", "").strip()
+    if s:
+        # YYYYMMDDHH
+        return datetime.strptime(s, "%Y%m%d%H").replace(tzinfo=timezone.utc)
 
-    all_errors: List[str] = []
+    # 未指定なら「今のUTC（分秒を切り捨て）」を使う
+    now = datetime.now(timezone.utc)
+    return now.replace(minute=0, second=0, microsecond=0)
 
-    # GSM/MSM/LFM で3通
-    for group_key in ("GSM", "MSM", "LFM"):
-        group = GROUPS.get(group_key)
-        if not group:
+def mmddhh(dt_utc: datetime) -> str:
+    # RJTD_030600 の "0306" 部分
+    return dt_utc.strftime("%m%d%H")
+
+def build_url(base: str, layer: str, view: str, valid_dt_utc: datetime) -> str:
+    t = mmddhh(valid_dt_utc) + "00"
+    return f"{base}/{layer}/images/VIEW{view}_RJTD_{t}.png"
+
+
+# =============================================================================
+# 5) HTTP取得（Safari互換のHeader）
+# =============================================================================
+
+def headers_for(referer: str) -> dict:
+    return {
+        "Authorization": get_auth_basic(),
+        "User-Agent": "Mozilla/5.0",
+        "Referer": referer,
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+
+def fetch_png_with_candidates(urls: List[str], referer: str, timeout=30) -> Tuple[Optional[bytes], Optional[str], Optional[int]]:
+    """
+    候補URLを順に試し、最初に200になったPNG bytesを返す。
+    失敗時は (None, last_url, last_status) を返す。
+    """
+    last_url = None
+    last_status = None
+
+    for u in urls:
+        last_url = u
+        try:
+            r = requests.get(u, headers=headers_for(referer), timeout=timeout)
+            last_status = r.status_code
+
+            if r.status_code == 200:
+                # 画像じゃないHTMLを掴んだ時の保険
+                ctype = (r.headers.get("Content-Type") or "").lower()
+                if "image" not in ctype:
+                    return None, u, 999
+                return r.content, u, 200
+
+            # 認証/権限系は候補を変えても意味が薄いので即打ち切り
+            if r.status_code in (401, 403):
+                return None, u, r.status_code
+
+            # 404等は次候補へ
             continue
 
-        group_dir = base_dir / group_key
-        saved, errors = fetch_group(group_dir, group_key, group)
-        all_errors.extend(errors)
+        except Exception as e:
+            last_status = -1
+            print(f"[ERR] request failed: {u} / {e}")
+            continue
 
-        # 1グループ=1通
-        send_group_mail(group_key, group_dir, saved, errors)
+    return None, last_url, last_status
 
-    print("=== Done ADV JMA (tgv) ===")
 
-    # 全体まとめ（任意）
-    if all_errors:
-        print(f"[WARN] total errors: {len(all_errors)}")
+# =============================================================================
+# 6) PNG→JPG（メール用に軽量化）
+# =============================================================================
+
+def png_to_jpg_bytes(png_bytes: bytes, quality: int = 85) -> bytes:
+    """
+    天気図は線画なので、quality=80〜85 で大きく軽くなることが多い。
+    """
+    im = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
+# =============================================================================
+# 7) モデル単位で「取得→JPG化→メール送信」
+# =============================================================================
+
+Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
+
+def run_model(model_name: str, cfg: Dict, init_dt: datetime) -> None:
+    base = cfg["base"]
+    referer = cfg["referer"]
+    ft_list: List[int] = cfg["ft_list"]
+    items: List[Dict] = cfg["items"]
+
+    errors: List[str] = []
+    attachments: List[Attachment] = []
+
+    print(f"--- Fetch group: {model_name} ({len(items)} items) ---")
+
+    for ft in ft_list:
+        valid_dt = init_dt + timedelta(hours=int(ft))
+        tag_time = mmddhh(valid_dt)  # 例: 0306
+        for it in items:
+            layer = it["layer"]
+            view_candidates = it["view_candidates"]
+            label = it["label"]
+            prefix = it["jpg_prefix"]
+
+            # 候補URLを作る（VIEW揺れ対策）
+            urls = [build_url(base, layer, v, valid_dt) for v in view_candidates]
+
+            blob, used_url, status = fetch_png_with_candidates(urls, referer=referer, timeout=30)
+            if blob is None:
+                msg = f"{model_name} ft={ft} {label}: HTTP={status} url={used_url}"
+                print(f"[NG] {msg}")
+                errors.append(msg)
+                continue
+
+            # JPG化して添付（ファイル名は運用しやすいように統一）
+            jpg_quality = int(os.getenv("JPEG_QUALITY", "85"))
+            jpg = png_to_jpg_bytes(blob, quality=jpg_quality)
+            fname = f"{prefix}_FT{ft:03d}_{tag_time}.jpg"
+            attachments.append((fname, jpg, "image/jpeg"))
+            print(f"[OK] {model_name} ft={ft} {label} -> {fname}")
+
+    # 失敗ログ（404/401等）はSlackへ（要求どおり）
+    if errors:
+        slack_log("❌ ADV JMA TGV fetch errors\n" + "\n".join(errors[:40]))
+
+    # 何も取れなかったらメールは送らずに例外（運用的に気づきやすい）
+    if not attachments:
+        raise RuntimeError(f"{model_name}: no images fetched. see Slack/logs.")
+
+    # メール送信（個別JPG添付）
+    # mail_utils の subject_prefix は MAIL_SUBJECT_PREFIX を使うので、ここでは中身だけ整える
+    now_jst = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
+    subj = f"[{model_name}] tgv {init_dt.strftime('%Y%m%d%H')}Z ({now_jst} JST)"
+    body = (
+        f"JMA 防災情報アドバイザー向け 専門天気図（tgv）\n"
+        f"model={model_name}\n"
+        f"init={init_dt.strftime('%Y-%m-%d %H:%MZ')}\n"
+        f"files={len(attachments)}\n"
+        + ("\n\n--- errors ---\n" + "\n".join(errors) if errors else "")
+    )
+
+    msg_id = send_mail(
+        subject=subj,
+        body=body,
+        attachment_blobs=attachments,   # ← ZIPにせず個別添付
+        is_html=False,
+        slack_mode="error_only",        # ← メール送信失敗だけ mail_utils 側で通知してもOK
+    )
+    print(f"[OK] {model_name}: mail sent. Message-ID={msg_id}")
+
+
+# =============================================================================
+# main
+# =============================================================================
+
+def main() -> None:
+    init_dt = parse_init_utc()
+    print(f"=== Start ADV JMA TGV === init={init_dt.strftime('%Y-%m-%d %H:%MZ')}")
+
+    # GSM / MSM / LFM を順に実行（3通送る）
+    for model_name in ("GSM", "MSM", "LFM"):
+        cfg = MODEL_GROUPS[model_name]
+        run_model(model_name, cfg, init_dt)
+
+    print("=== Done ADV JMA TGV ===")
 
 
 if __name__ == "__main__":
