@@ -104,4 +104,4 @@ jobs:
 
       # 専門天気図を取得してメール送信
       - name: Run TGV map sender script
-        run: python scripts/send_jma_tgv_maps.py
+        run: python scripts/adv_jma.py
