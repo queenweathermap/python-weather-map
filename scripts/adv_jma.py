@@ -11,6 +11,14 @@
 # - 添付は既定で ZIP（MAIL_ATTACH_AS_ZIP=1 推奨）
 #   ※ mail_utils 側の仕様：サイズ超過や設定により自動ZIPも可能
 # =============================================================================
+# --- GitHub Actions / 直叩き実行でも module/ を import できるようにする ---
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]  # scripts/ の1つ上 = リポジトリ直下
+sys.path.insert(0, str(REPO_ROOT))
+# -------------------------------------------------------------------------
+
 
 import os
 import shutil
