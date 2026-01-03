@@ -267,10 +267,17 @@ def send_mail(files: list[Path]) -> None:
             filename=f.name,
         )
 
-    # SMTP（SSL）で送信
-    with smtplib.SMTP_SSL(smtp_server, smtp_port) as smtp:
+    # SMTP（587 = STARTTLS）で送信
+    # 587 は「SMTPで接続 → starttls()で暗号化 → login → send」
+    with smtplib.SMTP(smtp_server, smtp_port, timeout=30) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
         smtp.login(smtp_user, smtp_pass)
         smtp.send_message(msg)
+
+    print("[MAIL] send_message() done")
+
 
 
 # ============================================================
