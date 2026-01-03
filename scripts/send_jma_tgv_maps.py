@@ -20,6 +20,14 @@ GitHub Actions 上で自動取得し、メールで送信するスクリプト�
   - Safariで観測したJMA_AUTH_BASICも残して比較・退避できる
   - どちらかが未設定でも止まりにくい（設定漏れ耐性）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【404対策（今回の失敗原因）】
+- LFM の画像は VIEW860200 / VIEW860201 のどちらか片方しか無い時があります。
+- そのため、まず指定URLを取りに行き、404だった場合だけ
+  “200↔201 を入れ替えた代替URL” を自動で試します。
+- GSM/MSM も将来同様の揺れが起きても使い回せるよう、
+  汎用的に「末尾3桁が200/201なら入れ替える」処理も入れています。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import os
@@ -49,6 +57,7 @@ MAPS = [
     },
     {
         "title": "LFMNarrow 850hPa",
+        # ここはどちらを置いてもOK（404時に自動で200↔201を試す）
         "url": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow/850/images/VIEW860201_RJTD_030600.png",
         "filename": "LFMNarrow_850hPa.png",
     },
@@ -133,11 +142,75 @@ def headers_for(url: str) -> dict:
 
 
 # ============================================================
+# 404時の「代替URL」生成（200↔201 入れ替え）
+# ============================================================
+def make_alt_url_if_possible(url: str) -> str | None:
+    """
+    例：
+      .../VIEW860201_RJTD_030600.png  ->  .../VIEW860200_RJTD_030600.png
+      .../VIEW860200_RJTD_030600.png  ->  .../VIEW860201_RJTD_030600.png
+
+    200/201 が含まれないURLの場合は None を返す。
+    """
+    if "VIEW" not in url:
+        return None
+
+    # よくあるケース：VIEWxxxx200 / VIEWxxxx201
+    if "VIEW860201_" in url:
+        return url.replace("VIEW860201_", "VIEW860200_")
+    if "VIEW860200_" in url:
+        return url.replace("VIEW860200_", "VIEW860201_")
+
+    # 汎用化：末尾の "200_" / "201_" を入れ替え（他モデルでも効く可能性）
+    # ただし誤爆を避けるため、"VIEW" の直後に出てくる箇所だけを想定。
+    if "200_" in url:
+        # 先に 200->201 を試す（元が200のとき）
+        return url.replace("200_", "201_", 1)
+    if "201_" in url:
+        # 元が201のとき
+        return url.replace("201_", "200_", 1)
+
+    return None
+
+
+def get_with_fallback(url: str) -> requests.Response:
+    """
+    通常取得 → 404 の場合のみ代替URLを試す。
+
+    ・401/403 は「認証やRefererの問題」なので代替を試しても意味がない。
+      → そのまま raise してログで原因を見つける。
+    ・404 だけが今回の原因（ファイルが無い）
+      → 200/201 を入れ替えたURLを試す
+    """
+    r = requests.get(url, headers=headers_for(url), timeout=30)
+
+    # 正常または 401/403/500 等はここで判定
+    if r.status_code != 404:
+        r.raise_for_status()
+        return r
+
+    # 404 だけ、代替URLを試す
+    alt = make_alt_url_if_possible(url)
+    if not alt:
+        r.raise_for_status()
+        return r
+
+    print(f"  404 Not Found. Try alternate: {alt}")
+    r2 = requests.get(alt, headers=headers_for(alt), timeout=30)
+    r2.raise_for_status()
+    return r2
+
+
+# ============================================================
 # PNG 取得
 # ============================================================
 def fetch_images() -> list[Path]:
     """
     MAPS に定義された PNG を取得し、ファイルとして保存して返す。
+
+    重要：
+    - 404 の時だけ “200↔201 の代替” を自動で試すので
+      LFM の揺れに強くなります。
     """
     saved_files: list[Path] = []
 
@@ -145,14 +218,8 @@ def fetch_images() -> list[Path]:
         url = m["url"]
         print(f"Fetching: {m['title']}")
 
-        r = requests.get(
-            url,
-            headers=headers_for(url),
-            timeout=30,
-        )
-
-        # 401/403/404 などはここで例外になる（Actionsログに出る）
-        r.raise_for_status()
+        # ここで 404 対策付き取得
+        r = get_with_fallback(url)
 
         path = Path(m["filename"])
         path.write_bytes(r.content)
