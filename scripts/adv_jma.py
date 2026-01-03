@@ -52,7 +52,7 @@ MODEL_GROUPS: Dict[str, Dict] = {
         "base": "https://www.jma.go.jp/bosai/tgv/data/GSMWide",
         "referer": "https://www.jma.go.jp/bosai/tgv/GSM/",
         # GSMは 0〜72h を 3h刻み などにしたいならここを増やす
-        "ft_list": list(range(0, 73, 3)),  # ←ここ
+        "ft_list": list(range(0, 28, 3))  # 0,3,6,...,27
         "items": [
             # 例に合わせて：300 と 3002 の2系（あなたの提示URL）
             {"label": "300hPa",  "layer": "300",  "view_candidates": ["3002000"], "jpg_prefix": "GSM_300"},
