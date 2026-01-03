@@ -35,23 +35,24 @@ concurrency:
 # ------------------------------------------------------------
 jobs:
   send_tgv_maps:
-    # 実行環境
+    # 実行環境（GitHub Actions 標準）
     runs-on: ubuntu-latest
 
     # --------------------------------------------------------
     # 環境変数
-    # （Python スクリプトから参照される）
+    # （Python スクリプトから os.getenv() で参照される）
     # --------------------------------------------------------
     env:
-      # タイムゾーン（Pythonの datetime 表示用）
+      # タイムゾーン（datetime.now() の表示を JST にするため）
       TZ: Asia/Tokyo
 
-      # Python の標準出力を即時表示（ログ確認しやすくする）
+      # Python の標準出力をバッファリングしない
+      # → Actions のログに即時表示され、デバッグしやすい
       PYTHONUNBUFFERED: "1"
 
-      # ------------------------------
+      # ======================================================
       # メール送信設定（既存 run_jma.yml と共通）
-      # ------------------------------
+      # ======================================================
       FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
       TO_EMAIL: ${{ secrets.TO_EMAIL }}
 
@@ -60,14 +61,25 @@ jobs:
       SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
 
-      # メール件名のプレフィックス
+      # メール件名の先頭に付ける文字列
       EMAIL_SUBJECT_PREFIX: "JMA"
 
-      # ------------------------------
-      # ★最重要★
-      # Safari で取得した Authorization: Basic xxxx
-      # ------------------------------
+      # ======================================================
+      # ★ 認証情報（最重要）★
+      # ======================================================
+
+      # --- 優先的に使われる ---
+      # 気象防災アドバイザー（adv）用の ID / パスワード
+      # Python 側で Authorization: Basic xxxx を毎回生成する
+      JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
+      JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
+
+      # --- フォールバック用 ---
+      # Safari の Network タブで実測した
+      # Authorization: Basic xxxx をそのまま入れたもの
+      # （USER/PASS が未設定の場合にのみ使用）
       JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
+
 
     # --------------------------------------------------------
     # 実行ステップ
