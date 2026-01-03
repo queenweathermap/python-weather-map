@@ -51,38 +51,38 @@ MODEL_GROUPS: Dict[str, Dict] = {
     "GSM": {
         "base": "https://www.jma.go.jp/bosai/tgv/data/GSMWide",
         "referer": "https://www.jma.go.jp/bosai/tgv/GSM/",
-        # GSMは 0〜72h を 3h刻み などにしたいならここを増やす
-        "ft_list": list(range(0, 28, 3))  # 0,3,6,...,27
+        # GSMは 0〜27h（3h刻み）
+        "ft_list": list(range(0, 28, 3)),  # ← ★カンマを追加
         "items": [
-            # 例に合わせて：300 と 3002 の2系（あなたの提示URL）
-            {"label": "300hPa",  "layer": "300",  "view_candidates": ["3002000"], "jpg_prefix": "GSM_300"},
-            {"label": "300hPa-2","layer": "3002", "view_candidates": ["3102000"], "jpg_prefix": "GSM_3002"},
+            {"label": "300hPa",   "layer": "300",  "view_candidates": ["3002000"], "jpg_prefix": "GSM_300"},
+            {"label": "300hPa-2", "layer": "3002", "view_candidates": ["3102000"], "jpg_prefix": "GSM_3002"},
         ],
     },
     "MSM": {
         "base": "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow",
         "referer": "https://www.jma.go.jp/bosai/tgv/MSM/",
-        "ft_list": [0],  # 後で [0..27] を回す（例：0〜27h）
+        "ft_list": [0],
         "items": [
-            {"label": "500hPa",  "layer": "500",  "view_candidates": ["500200"],  "jpg_prefix": "MSM_500"},
-            {"label": "500hPa-2","layer": "5002", "view_candidates": ["510200"],  "jpg_prefix": "MSM_5002"},
-            {"label": "700hPa",  "layer": "700",  "view_candidates": ["700200"],  "jpg_prefix": "MSM_700"},
+            {"label": "500hPa",   "layer": "500",  "view_candidates": ["500200"], "jpg_prefix": "MSM_500"},
+            {"label": "500hPa-2", "layer": "5002", "view_candidates": ["510200"], "jpg_prefix": "MSM_5002"},
+            {"label": "700hPa",   "layer": "700",  "view_candidates": ["700200"], "jpg_prefix": "MSM_700"},
         ],
     },
     "LFM": {
         "base": "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow",
         "referer": "https://www.jma.go.jp/bosai/tgv/LFM/",
-        "ft_list": [0],  # 後で 0〜10h など
+        "ft_list": [0],
         "items": [
-            {"label": "850hPa",  "layer": "850",  "view_candidates": ["850200", "850201"], "jpg_prefix": "LFM_850"},
-            {"label": "850hPa-2","layer": "8502", "view_candidates": ["860200", "860201"], "jpg_prefix": "LFM_8502"},
-            {"label": "925hPa",  "layer": "925",  "view_candidates": ["920200", "920201"], "jpg_prefix": "LFM_925"},
-            {"label": "975hPa",  "layer": "975",  "view_candidates": ["970200", "970201"], "jpg_prefix": "LFM_975"},
-            {"label": "sfc",     "layer": "sfc",  "view_candidates": ["000200", "000201"], "jpg_prefix": "LFM_sfc"},
-            {"label": "sfc-2",   "layer": "sfc2", "view_candidates": ["010200", "010201"], "jpg_prefix": "LFM_sfc2"},
+            {"label": "850hPa",   "layer": "850",  "view_candidates": ["850200", "850201"], "jpg_prefix": "LFM_850"},
+            {"label": "850hPa-2", "layer": "8502", "view_candidates": ["860200", "860201"], "jpg_prefix": "LFM_8502"},
+            {"label": "925hPa",   "layer": "925",  "view_candidates": ["920200", "920201"], "jpg_prefix": "LFM_925"},
+            {"label": "975hPa",   "layer": "975",  "view_candidates": ["970200", "970201"], "jpg_prefix": "LFM_975"},
+            {"label": "sfc",      "layer": "sfc",  "view_candidates": ["000200", "000201"], "jpg_prefix": "LFM_sfc"},
+            {"label": "sfc-2",    "layer": "sfc2", "view_candidates": ["010200", "010201"], "jpg_prefix": "LFM_sfc2"},
         ],
     },
 }
+
 
 # =============================================================================
 # 1) 環境変数ユーティリティ
