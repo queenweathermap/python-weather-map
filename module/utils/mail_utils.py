@@ -14,14 +14,24 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from email.headerregistry import Address
 from email.utils import formataddr, formatdate, make_msgid
-from dotenv import load_dotenv
 
-load_dotenv()
+# --------------------------------------------------
+# dotenv は「ローカル開発用の任意依存」
+# GitHub Actions では Secrets が env に入るため必須ではない
+# --------------------------------------------------
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    # python-dotenv が無い環境でも正常動作させる
+    pass
 
 # ---------- utils ----------
 def _ensure_list(x) -> List[str]:
-    if x is None: return []
-    if isinstance(x, (list, tuple)): return list(x)
+    if x is None:
+        return []
+    if isinstance(x, (list, tuple)):
+        return list(x)
     return [str(x)]
 
 def _bytes_to_mb(n: int) -> float:
@@ -38,7 +48,9 @@ def _build_message(
 ) -> MIMEMultipart:
     msg = MIMEMultipart()
     localpart, _, domain = mail_from.partition("@")
-    msg["From"] = formataddr((str(Address(display_name="", username=localpart, domain=domain)), mail_from))
+    msg["From"] = formataddr(
+        (str(Address(display_name="", username=localpart, domain=domain)), mail_from)
+    )
     msg["To"] = ", ".join(to_addrs)
     if cc_addrs:
         msg["Cc"] = ", ".join(cc_addrs)
@@ -50,13 +62,17 @@ def _build_message(
 
     for name, blob, ctype in attachments:
         if ctype:
-            maintype, _, subtype = ctype.partition("/")
-            part = MIMEApplication(blob, _subtype=(subtype or "octet-stream"), Name=name)
+            _, _, subtype = ctype.partition("/")
+            part = MIMEApplication(
+                blob, _subtype=(subtype or "octet-stream"), Name=name
+            )
         else:
             part = MIMEApplication(blob, Name=name)
         part.add_header("Content-Disposition", "attachment", filename=name)
         msg.attach(part)
+
     return msg
+
 
 def _connect_and_send(
     host: str,
