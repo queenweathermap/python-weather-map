@@ -1,16 +1,12 @@
-name: Run ADV JMA (TGV Special Maps)
+# .github/workflows/run_adv.yml
+name: Run ADV JMA
 
 on:
-  # 定期実行（cronはUTC）
-  # 例）JST 14:10 = UTC 05:10
   schedule:
-    - cron: "10 5 * * *"
-
-  # 手動実行
+    - cron: "10 5 * * *"   # UTC（JST 14:10）
   workflow_dispatch: {}
 
 concurrency:
-  # 同じブランチで多重起動しない（run_jma.yml と同じ考え方）
   group: run-adv-${{ github.ref }}
   cancel-in-progress: true
 
@@ -19,48 +15,43 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # JSTで動かす（ログ時刻・ファイル名の時刻合わせ）
       TZ: Asia/Tokyo
-
-      # ログを即時出す
       PYTHONUNBUFFERED: "1"
 
-      # ======================================================
-      # Mail（module/utils/mail_utils.py が参照）
-      # ======================================================
+      # =====================
+      # Mail（mail_utils参照）
+      # =====================
       FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
       TO_EMAIL: ${{ secrets.TO_EMAIL }}
-
       SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}          # 587想定（STARTTLSはmail_utils側で対応）
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
       SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-
-      # 件名プレフィックス（mail_utilsは MAIL_SUBJECT_PREFIX を参照）
       MAIL_SUBJECT_PREFIX: "JMA"
+      SMTP_STARTTLS: "1"
+      MAIL_DEBUG: "0"
+      MAX_MAIL_SIZE_MB: "20"
 
-      # ======================================================
-      # JMA ADV 認証（adv_jma.py が参照）
-      # ======================================================
+      # =====================
+      # JMA ADV 認証
+      # =====================
       JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
       JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
-
-      # 予備（残しておく方針なら渡してOK：adv_jma.py がフォールバックで使える）
       JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
 
-      # ======================================================
-      # 任意：Slack（使う場合のみ Secrets に入れておく）
-      # ======================================================
+      # =====================
+      # Slack（副系：入っていれば使う）
+      # =====================
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      SLACK_CHUNK: "10"
 
-      # 任意：mail_utils の挙動
-      # 587 で STARTTLS を強制したい場合は 1（既定1）
-      SMTP_STARTTLS: "1"
-      # デバッグ（SMTP会話は情報が出やすいので普段は0推奨）
-      MAIL_DEBUG: "0"
-      # メールサイズ上限（mail_utils が自動ZIP判断に利用）
-      MAX_MAIL_SIZE_MB: "20"
+      # =====================
+      # ADV script tuning
+      # =====================
+      DELIVERY_MODE: "both"        # email | slack | both
+      JPG_QUALITY: "85"
+      INIT_SEARCH_HOURS: "72"
 
     steps:
       - name: Checkout repository
@@ -72,14 +63,14 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      # run_jma.yml の流儀に寄せて、requirements があればそれを優先
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            pip install requests
+            # adv_jma.py は PIL を使うので pillow 必須
+            pip install requests pillow
           fi
 
       - name: Run ADV script
