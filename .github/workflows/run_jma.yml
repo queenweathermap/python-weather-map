@@ -57,4 +57,4 @@ jobs:
           pip install requests pdf2image pillow python-dotenv   # ← 追加
 
       - name: Run JMA script
-        run: python scripts/weathercaster_jma.py
+        run: python scripts/jma_weathercaster.py
