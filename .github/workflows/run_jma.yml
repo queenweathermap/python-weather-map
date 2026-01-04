@@ -1,6 +1,6 @@
 #.github/workflows/run_jma.yml
 
-name: Run JMA Weathercaster
+name: Run JMA
 
 on:
   schedule:
