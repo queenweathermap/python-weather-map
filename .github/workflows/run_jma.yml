@@ -1,6 +1,5 @@
-#.github/workflows/run_jma.yml
-
-name: Run JMA
+# .github/workflows/run_jma.yml
+name: Run JMA Weathercaster
 
 on:
   schedule:
@@ -19,22 +18,23 @@ jobs:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: ${{ github.workspace }}
 
+      # --- Weathercaster 認証（★これが必要） ---
+      WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
+      WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
+
+      # --- Mail ---
       FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
       TO_EMAIL:   ${{ secrets.TO_EMAIL }}
       SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
       SMTP_PORT:   ${{ secrets.SMTP_PORT }}
       SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-
-      # ★Webhook名の整合
-      # SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
       MAIL_SUBJECT_PREFIX: "[JMA]"
 
-      # ★JMA認証をActionsに渡す（.env不要化）
-      # JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
-      # JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
-      # JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
+      # --- 任意：Slack（mail_utils の方式に合わせるならBot方式） ---
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      # SLACK_MODE: "error_only"  # 必要なら
 
     steps:
       - uses: actions/checkout@v4
@@ -51,10 +51,11 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install Python deps (light)
+      - name: Install Python deps
         run: |
           python -m pip install -U pip
-          pip install requests pdf2image pillow python-dotenv   # ← 追加
+          pip install requests pdf2image pillow
 
-      - name: Run JMA script
+      # ★どのファイルを動かすか固定（ここ重要）
+      - name: Run JMA Weathercaster script
         run: python scripts/jma_weathercaster.py
