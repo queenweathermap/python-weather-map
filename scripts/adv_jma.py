@@ -417,9 +417,6 @@ def main() -> None:
     print("=== Start ADV JMA TGV ===")
 
     groups = load_model_groups()
-    mode = env_str("DELIVERY_MODE", "slack").lower()
-    if mode not in ("slack", "email", "both"):
-        mode = "slack"
 
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
@@ -429,52 +426,41 @@ def main() -> None:
         try:
             init_dt = find_working_init_dt(model_name, cfg, max_back_hours=72)
         except Exception as e:
-            msg = f"❌ ADV TGV {model_name}: INIT not found / auth-like\n{type(e).__name__}: {e}"
+            msg = f"❌ ADV TGV {model_name}: INIT not found / auth error\n{type(e).__name__}: {e}"
             print(msg)
-            slack_notify(msg)  # ✅ 重要なので通知
+            slack_notify(msg)
             continue
 
-        # 2) itemごとに取得 → 送信
-        total_files = 0
-        auth_failed = False
-
+        # 2) itemごとに取得 → メール（本命）→ Slack画像（副系）
         for item in cfg.items:
-            atts, af = fetch_item_images(model_name, cfg, init_dt, item)
-            if af:
-                auth_failed = True
-                break
+            atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
+
+            if auth_failed:
+                slack_notify(
+                    f"❌ ADV TGV {model_name} {item.label}: auth error (401/403 or HTML)"
+                )
+                break  # このモデルは打ち切り（次のモデルへ）
 
             if not atts:
-                # item単位の“空”はよくあるので通知しない
-                print(f"[WARN] {model_name} {item.label}: no files (maybe 404s)")
+                print(f"[WARN] {model_name} {item.label}: no images")
                 continue
 
-            total_files += len(atts)
-
-            # Slack / Email / Both
+            # ① メール送信（本命）
             try:
-                if mode in ("slack", "both"):
-                    send_item_slack(model_name, item, init_dt, atts)
-                if mode in ("email", "both"):
-                    send_item_mail(model_name, item, init_dt, atts)
+                send_item_mail(model_name, item, init_dt, atts)
             except Exception as e:
-                msg = f"❌ ADV TGV {model_name} {item.label}: delivery failed\n{type(e).__name__}: {e}"
-                print(msg)
-                slack_notify(msg)  # ✅ 送信失敗は重要
+                slack_notify(
+                    f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}"
+                )
+                continue  # 次のitemへ
 
-        # 3) Slack通知条件
-        if auth_failed:
-            msg = f"❌ ADV TGV {model_name}: auth error (401/403 or HTML detected)"
-            print(msg)
-            slack_notify(msg)
-            continue
-
-        if total_files == 0:
-            # ✅ モデル全滅のみ Slack
-            init_str = init_dt.strftime("%m/%d %H:00(UTC)")
-            msg = f"❌ ADV TGV {model_name}: no images fetched (model total=0) init={init_str}"
-            print(msg)
-            slack_notify(msg)
+            # ② Slack画像送信（副系）※失敗しても処理継続
+            try:
+                send_item_slack(model_name, item, init_dt, atts)
+            except Exception as e:
+                print(f"[WARN] Slack image send failed: {model_name} {item.label}: {e}")
+                # 必要なら軽いテキストだけ
+                # slack_notify(f"⚠️ Slack image failed: {model_name} {item.label}")
 
     print("\n=== Done ADV JMA TGV ===")
 
