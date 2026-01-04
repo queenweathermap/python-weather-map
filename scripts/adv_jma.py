@@ -120,6 +120,7 @@ def headers_for(referer: str) -> dict:
         "Referer": referer,
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
 
 
@@ -177,7 +178,7 @@ def view_for_ft(view_base: str, ft_hours: int) -> str:
 class Item:
     label: str
     layer: str
-    view_bases: List[str]   # base view (ft桁込みの “ft=0相当” を置くのが基本)
+    view_bases: List[str]   # base view（ft=0相当を置く）
     jpg_prefix: str
 
 
@@ -248,18 +249,24 @@ def load_model_groups() -> Dict[str, ModelCfg]:
 # =============================================================================
 # INIT auto-detect
 # =============================================================================
-def probe_init(url: str, referer: str) -> Tuple[bool, int, str, bytes]:
+def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
     r = requests.get(url, headers=headers_for(referer), timeout=25)
     ctype = (r.headers.get("Content-Type") or "").lower()
-    return (r.status_code == 200, r.status_code, ctype, r.content[:200])
+    head = r.content[:200]
+    return r.status_code, ctype, head
 
 
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
+    """
+    重要：
+    - 404は“普通に起きる”ので例外にしない（HTMLでもOK）
+    - 401/403は認証エラー
+    - 200なのにHTMLは認証ページ/ブロック疑い
+    """
     step = cfg.init_step_hours
     now = datetime.now(timezone.utc)
     start = floor_to_step(now, step)
 
-    # 代表画像：items[0] の view_base を ft=0 に
     it0 = cfg.items[0]
     base_view = it0.view_bases[0]
     view0 = view_for_ft(base_view, 0)
@@ -270,20 +277,21 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
         url = build_png_url(cfg.base, it0.layer, view0, rjtd)
 
         try:
-            ok, st, ctype, head = probe_init(url, cfg.referer)
-            if ok:
+            st, ctype, head = probe_init(url, cfg.referer)
+
+            if st == 200:
+                # 200でもHTMLならおかしい（認証ページ等）
+                if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
+                    raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
+
                 print(f"[OK] {model_name} init found: {init_dt.isoformat()} (RJTD_{rjtd}) url={url}")
                 return init_dt
 
-            # 認証系は即通知対象
             if st in (401, 403):
                 raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
-            # 404でも、HTMLが返ってきていたら “認証/ブロック疑い” に寄せて扱う
-            if "text/html" in ctype or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
-                raise RuntimeError(f"{model_name} auth-like HTML response (HTTP{st}) url={url}")
-
-            print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st}")
+            # 404含む、それ以外は探索継続
+            print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st} url={url}")
 
         except Exception as e:
             print(f"[ERR] {model_name} init probe failed: {type(e).__name__}: {e}")
@@ -304,7 +312,7 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
     """
     1天気図ぶん取得
     - 404はよくあるので黙ってスキップ（printは出す）
-    - 401/403 or HTML（認証ページ疑い）なら auth_failed=True
+    - 401/403 or 200なのにHTML（認証ページ疑い）なら auth_failed=True
     """
     jpg_quality = env_int("JPG_QUALITY", 85)
     rjtd = fmt_rjtd(init_dt)  # ✅ RJTDはinit固定
@@ -323,9 +331,10 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
                 status, content, ctype = fetch_png(url, cfg.referer)
 
                 if status == 200:
-                    if "text/html" in ctype or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
+                    # 200でHTMLは異常（ログインHTML等）
+                    if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
                         auth_failed = True
-                        print(f"[NG] {model_name} {item.label} ft={ft}: got HTML (auth?) url={url}")
+                        print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
                         got = False
                         break
 
@@ -343,20 +352,17 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
                     break
 
                 if status == 404:
-                    # ✅ Slackには出さない
                     print(f"[NG] {model_name} {item.label} ft={ft}: HTTP404 url={url}")
                     continue
 
                 print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} url={url}")
 
             except Exception as e:
-                # ネットワーク例外も “全滅時だけ” Slackにまとめたいので、ここではprintのみ
                 print(f"[ERR] {model_name} {item.label} ft={ft}: {type(e).__name__}: {e} url={url}")
 
         if auth_failed:
             break
 
-        # そのftが全部ダメでも続行（“あるある”）
         if not got:
             continue
 
@@ -416,6 +422,7 @@ def send_item_slack(model_name: str, item: Item, init_dt: datetime, atts: List[A
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
 
+    mode = env_str("DELIVERY_MODE", "slack").lower()
     groups = load_model_groups()
 
     for model_name in ("GSM", "MSM", "LFM"):
@@ -431,36 +438,43 @@ def main() -> None:
             slack_notify(msg)
             continue
 
+        model_total = 0
+        model_auth_failed = False
+
         # 2) itemごとに取得 → メール（本命）→ Slack画像（副系）
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
             if auth_failed:
-                slack_notify(
-                    f"❌ ADV TGV {model_name} {item.label}: auth error (401/403 or HTML)"
-                )
-                break  # このモデルは打ち切り（次のモデルへ）
+                model_auth_failed = True
+                slack_notify(f"❌ ADV TGV {model_name} {item.label}: auth error (401/403 or HTTP200-HTML)")
+                break
 
             if not atts:
                 print(f"[WARN] {model_name} {item.label}: no images")
                 continue
 
-            # ① メール送信（本命）
-            try:
-                send_item_mail(model_name, item, init_dt, atts)
-            except Exception as e:
-                slack_notify(
-                    f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}"
-                )
-                continue  # 次のitemへ
+            model_total += len(atts)
 
-            # ② Slack画像送信（副系）※失敗しても処理継続
-            try:
-                send_item_slack(model_name, item, init_dt, atts)
-            except Exception as e:
-                print(f"[WARN] Slack image send failed: {model_name} {item.label}: {e}")
-                # 必要なら軽いテキストだけ
-                # slack_notify(f"⚠️ Slack image failed: {model_name} {item.label}")
+            if mode in ("email", "both"):
+                try:
+                    send_item_mail(model_name, item, init_dt, atts)
+                except Exception as e:
+                    slack_notify(
+                        f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}"
+                    )
+
+            if mode in ("slack", "both"):
+                try:
+                    send_item_slack(model_name, item, init_dt, atts)
+                except Exception as e:
+                    print(f"[WARN] Slack image send failed: {model_name} {item.label}: {e}")
+
+        # 3) モデル全滅だけ通知（あなたの希望）
+        if (not model_auth_failed) and (model_total == 0):
+            slack_notify(
+                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\ninit={init_dt.strftime('%m/%d %H:00(UTC)')}"
+            )
 
     print("\n=== Done ADV JMA TGV ===")
 
