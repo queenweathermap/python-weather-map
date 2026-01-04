@@ -1,5 +1,5 @@
 # .github/workflows/run_adv.yml
-name: Run ADV JMA
+name: Run JMA ADV
 
 on:
   schedule:
