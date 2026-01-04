@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-# scripts/weathercaster_jma.py
+# scripts/jma_weathercaster.py
 # 気象庁 Weathercaster（会員ページ）PDFを保存せずにDL→JPG化
 # - 出力は /tmp に展開
 # - メール送信（JPGを複数添付：ZIPにしない）
