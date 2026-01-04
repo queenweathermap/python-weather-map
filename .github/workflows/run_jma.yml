@@ -27,14 +27,14 @@ jobs:
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
 
       # ★Webhook名の整合
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      # SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
       MAIL_SUBJECT_PREFIX: "[JMA]"
 
       # ★JMA認証をActionsに渡す（.env不要化）
-      JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
-      JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
-      JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
+      # JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
+      # JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
+      # JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
 
     steps:
       - uses: actions/checkout@v4
