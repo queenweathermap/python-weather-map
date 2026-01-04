@@ -210,18 +210,20 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item(label="300hPa",   layer="300",  view_base="3001000", view_digits=3, jpg_prefix="GSM_300"),
         Item(label="300hPa-2", layer="3002", view_base="3101000", view_digits=3, jpg_prefix="GSM_3002"),
     ]
+    
     msm_items = [
-        Item(label="500hPa",   layer="500",  view_base="500000", view_digits=2, jpg_prefix="MSM_500"),
-        Item(label="500hPa-2", layer="5002", view_base="510000", view_digits=2, jpg_prefix="MSM_5002"),
-        Item(label="700hPa",   layer="700",  view_base="700000", view_digits=2, jpg_prefix="MSM_700"),
+        Item(label="500hPa",   layer="500",  view_base="500000", view_digits=3, jpg_prefix="MSM_500"),
+        Item(label="500hPa-2", layer="5002", view_base="510000", view_digits=3, jpg_prefix="MSM_5002"),
+        Item(label="700hPa",   layer="700",  view_base="700000", view_digits=3, jpg_prefix="MSM_700"),
     ]
+    
     lfm_items = [
-        Item(label="850hPa",   layer="850",  view_base="850200", view_digits=2, jpg_prefix="LFM_850"),
-        Item(label="850hPa-2", layer="8502", view_base="860200", view_digits=2, jpg_prefix="LFM_8502"),
-        Item(label="925hPa",   layer="925",  view_base="920200", view_digits=2, jpg_prefix="LFM_925"),
-        Item(label="975hPa",   layer="975",  view_base="970200", view_digits=2, jpg_prefix="LFM_975"),
-        Item(label="sfc",      layer="sfc",  view_base="000200", view_digits=2, jpg_prefix="LFM_sfc"),
-        Item(label="sfc-2",    layer="sfc2", view_base="010200", view_digits=2, jpg_prefix="LFM_sfc2"),
+        Item(label="850hPa",   layer="850",  view_base="850200", view_digits=3, jpg_prefix="LFM_850"),
+        Item(label="850hPa-2", layer="8502", view_base="860200", view_digits=3, jpg_prefix="LFM_8502"),
+        Item(label="925hPa",   layer="925",  view_base="920200", view_digits=3, jpg_prefix="LFM_925"),
+        Item(label="975hPa",   layer="975",  view_base="970200", view_digits=3, jpg_prefix="LFM_975"),
+        Item(label="sfc",      layer="sfc",  view_base="000200", view_digits=3, jpg_prefix="LFM_sfc"),
+        Item(label="sfc-2",    layer="sfc2", view_base="010200", view_digits=3, jpg_prefix="LFM_sfc2"),
     ]
 
     return {
