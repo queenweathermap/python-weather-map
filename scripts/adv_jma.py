@@ -1,30 +1,28 @@
-# scripts/adv_jma.py
 # -*- coding: utf-8 -*-
 # =============================================================================
+# scripts/adv_jma.py
+#
 # JMA 防災情報アドバイザー向け「専門天気図（tgv）」を自動取得し、
-# “天気図ごと（itemごと）” に Slack投稿 / メール送信する。
+# “天気図ごと（itemごと）” に Slack 投稿（/メール）する。
 #
 # ✅ 最終仕様
 # - 取得元：JMA tgv の PNG
-# - 送付：JPG（PNGより軽量化）
-# - 送信単位：天気図ごと（itemごと）
-# - INIT（RJTD）は「存在する初期時刻」を自動探索して合わせる
-# - FTは VIEWコード末尾で表現（RJTDはinit固定）
+# - Slack/メール送信：JPG（PNGより軽量化）
+# - 送信単位：天気図ごと（itemごと）に分割
+# - INIT（RJTD）は「存在する初期時刻」を自動探索
+# - FT は VIEWコード末尾で表現（RJTDはinit固定）  ← 重要
 # - Slack通知：404は出さない
-#   * 401/403/HTML(認証) or モデル全滅（1枚も取れない） or init探索失敗のみ通知
+#   * 401/403（認証系） or モデル全滅（1枚も取れない）だけ通知
 #
-# ✅ 認証（優先順位）
-#   1) JMA_ADV_USER / JMA_ADV_PASS → Basic生成（推奨）
-#   2) JMA_AUTH_BASIC → "Basic xxxx" をそのまま利用（フォールバック）
+# ✅ 環境変数
+# - JMA_ADV_USER / JMA_ADV_PASS  (推奨)   または JMA_AUTH_BASIC ("Basic xxxx")
+# - SLACK_BOT_TOKEN / SLACK_CHANNEL_ID    (Slack投稿したい場合)
+# - DELIVERY_MODE = slack | email | both  (default: slack)
+# - SLACK_CHUNK = 10                      (default: 10)  1投稿の枚数
 #
-# ✅ 配信モード
-#   DELIVERY_MODE=slack | email | both  （default=slack）
-#   SLACK_CHUNK=10 （1投稿あたりの添付枚数。default=10）
-#
-# 依存:
-# - requests, pillow
-# - module.utils.mail_utils.send_mail
-# - module.utils.slack_utils.send_slack_text, upload_bytes_slack
+# - GSM_MAX_FT (default=27) / GSM_FT_STEP (default=3)
+# - MSM_MAX_FT (default=0)  / MSM_FT_STEP (default=1)
+# - LFM_MAX_FT (default=0)  / LFM_FT_STEP (default=1)
 # =============================================================================
 
 import sys
@@ -48,7 +46,13 @@ from module.utils.slack_utils import send_slack_text, upload_bytes_slack
 
 
 # =============================================================================
-# Env
+# Types
+# =============================================================================
+Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
+
+
+# =============================================================================
+# Env utils
 # =============================================================================
 def must_env(name: str) -> str:
     v = os.getenv(name)
@@ -67,6 +71,11 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_str(name: str, default: str = "") -> str:
+    v = os.getenv(name)
+    return default if v is None else v.strip()
+
+
 # =============================================================================
 # Auth
 # =============================================================================
@@ -76,6 +85,7 @@ def make_basic_auth(user: str, password: str) -> str:
 
 
 def get_auth_basic() -> str:
+    # 優先：user/pass → 生成、無ければ JMA_AUTH_BASIC
     user = os.getenv("JMA_ADV_USER")
     pw = os.getenv("JMA_ADV_PASS")
     if user and pw:
@@ -84,54 +94,20 @@ def get_auth_basic() -> str:
 
 
 # =============================================================================
-# Slack
+# Slack (critical only)
 # =============================================================================
 def slack_enabled() -> bool:
-    return bool(os.getenv("SLACK_BOT_TOKEN")) and bool(os.getenv("SLACK_CHANNEL_ID"))
+    return bool(env_str("SLACK_BOT_TOKEN")) and bool(env_str("SLACK_CHANNEL_ID"))
 
 
 def slack_notify(text: str) -> None:
+    # 401/403 や “全滅” など、重要な時だけ呼ぶ想定
     if not slack_enabled():
         return
     try:
-        ch = os.getenv("SLACK_CHANNEL_ID", "").strip()
-        if not ch:
-            return
-        send_slack_text(channel=ch, message=text)
+        send_slack_text(channel=env_str("SLACK_CHANNEL_ID"), message=text)
     except Exception as e:
         print(f"[WARN] Slack notify failed: {e}")
-
-
-Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
-
-
-def send_item_slack(
-    model_name: str,
-    item_label: str,
-    init_dt: datetime,
-    atts: List[Attachment],
-    *,
-    chunk_size: int = 10,
-) -> None:
-    """
-    天気図（item）単位でSlackへ投稿（必要なら分割）
-    """
-    if not slack_enabled():
-        return
-    channel = os.getenv("SLACK_CHANNEL_ID", "").strip()
-    if not channel:
-        return
-
-    init_str = init_dt.strftime("%m/%d %H:00(UTC)")
-    header = f"🗺️ ADV TGV {model_name} / {item_label}  init={init_str}  files={len(atts)}"
-
-    pairs = [(fn, blob) for (fn, blob, _mime) in atts]
-    for i in range(0, len(pairs), chunk_size):
-        chunk = pairs[i:i + chunk_size]
-        comment = header if i == 0 else f"🗺️ ADV TGV {model_name}/{item_label}（続き {i//chunk_size + 1}）"
-        upload_bytes_slack(channel=channel, files=chunk, initial_comment=comment)
-
-    print(f"[OK] slack sent: {model_name} {item_label} files={len(atts)}")
 
 
 # =============================================================================
@@ -168,6 +144,7 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
 # URL rules
 # =============================================================================
 def fmt_rjtd(init_dt_utc: datetime) -> str:
+    # RJTD: MMDDHHMM (UTC), 分は00固定
     dt = init_dt_utc.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
     return dt.strftime("%m%d%H%M")
 
@@ -184,27 +161,12 @@ def build_png_url(base: str, layer: str, view_code: str, rjtd: str) -> str:
 
 def view_for_ft(view_base: str, ft_hours: int) -> str:
     """
-    FTは VIEW末尾に入る（RJTDはinit固定）
-    ただし “末尾が何桁FTか” は系列によって違うので、候補viewから自動推定する。
+    FT は VIEWコード末尾で表現する（RJTDはinit固定）
 
-    ルール（経験則）:
-    - 末尾が '000' や '003' のように3桁FTに見える系列 → 3桁
-    - 末尾が '00' や '01' のように2桁FTに見える系列 → 2桁
-    - 迷ったら 3桁を優先（GSMWideがこれに多い）
+    - GSM: 7桁（例 3102000） → 末尾3桁をFT(000/003/006...)に
+    - MSM/LFM: 6桁（例 500200） → 末尾2桁をFT(00/01/02...)に
     """
-    # 末尾3桁が数字で、かつ 000/003/006/009... の雰囲気なら3桁
-    if len(view_base) >= 3 and view_base[-3:].isdigit():
-        tail3 = int(view_base[-3:])
-        # よくある 0,1,2 などの系列もあるので「0〜99は2桁」と決め打ちしない
-        # ただ GSMWide(あなたの例)は 000/003/006... が出るので、3の倍数なら3桁を強く採用
-        if tail3 % 3 == 0:
-            digits = 3
-        else:
-            # 末尾2桁も数字なら2桁系列の可能性
-            digits = 2 if (len(view_base) >= 2 and view_base[-2:].isdigit()) else 3
-    else:
-        digits = 2 if (len(view_base) >= 2 and view_base[-2:].isdigit()) else 3
-
+    digits = 3 if len(view_base) >= 7 else 2
     return f"{view_base[:-digits]}{ft_hours:0{digits}d}"
 
 
@@ -215,7 +177,7 @@ def view_for_ft(view_base: str, ft_hours: int) -> str:
 class Item:
     label: str
     layer: str
-    view_candidates: List[str]
+    view_bases: List[str]   # base view (ft桁込みの “ft=0相当” を置くのが基本)
     jpg_prefix: str
 
 
@@ -235,13 +197,13 @@ def build_ft_list(max_ft: int, step: int) -> List[int]:
 
 
 def load_model_groups() -> Dict[str, ModelCfg]:
-    gsm_max = env_int("GSM_MAX_FT", 27)
+    gsm_max  = env_int("GSM_MAX_FT", 27)
     gsm_step = env_int("GSM_FT_STEP", 3)
 
-    msm_max = env_int("MSM_MAX_FT", 0)
+    msm_max  = env_int("MSM_MAX_FT", 0)
     msm_step = env_int("MSM_FT_STEP", 1)
 
-    lfm_max = env_int("LFM_MAX_FT", 0)
+    lfm_max  = env_int("LFM_MAX_FT", 0)
     lfm_step = env_int("LFM_FT_STEP", 1)
 
     return {
@@ -251,8 +213,8 @@ def load_model_groups() -> Dict[str, ModelCfg]:
             init_step_hours=3,
             ft_list=build_ft_list(gsm_max, gsm_step),
             items=[
-                Item(label="300hPa",   layer="300",  view_candidates=["3002000"], jpg_prefix="GSM_300"),
-                Item(label="300hPa-2", layer="3002", view_candidates=["3102000"], jpg_prefix="GSM_3002"),
+                Item(label="300hPa",   layer="300",  view_bases=["3002000"], jpg_prefix="GSM_300"),
+                Item(label="300hPa-2", layer="3002", view_bases=["3102000"], jpg_prefix="GSM_3002"),
             ],
         ),
         "MSM": ModelCfg(
@@ -261,9 +223,9 @@ def load_model_groups() -> Dict[str, ModelCfg]:
             init_step_hours=1,
             ft_list=build_ft_list(msm_max, msm_step),
             items=[
-                Item(label="500hPa",   layer="500",  view_candidates=["500200"], jpg_prefix="MSM_500"),
-                Item(label="500hPa-2", layer="5002", view_candidates=["510200"], jpg_prefix="MSM_5002"),
-                Item(label="700hPa",   layer="700",  view_candidates=["700200"], jpg_prefix="MSM_700"),
+                Item(label="500hPa",   layer="500",  view_bases=["500200"], jpg_prefix="MSM_500"),
+                Item(label="500hPa-2", layer="5002", view_bases=["510200"], jpg_prefix="MSM_5002"),
+                Item(label="700hPa",   layer="700",  view_bases=["700200"], jpg_prefix="MSM_700"),
             ],
         ),
         "LFM": ModelCfg(
@@ -272,12 +234,12 @@ def load_model_groups() -> Dict[str, ModelCfg]:
             init_step_hours=1,
             ft_list=build_ft_list(lfm_max, lfm_step),
             items=[
-                Item(label="850hPa",   layer="850",  view_candidates=["850200", "850201"], jpg_prefix="LFM_850"),
-                Item(label="850hPa-2", layer="8502", view_candidates=["860200", "860201"], jpg_prefix="LFM_8502"),
-                Item(label="925hPa",   layer="925",  view_candidates=["920200", "920201"], jpg_prefix="LFM_925"),
-                Item(label="975hPa",   layer="975",  view_candidates=["970200", "970201"], jpg_prefix="LFM_975"),
-                Item(label="sfc",      layer="sfc",  view_candidates=["000200", "000201"], jpg_prefix="LFM_sfc"),
-                Item(label="sfc-2",    layer="sfc2", view_candidates=["010200", "010201"], jpg_prefix="LFM_sfc2"),
+                Item(label="850hPa",   layer="850",  view_bases=["850200"], jpg_prefix="LFM_850"),
+                Item(label="850hPa-2", layer="8502", view_bases=["860200"], jpg_prefix="LFM_8502"),
+                Item(label="925hPa",   layer="925",  view_bases=["920200"], jpg_prefix="LFM_925"),
+                Item(label="975hPa",   layer="975",  view_bases=["970200"], jpg_prefix="LFM_975"),
+                Item(label="sfc",      layer="sfc",  view_bases=["000200"], jpg_prefix="LFM_sfc"),
+                Item(label="sfc-2",    layer="sfc2", view_bases=["010200"], jpg_prefix="LFM_sfc2"),
             ],
         ),
     }
@@ -286,21 +248,20 @@ def load_model_groups() -> Dict[str, ModelCfg]:
 # =============================================================================
 # INIT auto-detect
 # =============================================================================
-def probe_status(url: str, referer: str) -> int:
+def probe_init(url: str, referer: str) -> Tuple[bool, int, str, bytes]:
     r = requests.get(url, headers=headers_for(referer), timeout=25)
-    return r.status_code
+    ctype = (r.headers.get("Content-Type") or "").lower()
+    return (r.status_code == 200, r.status_code, ctype, r.content[:200])
 
 
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
-    """
-    いまのUTCから遡って、「ft=0の代表画像が200になる init_dt」を探す。
-    """
     step = cfg.init_step_hours
     now = datetime.now(timezone.utc)
     start = floor_to_step(now, step)
 
+    # 代表画像：items[0] の view_base を ft=0 に
     it0 = cfg.items[0]
-    base_view = it0.view_candidates[0]
+    base_view = it0.view_bases[0]
     view0 = view_for_ft(base_view, 0)
 
     for back in range(0, max_back_hours + 1, step):
@@ -309,15 +270,20 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
         url = build_png_url(cfg.base, it0.layer, view0, rjtd)
 
         try:
-            st = probe_status(url, cfg.referer)
-            if st == 200:
+            ok, st, ctype, head = probe_init(url, cfg.referer)
+            if ok:
                 print(f"[OK] {model_name} init found: {init_dt.isoformat()} (RJTD_{rjtd}) url={url}")
                 return init_dt
 
+            # 認証系は即通知対象
             if st in (401, 403):
                 raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
-            print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st} url={url}")
+            # 404でも、HTMLが返ってきていたら “認証/ブロック疑い” に寄せて扱う
+            if "text/html" in ctype or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
+                raise RuntimeError(f"{model_name} auth-like HTML response (HTTP{st}) url={url}")
+
+            print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st}")
 
         except Exception as e:
             print(f"[ERR] {model_name} init probe failed: {type(e).__name__}: {e}")
@@ -326,7 +292,7 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
 
 
 # =============================================================================
-# Fetch per-item
+# Fetch per item
 # =============================================================================
 def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
     r = requests.get(url, headers=headers_for(referer), timeout=40)
@@ -336,10 +302,9 @@ def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
 
 def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: Item) -> Tuple[List[Attachment], bool]:
     """
-    1アイテム（=天気図）ぶん取得
-    戻り値：
-      - attachments: JPG添付/Slack用
-      - auth_failed: 401/403/HTML(認証) が出たら True
+    1天気図ぶん取得
+    - 404はよくあるので黙ってスキップ（printは出す）
+    - 401/403 or HTML（認証ページ疑い）なら auth_failed=True
     """
     jpg_quality = env_int("JPG_QUALITY", 85)
     rjtd = fmt_rjtd(init_dt)  # ✅ RJTDはinit固定
@@ -348,9 +313,9 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
     auth_failed = False
 
     for ft in cfg.ft_list:
-        got_one = False
+        got = False
 
-        for base_view in item.view_candidates:
+        for base_view in item.view_bases:
             view_code = view_for_ft(base_view, ft)
             url = build_png_url(cfg.base, item.layer, view_code, rjtd)
 
@@ -358,44 +323,51 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
                 status, content, ctype = fetch_png(url, cfg.referer)
 
                 if status == 200:
-                    if "text/html" in ctype or content[:20].lower().startswith(b"<!doctype html"):
+                    if "text/html" in ctype or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
                         auth_failed = True
                         print(f"[NG] {model_name} {item.label} ft={ft}: got HTML (auth?) url={url}")
+                        got = False
                         break
 
                     jpg = png_bytes_to_jpg_bytes(content, quality=jpg_quality)
                     fname = f"{item.jpg_prefix}_ft{ft:03d}.jpg"
                     atts.append((fname, jpg, "image/jpeg"))
                     print(f"[OK] {model_name} {item.label} ft={ft} url={url}")
-                    got_one = True
+                    got = True
                     break
 
                 if status in (401, 403):
                     auth_failed = True
                     print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} auth url={url}")
+                    got = False
                     break
 
-                # 404は“あるある”。Slack通知しない（printのみ）
                 if status == 404:
+                    # ✅ Slackには出さない
                     print(f"[NG] {model_name} {item.label} ft={ft}: HTTP404 url={url}")
                     continue
 
                 print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} url={url}")
 
             except Exception as e:
+                # ネットワーク例外も “全滅時だけ” Slackにまとめたいので、ここではprintのみ
                 print(f"[ERR] {model_name} {item.label} ft={ft}: {type(e).__name__}: {e} url={url}")
 
         if auth_failed:
             break
 
-        # ftごとに必ず1枚取れないのは普通にあり得る（欠測/未更新）
-        # got_one が False でも継続
+        # そのftが全部ダメでも続行（“あるある”）
+        if not got:
+            continue
 
     return atts, auth_failed
 
 
+# =============================================================================
+# Delivery: Email / Slack (per item)
+# =============================================================================
 def send_item_mail(model_name: str, item: Item, init_dt: datetime, atts: List[Attachment]) -> None:
-    prefix = os.getenv("MAIL_SUBJECT_PREFIX", "JMA").strip()
+    prefix = env_str("MAIL_SUBJECT_PREFIX", "JMA")
     init_str = init_dt.strftime("%m/%d %H:00(UTC)")
     subject = f"{prefix} ADV TGV {model_name} {item.label} init={init_str}"
 
@@ -420,6 +392,24 @@ def send_item_mail(model_name: str, item: Item, init_dt: datetime, atts: List[At
     print(f"[OK] mail sent: {model_name} {item.label} files={len(atts)}")
 
 
+def send_item_slack(model_name: str, item: Item, init_dt: datetime, atts: List[Attachment]) -> None:
+    channel = env_str("SLACK_CHANNEL_ID")
+    if not channel:
+        raise RuntimeError("SLACK_CHANNEL_ID is missing")
+
+    chunk_size = env_int("SLACK_CHUNK", 10)
+    init_str = init_dt.strftime("%m/%d %H:00(UTC)")
+    header = f"🗺️ ADV TGV {model_name} / {item.label}  init={init_str}  files={len(atts)}"
+
+    pairs = [(fn, blob) for (fn, blob, _mime) in atts]
+    for i in range(0, len(pairs), chunk_size):
+        chunk = pairs[i:i + chunk_size]
+        comment = header if i == 0 else f"🗺️ ADV TGV {model_name} / {item.label}（続き {i//chunk_size + 1}）"
+        upload_bytes_slack(channel=channel, files=chunk, initial_comment=comment)
+
+    print(f"[OK] slack sent: {model_name} {item.label} files={len(atts)}")
+
+
 # =============================================================================
 # main
 # =============================================================================
@@ -427,71 +417,62 @@ def main() -> None:
     print("=== Start ADV JMA TGV ===")
 
     groups = load_model_groups()
-    mode = os.getenv("DELIVERY_MODE", "slack").strip().lower()
-    slack_chunk = env_int("SLACK_CHUNK", 10)
+    mode = env_str("DELIVERY_MODE", "slack").lower()
+    if mode not in ("slack", "email", "both"):
+        mode = "slack"
 
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
         print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
 
-        # 1) init探索（失敗はSlack通知対象）
+        # 1) init探索
         try:
             init_dt = find_working_init_dt(model_name, cfg, max_back_hours=72)
         except Exception as e:
-            msg = f"❌ ADV TGV {model_name}: INIT not found / auth error\n{type(e).__name__}: {e}"
+            msg = f"❌ ADV TGV {model_name}: INIT not found / auth-like\n{type(e).__name__}: {e}"
             print(msg)
-            slack_notify(msg)
+            slack_notify(msg)  # ✅ 重要なので通知
             continue
 
+        # 2) itemごとに取得 → 送信
         total_files = 0
-        any_auth_failed = False
+        auth_failed = False
 
-        # 2) itemごとに fetch → slack/email
         for item in cfg.items:
-            atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
-
-            if auth_failed:
-                any_auth_failed = True
+            atts, af = fetch_item_images(model_name, cfg, init_dt, item)
+            if af:
+                auth_failed = True
                 break
 
             if not atts:
-                # item単位の全滅は「ありがち」なのでSlack通知しない（printだけ）
+                # item単位の“空”はよくあるので通知しない
                 print(f"[WARN] {model_name} {item.label}: no files (maybe 404s)")
                 continue
 
             total_files += len(atts)
 
-            # Slack投稿（天気図ごと）
-            if mode in ("slack", "both"):
-                try:
-                    send_item_slack(model_name, item.label, init_dt, atts, chunk_size=slack_chunk)
-                except Exception as e:
-                    # 画像をSlackで受け取る仕様なら、ここは重要なので通知してよい
-                    msg = f"❌ ADV TGV {model_name} {item.label}: slack upload failed\n{type(e).__name__}: {e}"
-                    print(msg)
-                    slack_notify(msg)
-
-            # メール送信（天気図ごと）
-            if mode in ("email", "both"):
-                try:
+            # Slack / Email / Both
+            try:
+                if mode in ("slack", "both"):
+                    send_item_slack(model_name, item, init_dt, atts)
+                if mode in ("email", "both"):
                     send_item_mail(model_name, item, init_dt, atts)
-                except Exception as e:
-                    msg = f"❌ ADV TGV {model_name} {item.label}: mail send failed\n{type(e).__name__}: {e}"
-                    print(msg)
-                    slack_notify(msg)
+            except Exception as e:
+                msg = f"❌ ADV TGV {model_name} {item.label}: delivery failed\n{type(e).__name__}: {e}"
+                print(msg)
+                slack_notify(msg)  # ✅ 送信失敗は重要
 
-        # 3) Slack通知条件（あなたの希望どおり）
-        if any_auth_failed:
-            msg = f"❌ ADV TGV {model_name}: auth error (401/403 or HTML detected)."
+        # 3) Slack通知条件
+        if auth_failed:
+            msg = f"❌ ADV TGV {model_name}: auth error (401/403 or HTML detected)"
             print(msg)
             slack_notify(msg)
             continue
 
         if total_files == 0:
-            msg = (
-                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\n"
-                f"init={init_dt.strftime('%m/%d %H:00(UTC)')}"
-            )
+            # ✅ モデル全滅のみ Slack
+            init_str = init_dt.strftime("%m/%d %H:00(UTC)")
+            msg = f"❌ ADV TGV {model_name}: no images fetched (model total=0) init={init_str}"
             print(msg)
             slack_notify(msg)
 
