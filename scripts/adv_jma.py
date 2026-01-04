@@ -3,26 +3,22 @@
 # scripts/adv_jma.py
 #
 # JMA 防災情報アドバイザー向け「専門天気図（tgv）」を自動取得し、
-# “天気図ごと（itemごと）” に Slack 投稿（/メール）する。
+# “天気図ごと（itemごと）” にメール送信（必須）＋Slack投稿（副系）する。
 #
-# ✅ 最終仕様
-# - 取得元：JMA tgv の PNG
-# - Slack/メール送信：JPG（PNGより軽量化）
-# - 送信単位：天気図ごと（itemごと）に分割
-# - INIT（RJTD）は「存在する初期時刻」を自動探索
-# - FT は VIEWコード末尾で表現（RJTDはinit固定）  ← 重要
-# - Slack通知：404は出さない
-#   * 401/403（認証系） or モデル全滅（1枚も取れない）だけ通知
+# ✅ 仕様（あなたの現行URL規則に完全準拠）
+# - FT は VIEWコード末尾で表現（RJTDは init 固定）
+# - GSM: FT=3..30 (3h) 10枚 / item（Slack 1投稿・メール1通）
+# - MSM: FT=1..15(1h) + 18,21,24,27,30 合計20枚 / item（Slack 2投稿・メール1通）
+# - LFM: FT=1..18(1h) 18枚 / item（Slack 2投稿(10+8)・メール1通）
+# - Slack通知（テキスト）は 401/403 or モデル全滅のみ（404は通知しない）
 #
 # ✅ 環境変数
 # - JMA_ADV_USER / JMA_ADV_PASS  (推奨)   または JMA_AUTH_BASIC ("Basic xxxx")
+# - DELIVERY_MODE = email | slack | both  (default: both)  ※メール必須想定だが切替可
 # - SLACK_BOT_TOKEN / SLACK_CHANNEL_ID    (Slack投稿したい場合)
-# - DELIVERY_MODE = slack | email | both  (default: slack)
-# - SLACK_CHUNK = 10                      (default: 10)  1投稿の枚数
-#
-# - GSM_MAX_FT (default=27) / GSM_FT_STEP (default=3)
-# - MSM_MAX_FT (default=0)  / MSM_FT_STEP (default=1)
-# - LFM_MAX_FT (default=0)  / LFM_FT_STEP (default=1)
+# - SLACK_CHUNK = 10                      (default: 10)
+# - JPG_QUALITY = 85                      (default: 85)
+# - INIT_SEARCH_HOURS = 72                (default: 72)
 # =============================================================================
 
 import sys
@@ -160,14 +156,12 @@ def build_png_url(base: str, layer: str, view_code: str, rjtd: str) -> str:
     return f"{base}/{layer}/images/VIEW{view_code}_RJTD_{rjtd}.png"
 
 
-def view_for_ft(view_base: str, ft_hours: int) -> str:
+def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
     """
-    FT は VIEWコード末尾で表現する（RJTDはinit固定）
-
-    - GSM: 7桁（例 3102000） → 末尾3桁をFT(000/003/006...)に
-    - MSM/LFM: 6桁（例 500200） → 末尾2桁をFT(00/01/02...)に
+    FT は VIEWコード末尾で表現（RJTDはinit固定）
+    - GSM: 末尾3桁 FT（例: 3001000 -> 3001003）
+    - MSM/LFM: 末尾2桁 FT（例: 500000 -> 500001）
     """
-    digits = 3 if len(view_base) >= 7 else 2
     return f"{view_base[:-digits]}{ft_hours:0{digits}d}"
 
 
@@ -178,7 +172,8 @@ def view_for_ft(view_base: str, ft_hours: int) -> str:
 class Item:
     label: str
     layer: str
-    view_bases: List[str]   # base view（ft=0相当を置く）
+    view_base: str      # ft=0 相当の VIEWコード（末尾は 00...0）
+    view_digits: int    # FT差し替え桁数（GSM=3, MSM/LFM=2）
     jpg_prefix: str
 
 
@@ -187,61 +182,75 @@ class ModelCfg:
     base: str
     referer: str
     init_step_hours: int
+    init_probe_item: Item
     ft_list: List[int]
+    slack_chunk: int
     items: List[Item]
 
 
-def build_ft_list(max_ft: int, step: int) -> List[int]:
-    if max_ft < 0:
-        return [0]
-    return list(range(0, max_ft + 1, step))
+def ft_list_gsm() -> List[int]:
+    # FT=3..30 (3h): 3,6,...,30 => 10
+    return list(range(3, 31, 3))
+
+
+def ft_list_msm() -> List[int]:
+    # FT=1..15 (1h) = 15枚 + 18,21,24,27,30 = 5枚 => 20
+    return list(range(1, 16)) + [18, 21, 24, 27, 30]
+
+
+def ft_list_lfm() -> List[int]:
+    # FT=1..18 (1h) => 18
+    return list(range(1, 19))
 
 
 def load_model_groups() -> Dict[str, ModelCfg]:
-    gsm_max  = env_int("GSM_MAX_FT", 27)
-    gsm_step = env_int("GSM_FT_STEP", 3)
+    slack_chunk = env_int("SLACK_CHUNK", 10)
 
-    msm_max  = env_int("MSM_MAX_FT", 0)
-    msm_step = env_int("MSM_FT_STEP", 1)
-
-    lfm_max  = env_int("LFM_MAX_FT", 0)
-    lfm_step = env_int("LFM_FT_STEP", 1)
+    gsm_items = [
+        Item(label="300hPa",   layer="300",  view_base="3001000", view_digits=3, jpg_prefix="GSM_300"),
+        Item(label="300hPa-2", layer="3002", view_base="3101000", view_digits=3, jpg_prefix="GSM_3002"),
+    ]
+    msm_items = [
+        Item(label="500hPa",   layer="500",  view_base="500000", view_digits=2, jpg_prefix="MSM_500"),
+        Item(label="500hPa-2", layer="5002", view_base="510000", view_digits=2, jpg_prefix="MSM_5002"),
+        Item(label="700hPa",   layer="700",  view_base="700000", view_digits=2, jpg_prefix="MSM_700"),
+    ]
+    lfm_items = [
+        Item(label="850hPa",   layer="850",  view_base="850200", view_digits=2, jpg_prefix="LFM_850"),
+        Item(label="850hPa-2", layer="8502", view_base="860200", view_digits=2, jpg_prefix="LFM_8502"),
+        Item(label="925hPa",   layer="925",  view_base="920200", view_digits=2, jpg_prefix="LFM_925"),
+        Item(label="975hPa",   layer="975",  view_base="970200", view_digits=2, jpg_prefix="LFM_975"),
+        Item(label="sfc",      layer="sfc",  view_base="000200", view_digits=2, jpg_prefix="LFM_sfc"),
+        Item(label="sfc-2",    layer="sfc2", view_base="010200", view_digits=2, jpg_prefix="LFM_sfc2"),
+    ]
 
     return {
         "GSM": ModelCfg(
             base="https://www.jma.go.jp/bosai/tgv/data/GSMWide",
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
-            init_step_hours=3,
-            ft_list=build_ft_list(gsm_max, gsm_step),
-            items=[
-                Item(label="300hPa",   layer="300",  view_bases=["3002000"], jpg_prefix="GSM_300"),
-                Item(label="300hPa-2", layer="3002", view_bases=["3102000"], jpg_prefix="GSM_3002"),
-            ],
+            init_step_hours=1,  # 探索は1h刻みでOK（実際にある時刻にヒットさせやすい）
+            init_probe_item=gsm_items[0],
+            ft_list=ft_list_gsm(),
+            slack_chunk=slack_chunk,  # 10
+            items=gsm_items,
         ),
         "MSM": ModelCfg(
-            base="https://www.jma.go.jp/bosai/tgv/data/MSMNarrow",
+            base="https://www.jma.go.jp/bosai/tgv/data/MSMWide",
             referer="https://www.jma.go.jp/bosai/tgv/MSM/",
             init_step_hours=1,
-            ft_list=build_ft_list(msm_max, msm_step),
-            items=[
-                Item(label="500hPa",   layer="500",  view_bases=["500200"], jpg_prefix="MSM_500"),
-                Item(label="500hPa-2", layer="5002", view_bases=["510200"], jpg_prefix="MSM_5002"),
-                Item(label="700hPa",   layer="700",  view_bases=["700200"], jpg_prefix="MSM_700"),
-            ],
+            init_probe_item=msm_items[0],
+            ft_list=ft_list_msm(),
+            slack_chunk=slack_chunk,  # 10（=10+10）
+            items=msm_items,
         ),
         "LFM": ModelCfg(
             base="https://www.jma.go.jp/bosai/tgv/data/LFMNarrow",
             referer="https://www.jma.go.jp/bosai/tgv/LFM/",
             init_step_hours=1,
-            ft_list=build_ft_list(lfm_max, lfm_step),
-            items=[
-                Item(label="850hPa",   layer="850",  view_bases=["850200"], jpg_prefix="LFM_850"),
-                Item(label="850hPa-2", layer="8502", view_bases=["860200"], jpg_prefix="LFM_8502"),
-                Item(label="925hPa",   layer="925",  view_bases=["920200"], jpg_prefix="LFM_925"),
-                Item(label="975hPa",   layer="975",  view_bases=["970200"], jpg_prefix="LFM_975"),
-                Item(label="sfc",      layer="sfc",  view_bases=["000200"], jpg_prefix="LFM_sfc"),
-                Item(label="sfc-2",    layer="sfc2", view_bases=["010200"], jpg_prefix="LFM_sfc2"),
-            ],
+            init_probe_item=lfm_items[0],
+            ft_list=ft_list_lfm(),
+            slack_chunk=slack_chunk,  # 10（=10+8）
+            items=lfm_items,
         ),
     }
 
@@ -258,8 +267,7 @@ def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
 
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
     """
-    重要：
-    - 404は“普通に起きる”ので例外にしない（HTMLでもOK）
+    - 404は普通に起きる（HTMLでもOK）ので例外にしない
     - 401/403は認証エラー
     - 200なのにHTMLは認証ページ/ブロック疑い
     """
@@ -267,34 +275,28 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
     now = datetime.now(timezone.utc)
     start = floor_to_step(now, step)
 
-    it0 = cfg.items[0]
-    base_view = it0.view_bases[0]
-    view0 = view_for_ft(base_view, 0)
+    it0 = cfg.init_probe_item
+    view0 = view_for_ft(it0.view_base, 0, it0.view_digits)
 
     for back in range(0, max_back_hours + 1, step):
         init_dt = start - timedelta(hours=back)
         rjtd = fmt_rjtd(init_dt)
         url = build_png_url(cfg.base, it0.layer, view0, rjtd)
 
-        try:
-            st, ctype, head = probe_init(url, cfg.referer)
+        st, ctype, head = probe_init(url, cfg.referer)
 
-            if st == 200:
-                # 200でもHTMLならおかしい（認証ページ等）
-                if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
-                    raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
+        if st == 200:
+            if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
+                # 200でHTMLは異常
+                raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
+            print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd}")
+            return init_dt
 
-                print(f"[OK] {model_name} init found: {init_dt.isoformat()} (RJTD_{rjtd}) url={url}")
-                return init_dt
+        if st in (401, 403):
+            raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
-            if st in (401, 403):
-                raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
-
-            # 404含む、それ以外は探索継続
-            print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st} url={url}")
-
-        except Exception as e:
-            print(f"[ERR] {model_name} init probe failed: {type(e).__name__}: {e}")
+        # 404等は探索継続
+        # print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st}")
 
     raise RuntimeError(f"{model_name}: init not found within back={max_back_hours}h")
 
@@ -311,7 +313,7 @@ def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
 def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: Item) -> Tuple[List[Attachment], bool]:
     """
     1天気図ぶん取得
-    - 404はよくあるので黙ってスキップ（printは出す）
+    - 404はよくあるので黙ってスキップ（printはOK）
     - 401/403 or 200なのにHTML（認証ページ疑い）なら auth_failed=True
     """
     jpg_quality = env_int("JPG_QUALITY", 85)
@@ -321,50 +323,36 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
     auth_failed = False
 
     for ft in cfg.ft_list:
-        got = False
+        view_code = view_for_ft(item.view_base, ft, item.view_digits)
+        url = build_png_url(cfg.base, item.layer, view_code, rjtd)
 
-        for base_view in item.view_bases:
-            view_code = view_for_ft(base_view, ft)
-            url = build_png_url(cfg.base, item.layer, view_code, rjtd)
+        status, content, ctype = fetch_png(url, cfg.referer)
 
-            try:
-                status, content, ctype = fetch_png(url, cfg.referer)
+        if status == 200:
+            # 200でHTMLは異常（ログインHTML等）
+            if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
+                auth_failed = True
+                print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
+                break
 
-                if status == 200:
-                    # 200でHTMLは異常（ログインHTML等）
-                    if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
-                        auth_failed = True
-                        print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
-                        got = False
-                        break
+            jpg = png_bytes_to_jpg_bytes(content, quality=jpg_quality)
+            fname = f"{item.jpg_prefix}_ft{ft:03d}.jpg"
+            atts.append((fname, jpg, "image/jpeg"))
+            print(f"[OK] {model_name} {item.label} ft={ft} url={url}")
+            continue
 
-                    jpg = png_bytes_to_jpg_bytes(content, quality=jpg_quality)
-                    fname = f"{item.jpg_prefix}_ft{ft:03d}.jpg"
-                    atts.append((fname, jpg, "image/jpeg"))
-                    print(f"[OK] {model_name} {item.label} ft={ft} url={url}")
-                    got = True
-                    break
-
-                if status in (401, 403):
-                    auth_failed = True
-                    print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} auth url={url}")
-                    got = False
-                    break
-
-                if status == 404:
-                    print(f"[NG] {model_name} {item.label} ft={ft}: HTTP404 url={url}")
-                    continue
-
-                print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} url={url}")
-
-            except Exception as e:
-                print(f"[ERR] {model_name} {item.label} ft={ft}: {type(e).__name__}: {e} url={url}")
-
-        if auth_failed:
+        if status in (401, 403):
+            auth_failed = True
+            print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} auth url={url}")
             break
 
-        if not got:
+        if status == 404:
+            # Slackには出さない
+            # print(f"[404] {model_name} {item.label} ft={ft}")
             continue
+
+        # その他
+        # print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} url={url}")
 
     return atts, auth_failed
 
@@ -375,13 +363,13 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
 def send_item_mail(model_name: str, item: Item, init_dt: datetime, atts: List[Attachment]) -> None:
     prefix = env_str("MAIL_SUBJECT_PREFIX", "JMA")
     init_str = init_dt.strftime("%m/%d %H:00(UTC)")
-    subject = f"{prefix} ADV TGV {model_name} {item.label} init={init_str}"
+    subject = f"{prefix} ADV TGV {model_name} {item.label} RJTD={fmt_rjtd(init_dt)}"
 
     body = "\n".join([
         "JMA 防災情報アドバイザー向け 専門天気図（tgv）",
         f"model: {model_name}",
         f"chart: {item.label}",
-        f"init : {init_str}",
+        f"RJTD : {fmt_rjtd(init_dt)} (UTC)",
         f"files: {len(atts)}",
         "",
         "※ 個人利用・非公開",
@@ -398,14 +386,13 @@ def send_item_mail(model_name: str, item: Item, init_dt: datetime, atts: List[At
     print(f"[OK] mail sent: {model_name} {item.label} files={len(atts)}")
 
 
-def send_item_slack(model_name: str, item: Item, init_dt: datetime, atts: List[Attachment]) -> None:
+def send_item_slack(model_name: str, item: Item, init_dt: datetime, atts: List[Attachment], chunk_size: int) -> None:
     channel = env_str("SLACK_CHANNEL_ID")
     if not channel:
         raise RuntimeError("SLACK_CHANNEL_ID is missing")
 
-    chunk_size = env_int("SLACK_CHUNK", 10)
-    init_str = init_dt.strftime("%m/%d %H:00(UTC)")
-    header = f"🗺️ ADV TGV {model_name} / {item.label}  init={init_str}  files={len(atts)}"
+    rjtd = fmt_rjtd(init_dt)
+    header = f"🗺️ ADV TGV {model_name} / {item.label}  RJTD={rjtd}  files={len(atts)}"
 
     pairs = [(fn, blob) for (fn, blob, _mime) in atts]
     for i in range(0, len(pairs), chunk_size):
@@ -413,7 +400,7 @@ def send_item_slack(model_name: str, item: Item, init_dt: datetime, atts: List[A
         comment = header if i == 0 else f"🗺️ ADV TGV {model_name} / {item.label}（続き {i//chunk_size + 1}）"
         upload_bytes_slack(channel=channel, files=chunk, initial_comment=comment)
 
-    print(f"[OK] slack sent: {model_name} {item.label} files={len(atts)}")
+    print(f"[OK] slack sent: {model_name} {item.label} posts={(len(pairs)+chunk_size-1)//chunk_size}")
 
 
 # =============================================================================
@@ -422,7 +409,9 @@ def send_item_slack(model_name: str, item: Item, init_dt: datetime, atts: List[A
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
 
-    mode = env_str("DELIVERY_MODE", "slack").lower()
+    mode = env_str("DELIVERY_MODE", "both").lower()
+    search_hours = env_int("INIT_SEARCH_HOURS", 72)
+
     groups = load_model_groups()
 
     for model_name in ("GSM", "MSM", "LFM"):
@@ -431,7 +420,7 @@ def main() -> None:
 
         # 1) init探索
         try:
-            init_dt = find_working_init_dt(model_name, cfg, max_back_hours=72)
+            init_dt = find_working_init_dt(model_name, cfg, max_back_hours=search_hours)
         except Exception as e:
             msg = f"❌ ADV TGV {model_name}: INIT not found / auth error\n{type(e).__name__}: {e}"
             print(msg)
@@ -441,7 +430,7 @@ def main() -> None:
         model_total = 0
         model_auth_failed = False
 
-        # 2) itemごとに取得 → メール（本命）→ Slack画像（副系）
+        # 2) itemごとに取得 → メール（必須）→ Slack画像（副系）
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
@@ -451,29 +440,31 @@ def main() -> None:
                 break
 
             if not atts:
+                # item全滅はよくあるので通知しない
                 print(f"[WARN] {model_name} {item.label}: no images")
                 continue
 
             model_total += len(atts)
 
+            # メール（本命）
             if mode in ("email", "both"):
                 try:
                     send_item_mail(model_name, item, init_dt, atts)
                 except Exception as e:
-                    slack_notify(
-                        f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}"
-                    )
+                    slack_notify(f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}")
 
+            # Slack（副系）
             if mode in ("slack", "both"):
                 try:
-                    send_item_slack(model_name, item, init_dt, atts)
+                    # chunkはモデル共通で10想定（GSM=10, MSM=10+10, LFM=10+8）
+                    send_item_slack(model_name, item, init_dt, atts, chunk_size=cfg.slack_chunk)
                 except Exception as e:
                     print(f"[WARN] Slack image send failed: {model_name} {item.label}: {e}")
 
-        # 3) モデル全滅だけ通知（あなたの希望）
+        # 3) モデル全滅だけ通知
         if (not model_auth_failed) and (model_total == 0):
             slack_notify(
-                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\ninit={init_dt.strftime('%m/%d %H:00(UTC)')}"
+                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\nRJTD={fmt_rjtd(init_dt)}"
             )
 
     print("\n=== Done ADV JMA TGV ===")
