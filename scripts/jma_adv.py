@@ -7,19 +7,13 @@
 #
 # ✅ 仕様（あなたの現行URL規則に準拠）
 # - FT は VIEWコード末尾で表現（RJTDは init 固定）
-# - GSM: FT=3..30 (3h) 10枚 / item（Slack 1投稿・メール1通）
-# - MSM: FT=1..15(1h) + 18,21,24,27,30 合計20枚 / item（Slack 2投稿・メール1通）
-# - LFM: FT=1..18(1h) 18枚 / item（Slack 2投稿(10+8)・メール1通）
-# - Slack通知（テキスト）は 401/403 or モデル全滅のみ（404は通知しない）
+# - GSM: FT=3..30 (3h) 10枚 / item
+# - MSM: FT=1..15(1h) + 18,21,24,27,30 合計20枚 / item
+# - LFM: FT=1..18(1h) 18枚 / item
 #
-# ✅ 環境変数
-# - JMA_ADV_USER / JMA_ADV_PASS  (推奨)   または JMA_AUTH_BASIC ("Basic xxxx")
-# - DELIVERY_MODE = email | slack | both  (default: both)
-# - SLACK_BOT_TOKEN / SLACK_CHANNEL_ID    (Slack投稿したい場合)
-# - SLACK_CHUNK = 10                      (default: 10)
-# - JPG_QUALITY = 85                      (default: 85)
-# - INIT_SEARCH_HOURS = 72                (default: 72)
-# - TGV_USE_AUTH = "0"(default) / "1"     ★公開天気図なら0推奨
+# ✅ 認証
+# - ADV限定（認証必須） → TGV_USE_AUTH=1 を推奨
+#   (GitHub Actions では secrets の user/pass を使う)
 # =============================================================================
 
 import sys
@@ -33,7 +27,7 @@ import io
 import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import requests
 from PIL import Image
@@ -42,9 +36,6 @@ from module.utils.mail_utils import send_mail
 from module.utils.slack_utils import send_slack_text, upload_bytes_slack
 
 
-# =============================================================================
-# Types
-# =============================================================================
 Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
 
 
@@ -76,18 +67,34 @@ def env_str(name: str, default: str = "") -> str:
 # =============================================================================
 # Auth
 # =============================================================================
-def make_basic_auth(user: str, password: str) -> str:
+def make_basic_auth_header(user: str, password: str) -> str:
     token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
     return f"Basic {token}"
 
 
-def get_auth_basic() -> str:
+def get_auth_basic_header() -> str:
     # 優先：user/pass → 生成、無ければ JMA_AUTH_BASIC
     user = os.getenv("JMA_ADV_USER")
     pw = os.getenv("JMA_ADV_PASS")
     if user and pw:
-        return make_basic_auth(user.strip(), pw.strip())
+        return make_basic_auth_header(user.strip(), pw.strip())
     return must_env("JMA_AUTH_BASIC").strip()
+
+
+def use_auth_enabled() -> bool:
+    return os.getenv("TGV_USE_AUTH", "0").strip() == "1"
+
+
+def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
+    """curl -u と同じ挙動にするため requests の auth を使う"""
+    if not use_auth_enabled():
+        return None
+    user = os.getenv("JMA_ADV_USER")
+    pw = os.getenv("JMA_ADV_PASS")
+    if user and pw:
+        return (user.strip(), pw.strip())
+    # user/pass がない場合は header 方式にフォールバック（JMA_AUTH_BASIC想定）
+    return None
 
 
 # =============================================================================
@@ -98,7 +105,6 @@ def slack_enabled() -> bool:
 
 
 def slack_notify(text: str) -> None:
-    # 401/403 や “全滅” など、重要な時だけ呼ぶ想定
     if not slack_enabled():
         return
     try:
@@ -118,15 +124,20 @@ def headers_for(referer: str) -> dict:
         "Pragma": "no-cache",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
-
-    # 公開天気図では Authorization を付けない（デフォルトOFF）
-    use_auth = os.getenv("TGV_USE_AUTH", "0").strip() == "1"
-    print(f"[DEBUG] TGV_USE_AUTH={'1' if use_auth else '0'}")
-    print(f"[DEBUG] headers auth={'on' if 'Authorization' in h else 'off'} referer={referer}")
-    if use_auth:
-        h["Authorization"] = get_auth_basic()
-
+    # user/pass が無い環境向けに、ヘッダ方式も残す（ADVは通常 user/pass でOK）
+    if use_auth_enabled() and (get_requests_auth_tuple() is None):
+        h["Authorization"] = get_auth_basic_header()
     return h
+
+
+def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
+    auth = get_requests_auth_tuple()
+    return requests.get(
+        url,
+        headers=headers_for(referer),
+        auth=auth,
+        timeout=timeout,
+    )
 
 
 # =============================================================================
@@ -150,13 +161,11 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
 # URL rules
 # =============================================================================
 def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
-    # RJTD: MMDDHHMM (UTC)
     dt = init_dt_utc.astimezone(timezone.utc).replace(minute=minute, second=0, microsecond=0)
     return dt.strftime("%m%d%H%M")
 
 
 def floor_to_step(dt_utc: datetime, step_hours: int, minute: int) -> datetime:
-    # 探索起点も minute を揃える（MSM=03, LFM=06 など）
     dt = dt_utc.astimezone(timezone.utc).replace(second=0, microsecond=0)
     h = (dt.hour // step_hours) * step_hours
     return dt.replace(hour=h, minute=minute)
@@ -167,11 +176,6 @@ def build_png_url(base: str, layer: str, view_code: str, rjtd: str) -> str:
 
 
 def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
-    """
-    FT は VIEWコード末尾で表現（RJTDはinit固定）
-    - GSM: 末尾3桁 FT（例: 3001000 -> 3001003）
-    - MSM/LFM: 末尾2桁 FT（例: 500000 -> 500001）
-    """
     return f"{view_base[:-digits]}{ft_hours:0{digits}d}"
 
 
@@ -200,15 +204,15 @@ class ModelCfg:
 
 
 def ft_list_gsm() -> List[int]:
-    return list(range(3, 31, 3))  # 3,6,...,30
+    return list(range(3, 31, 3))
 
 
 def ft_list_msm() -> List[int]:
-    return list(range(1, 16)) + [18, 21, 24, 27, 30]  # 1..15 + 18..30(3h)
+    return list(range(1, 16)) + [18, 21, 24, 27, 30]
 
 
 def ft_list_lfm() -> List[int]:
-    return list(range(1, 19))  # 1..18
+    return list(range(1, 19))
 
 
 def load_model_groups() -> Dict[str, ModelCfg]:
@@ -228,8 +232,8 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item("500hPa",   MSM_WIDE, "500",  "500000", 2, "MSM_500"),
         Item("500hPa-2", MSM_WIDE, "5002", "510000", 2, "MSM_5002"),
         Item("700hPa",   MSM_WIDE, "700",  "700000", 2, "MSM_700"),
-        Item("8502",     MSM_WIDE, "8502", "860000", 2, "MSM_8502"),   # 860001 がFT=1
-        Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),    # 050201 がFT=1
+        Item("8502",     MSM_WIDE, "8502", "860000", 2, "MSM_8502"),
+        Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),
     ]
 
     lfm_items = [
@@ -244,7 +248,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "GSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
             init_step_hours=1,
-            rjtd_minute=0,  # GSM: ..HH00
+            rjtd_minute=0,
             init_probe_item=gsm_items[0],
             ft_list=ft_list_gsm(),
             slack_chunk=slack_chunk,
@@ -253,8 +257,8 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "MSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/MSM/",
             init_step_hours=1,
-            rjtd_minute=3,  # MSM: ..HH03
-            init_probe_item=msm_items[0],  # Wide側で探索
+            rjtd_minute=3,
+            init_probe_item=msm_items[0],
             ft_list=ft_list_msm(),
             slack_chunk=slack_chunk,
             items=msm_items,
@@ -262,7 +266,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "LFM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/LFM/",
             init_step_hours=1,
-            rjtd_minute=6,  # LFM: ..HH06
+            rjtd_minute=6,
             init_probe_item=lfm_items[0],
             ft_list=ft_list_lfm(),
             slack_chunk=slack_chunk,
@@ -275,51 +279,36 @@ def load_model_groups() -> Dict[str, ModelCfg]:
 # INIT auto-detect
 # =============================================================================
 def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
-    r = requests.get(url, headers=headers_for(referer), timeout=25)
+    r = http_get(url, referer=referer, timeout=25)
     ctype = (r.headers.get("Content-Type") or "").lower()
     head = r.content[:200]
     return r.status_code, ctype, head
 
 
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
-    """
-    init探索を「今→1hずつ戻る」から
-    「候補hourを回しつつ back_day を戻す」へ変更。
-    これで “72h探しても見つからない” を潰しやすい。
-    """
+    step = cfg.init_step_hours
     now = datetime.now(timezone.utc)
-
-    # モデルごとに「出現しやすいUTC時刻」を候補化（必要なら後で調整）
-    if model_name == "GSM":
-        hour_candidates = [0, 6, 12, 18]
-    else:
-        hour_candidates = list(range(0, 24))
+    start = floor_to_step(now, step, cfg.rjtd_minute)
 
     it0 = cfg.init_probe_item
-    first_ft = cfg.ft_list[0]  # GSM=3, MSM/LFM=1
+    first_ft = cfg.ft_list[0]
     view0 = view_for_ft(it0.view_base, first_ft, it0.view_digits)
 
-    # 最大back_hoursを「日数」に変換して探索
-    max_back_days = max(1, (max_back_hours // 24) + 1)
+    for back in range(0, max_back_hours + 1, step):
+        init_dt = start - timedelta(hours=back)
+        rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
+        url = build_png_url(it0.base, it0.layer, view0, rjtd)
 
-    for back_day in range(0, max_back_days + 1):
-        day = (now - timedelta(days=back_day)).date()
+        st, ctype, head = probe_init(url, cfg.referer)
 
-        for hh in hour_candidates:
-            init_dt = datetime(day.year, day.month, day.day, hh, cfg.rjtd_minute, tzinfo=timezone.utc)
-            rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
-            url = build_png_url(it0.base, it0.layer, view0, rjtd)
+        if st in (401, 403):
+            raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
-            st, ctype, head = probe_init(url, cfg.referer)
-
-            if st in (401, 403):
-                raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
-
-            if st == 200:
-                if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
-                    raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
-                print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
-                return init_dt
+        if st == 200:
+            if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
+                raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
+            print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
+            return init_dt
 
     raise RuntimeError(f"{model_name}: init not found within back={max_back_hours}h")
 
@@ -328,7 +317,7 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
 # Fetch per item
 # =============================================================================
 def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
-    r = requests.get(url, headers=headers_for(referer), timeout=40)
+    r = http_get(url, referer=referer, timeout=40)
     ctype = (r.headers.get("Content-Type") or "").lower()
     return r.status_code, r.content, ctype
 
@@ -370,17 +359,18 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
 
 
 # =============================================================================
-# Delivery: Email / Slack (per item)
+# Delivery
 # =============================================================================
 def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment]) -> None:
     prefix = env_str("MAIL_SUBJECT_PREFIX", "JMA")
-    subject = f"{prefix} ADV TGV {model_name} {item.label} RJTD={fmt_rjtd(init_dt, cfg.rjtd_minute)}"
+    rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
+    subject = f"{prefix} ADV TGV {model_name} {item.label} RJTD={rjtd}"
 
     body = "\n".join([
         "JMA 防災情報アドバイザー向け 専門天気図（tgv）",
         f"model: {model_name}",
         f"chart: {item.label}",
-        f"RJTD : {fmt_rjtd(init_dt, cfg.rjtd_minute)} (UTC)",
+        f"RJTD : {rjtd} (UTC)",
         f"files: {len(atts)}",
         "",
         "※ 個人利用・非公開",
@@ -419,7 +409,7 @@ def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetim
 # =============================================================================
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
-
+    print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
     mode = env_str("DELIVERY_MODE", "both").lower()
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
 
