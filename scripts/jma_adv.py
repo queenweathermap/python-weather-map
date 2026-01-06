@@ -248,7 +248,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "GSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
             init_step_hours=1,
-            rjtd_minute=0,
+            rjtd_minute=6,
             init_probe_item=gsm_items[0],
             ft_list=ft_list_gsm(),
             slack_chunk=slack_chunk,
