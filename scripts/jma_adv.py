@@ -248,7 +248,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "GSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
             init_step_hours=6,     # ★ 1 → 6
-            rjtd_minute=6,         # ★ 06
+            rjtd_minute=0,         # ★ 06
             init_probe_item=gsm_items[0],
             ft_list=ft_list_gsm(),
             slack_chunk=slack_chunk,
@@ -257,7 +257,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "MSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/MSM/",
             init_step_hours=3,     # ★ 1 → 3
-            rjtd_minute=3,         # ★ 03
+            rjtd_minute=0,         # ★ 03
             init_probe_item=msm_items[0],
             ft_list=ft_list_msm(),
             slack_chunk=slack_chunk,
@@ -266,7 +266,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "LFM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/LFM/",
             init_step_hours=6,     # ★ 1 → 6
-            rjtd_minute=6,         # ★ 06
+            rjtd_minute=0,         # ★ 06
             init_probe_item=lfm_items[0],
             ft_list=ft_list_lfm(),
             slack_chunk=slack_chunk,
