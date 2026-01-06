@@ -103,12 +103,15 @@ def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
 def slack_enabled() -> bool:
     return bool(env_str("SLACK_BOT_TOKEN")) and bool(env_str("SLACK_CHANNEL_ID"))
 
-
 def slack_notify(text: str) -> None:
     if not slack_enabled():
         return
+    ch = env_str("SLACK_CHANNEL_ID")
     try:
-        send_slack_text(channel=env_str("SLACK_CHANNEL_ID"), message=text)
+        # Slackは長文で落ちることがあるので分割（目安 3500）
+        limit = 3500
+        for i in range(0, len(text), limit):
+            send_slack_text(channel=ch, message=text[i:i+limit])
     except Exception as e:
         print(f"[WARN] Slack notify failed: {e}")
 
@@ -451,11 +454,6 @@ def main() -> None:
                 except Exception as e:
                     slack_notify(f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}")
 
-            if mode in ("slack", "both"):
-                try:
-                    send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
-                except Exception as e:
-                    print(f"[WARN] Slack image send failed: {model_name} {item.label}: {e}")
 
         if (not model_auth_failed) and (model_total == 0):
             slack_notify(
