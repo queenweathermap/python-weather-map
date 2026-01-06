@@ -189,18 +189,17 @@ class ModelCfg:
 
 
 def ft_list_gsm() -> List[int]:
-    # FT=3..30 (3h): 3,6,...,30 => 10
+    # GSM: FT=3..30 (3h) => 10枚
     return list(range(3, 31, 3))
 
-
 def ft_list_msm() -> List[int]:
-    # FT=1..15 (1h) = 15枚 + 18,21,24,27,30 = 5枚 => 20
+    # MSM: FT=1..15 + 18,21,24,27,30 => 20枚
     return list(range(1, 16)) + [18, 21, 24, 27, 30]
 
-
 def ft_list_lfm() -> List[int]:
-    # FT=1..18 (1h) => 18
+    # LFM: FT=1..18 => 18枚
     return list(range(1, 19))
+
 
 
 def load_model_groups() -> Dict[str, ModelCfg]:
@@ -212,9 +211,9 @@ def load_model_groups() -> Dict[str, ModelCfg]:
     ]
     
     msm_items = [
-        Item(label="500hPa",   layer="500",  view_base="500000", view_digits=3, jpg_prefix="MSM_500"),
-        Item(label="500hPa-2", layer="5002", view_base="510000", view_digits=3, jpg_prefix="MSM_5002"),
-        Item(label="700hPa",   layer="700",  view_base="700000", view_digits=3, jpg_prefix="MSM_700"),
+        Item(label="500hPa",   layer="500",  view_base="500000", view_digits=2, jpg_prefix="MSM_500"),
+        Item(label="500hPa-2", layer="5002", view_base="510000", view_digits=2, jpg_prefix="MSM_5002"),
+        Item(label="700hPa",   layer="700",  view_base="700000", view_digits=2, jpg_prefix="MSM_700"),
     ]
     
     lfm_items = [
@@ -225,6 +224,8 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item(label="sfc",      layer="sfc",  view_base="000200", view_digits=2, jpg_prefix="LFM_sfc"),
         Item(label="sfc-2",    layer="sfc2", view_base="010200", view_digits=2, jpg_prefix="LFM_sfc2"),
     ]
+
+
 
 
     return {
