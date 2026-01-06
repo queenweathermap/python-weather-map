@@ -232,7 +232,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item("500hPa",   MSM_WIDE, "500",  "500000", 2, "MSM_500"),
         Item("500hPa-2", MSM_WIDE, "5002", "510000", 2, "MSM_5002"),
         Item("700hPa",   MSM_WIDE, "700",  "700000", 2, "MSM_700"),
-        Item("8502",     MSM_WIDE, "8502", "860000", 2, "MSM_8502"),
+        Item("8502",     MSM_NAR, "8502", "860000", 2, "MSM_8502"),
         Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),
     ]
 
