@@ -3,7 +3,7 @@ name: Run JMA ADV
 
 on:
   schedule:
-    - cron: "10 5 * * *"   # UTC（JST 14:10）
+    - cron: "30 5 * * *"   # UTC（JST 15:30）
   workflow_dispatch: {}
 
 concurrency:
@@ -57,6 +57,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ★ デバッグ（値は出さない：存在チェックだけ）
+      - name: Debug env (presence only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in JMA_ADV_USER JMA_ADV_PASS SLACK_CHANNEL_ID; do
+            if [ -n "${!v:-}" ]; then
+              echo "$v=OK"
+            else
+              echo "$v=MISSING"
+            fi
+          done
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -69,7 +82,6 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            # adv_jma.py は PIL を使うので pillow 必須
             pip install requests pillow
           fi
 
