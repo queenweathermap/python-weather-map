@@ -3,7 +3,7 @@ name: Run JMA ADV
 
 on:
   schedule:
-    - cron: "30 22 * * *"  # 07:30 JST
+    - cron: "30 22 * * *"  # 07:30 JST（前日22:30 UTC）
     - cron: "30 5  * * *"  # 14:30 JST
     - cron: "30 10 * * *"  # 19:30 JST
   workflow_dispatch: {}
@@ -95,16 +95,18 @@ jobs:
             pip install requests pillow
           fi
 
-      # ★ Run ADV script の直前：RJTD形式を Python 側と合わせてチェック（MMDDHHMM）
-      - name: Sanity check GSM (must find 200)
+      # ★ Run ADV script の直前：超軽量 sanity（DDHHMM / 6時間刻み / 最大5回）
+      - name: Sanity check GSM (DDHHMM, must find 200)
         shell: bash
         run: |
           set -euo pipefail
           ok=0
 
-          # 直近72hの「:30」を1時間刻みで探索（MMDDHHMM）
-          for back in $(seq 0 72); do
-            rjtd=$(date -u -d "${back} hour ago" +"%m%d%H30")
+          # RJTD は DDHHMM。GSM は minute=06 系が観測できている前提で「06」を試す
+          # 6時間刻みで最大5回（0,6,12,18,24h）だけ遡る
+          for back in 0 6 12 18 24; do
+            dt=$(date -u -d "${back} hour ago" +"%d%H")
+            rjtd="${dt}06"   # => DDHH06
             url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_${rjtd}.png"
 
             code=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -112,12 +114,12 @@ jobs:
               -H "Referer: https://www.jma.go.jp/bosai/tgv/GSM/" \
               "$url")
 
-            echo "GSM RJTD=${rjtd} HTTP=${code}"
+            echo "GSM RJTD=${rjtd} HTTP=${code} url=${url}"
             if [ "$code" = "200" ]; then ok=1; break; fi
           done
 
           if [ "$ok" != "1" ]; then
-            echo "GSM sanity failed: no HTTP200 within 72h"
+            echo "GSM sanity failed: no HTTP200 within last 24h (6-hour steps)"
             exit 1
           fi
 
