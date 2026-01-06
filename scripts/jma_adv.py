@@ -146,16 +146,18 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
 # =============================================================================
 # URL rules
 # =============================================================================
-def fmt_rjtd(init_dt_utc: datetime) -> str:
-    # RJTD: MMDDHHMM (UTC), 分は00固定
-    dt = init_dt_utc.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
+    # RJTD: MMDDHHMM (UTC)
+    dt = init_dt_utc.astimezone(timezone.utc).replace(
+        minute=minute, second=0, microsecond=0
+    )
     return dt.strftime("%m%d%H%M")
 
 
-def floor_to_step(dt_utc: datetime, step_hours: int) -> datetime:
-    dt = dt_utc.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+def floor_to_step(dt_utc: datetime, step_hours: int, minute: int) -> datetime:
+    dt = dt_utc.astimezone(timezone.utc).replace(second=0, microsecond=0)
     h = (dt.hour // step_hours) * step_hours
-    return dt.replace(hour=h)
+    return dt.replace(hour=h, minute=minute)
 
 
 def build_png_url(base: str, layer: str, view_code: str, rjtd: str) -> str:
@@ -188,6 +190,7 @@ class Item:
 class ModelCfg:
     referer: str
     init_step_hours: int
+    rjtd_minute: int         # ★追加（0/3/6）
     init_probe_item: Item
     ft_list: List[int]
     slack_chunk: int
@@ -238,32 +241,36 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item("sfc-2",    LFM_NAR, "sfc2", "010200", 2, "LFM_sfc2"),
     ]
 
-    return {
-        "GSM": ModelCfg(
-            referer="https://www.jma.go.jp/bosai/tgv/GSM/",
-            init_step_hours=1,
-            init_probe_item=gsm_items[0],
-            ft_list=ft_list_gsm(),     # 3..30
-            slack_chunk=10,
-            items=gsm_items,
-        ),
-        "MSM": ModelCfg(
-            referer="https://www.jma.go.jp/bosai/tgv/MSM/",
-            init_step_hours=1,
-            init_probe_item=msm_items[0],  # Wide側で探す
-            ft_list=ft_list_msm(),     # 1..15 + 18..30
-            slack_chunk=10,
-            items=msm_items,
-        ),
-        "LFM": ModelCfg(
-            referer="https://www.jma.go.jp/bosai/tgv/LFM/",
-            init_step_hours=1,
-            init_probe_item=lfm_items[0],
-            ft_list=ft_list_lfm(),     # 1..18
-            slack_chunk=10,
-            items=lfm_items,
-        ),
-    }
+return {
+    "GSM": ModelCfg(
+        referer="https://www.jma.go.jp/bosai/tgv/GSM/",
+        init_step_hours=1,
+        rjtd_minute=0,          # ★GSMは00
+        init_probe_item=gsm_items[0],
+        ft_list=ft_list_gsm(),
+        slack_chunk=10,
+        items=gsm_items,
+    ),
+    "MSM": ModelCfg(
+        referer="https://www.jma.go.jp/bosai/tgv/MSM/",
+        init_step_hours=1,
+        rjtd_minute=3,          # ★MSMは03
+        init_probe_item=msm_items[0],
+        ft_list=ft_list_msm(),
+        slack_chunk=10,
+        items=msm_items,
+    ),
+    "LFM": ModelCfg(
+        referer="https://www.jma.go.jp/bosai/tgv/LFM/",
+        init_step_hours=1,
+        rjtd_minute=6,          # ★LFMは06
+        init_probe_item=lfm_items[0],
+        ft_list=ft_list_lfm(),
+        slack_chunk=10,
+        items=lfm_items,
+    ),
+}
+
 
 
 
@@ -288,7 +295,7 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
 
     for back in range(0, max_back_hours + 1, step):
         init_dt = start - timedelta(hours=back)
-        rjtd = fmt_rjtd(init_dt)
+        rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
         url = build_png_url(it0.base, it0.layer, view0, rjtd)
 
         st, ctype, head = probe_init(url, cfg.referer)
@@ -327,7 +334,7 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
     - 401/403 or 200なのにHTML（認証ページ疑い）なら auth_failed=True
     """
     jpg_quality = env_int("JPG_QUALITY", 85)
-    rjtd = fmt_rjtd(init_dt)  # ✅ RJTDはinit固定
+    rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
 
     atts: List[Attachment] = []
     auth_failed = False
