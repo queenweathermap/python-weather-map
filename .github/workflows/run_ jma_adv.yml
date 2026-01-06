@@ -90,16 +90,19 @@ jobs:
           fi
 
       # ★ここに追加（Run ADV script の直前）
-      - name: Sanity check (status only)
+      - name: Sanity check GSM (status only)
         shell: bash
         run: |
           set -euo pipefail
-          url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_060000.png"
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-            -u "${JMA_ADV_USER}:${JMA_ADV_PASS}" \
-            -H "Referer: https://www.jma.go.jp/bosai/tgv/GSM/" \
-            "$url")
-          echo "HTTP=$code"
+          for hh in 00 06 12 18; do
+            url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_0106${hh}00.png"
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              -u "${JMA_ADV_USER}:${JMA_ADV_PASS}" \
+              -H "Referer: https://www.jma.go.jp/bosai/tgv/GSM/" \
+              "$url")
+            echo "RJTD=0106${hh}00 HTTP=$code"
+          done
+
 
       - name: Run ADV script
         run: |
