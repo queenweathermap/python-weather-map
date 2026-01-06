@@ -19,6 +19,11 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
       # =====================
+      # ★ 公開TGV：認証ヘッダを付けない（重要）
+      # =====================
+      TGV_USE_AUTH: "0"
+
+      # =====================
       # Mail（mail_utils参照）
       # =====================
       FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
@@ -33,7 +38,7 @@ jobs:
       MAX_MAIL_SIZE_MB: "20"
 
       # =====================
-      # JMA ADV 認証
+      # JMA ADV 認証（※TGV_USE_AUTH=0 なら実際には使わない）
       # =====================
       JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
       JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
@@ -62,14 +67,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for v in JMA_ADV_USER JMA_ADV_PASS SLACK_CHANNEL_ID; do
+          for v in TGV_USE_AUTH JMA_ADV_USER JMA_ADV_PASS JMA_AUTH_BASIC SLACK_CHANNEL_ID; do
             if [ -n "${!v:-}" ]; then
               echo "$v=OK"
             else
               echo "$v=MISSING"
             fi
           done
-
 
       - name: Setup Python
         uses: actions/setup-python@v5
