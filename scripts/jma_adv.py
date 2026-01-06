@@ -281,29 +281,44 @@ def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
 
 
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
-    step = cfg.init_step_hours
+    """
+    init探索を「今→1hずつ戻る」から
+    「候補hourを回しつつ back_day を戻す」へ変更。
+    これで “72h探しても見つからない” を潰しやすい。
+    """
     now = datetime.now(timezone.utc)
-    start = floor_to_step(now, step, cfg.rjtd_minute)  # ★minute必須
+
+    # モデルごとに「出現しやすいUTC時刻」を候補化（必要なら後で調整）
+    if model_name == "GSM":
+        hour_candidates = [0, 6, 12, 18]
+    else:
+        hour_candidates = list(range(0, 24))
 
     it0 = cfg.init_probe_item
     first_ft = cfg.ft_list[0]  # GSM=3, MSM/LFM=1
     view0 = view_for_ft(it0.view_base, first_ft, it0.view_digits)
 
-    for back in range(0, max_back_hours + 1, step):
-        init_dt = start - timedelta(hours=back)
-        rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
-        url = build_png_url(it0.base, it0.layer, view0, rjtd)
+    # 最大back_hoursを「日数」に変換して探索
+    max_back_days = max(1, (max_back_hours // 24) + 1)
 
-        st, ctype, head = probe_init(url, cfg.referer)
+    for back_day in range(0, max_back_days + 1):
+        day = (now - timedelta(days=back_day)).date()
 
-        if st in (401, 403):
-            raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
+        for hh in hour_candidates:
+            init_dt = datetime(day.year, day.month, day.day, hh, cfg.rjtd_minute, tzinfo=timezone.utc)
+            rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
+            url = build_png_url(it0.base, it0.layer, view0, rjtd)
 
-        if st == 200:
-            if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
-                raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
-            print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
-            return init_dt
+            st, ctype, head = probe_init(url, cfg.referer)
+
+            if st in (401, 403):
+                raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
+
+            if st == 200:
+                if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
+                    raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
+                print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
+                return init_dt
 
     raise RuntimeError(f"{model_name}: init not found within back={max_back_hours}h")
 
