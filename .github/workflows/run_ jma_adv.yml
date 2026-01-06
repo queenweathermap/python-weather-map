@@ -90,17 +90,22 @@ jobs:
           fi
 
       # ★ここに追加（Run ADV script の直前）
-      - name: Sanity check GSM (today)
+      - name: Sanity check GSM (status only)
         shell: bash
         run: |
           set -euo pipefail
-          for hh in 00 06 12 18; do
-            url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_$(date -u +%m%d)${hh}00.png"
+
+          # GSMは RJTD が ..HH06 で存在している（あなたのスクショより）
+          for h in 00 06 12 18; do
+            rjtd=$(date -u +"%m%d")${h}06
+            url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_${rjtd}.png"
+
             code=$(curl -s -o /dev/null -w "%{http_code}" \
               -u "${JMA_ADV_USER}:${JMA_ADV_PASS}" \
               -H "Referer: https://www.jma.go.jp/bosai/tgv/GSM/" \
               "$url")
-            echo "RJTD=$(date -u +%m%d)${hh}00 HTTP=$code"
+
+            echo "RJTD=${rjtd} HTTP=${code}"
           done
 
 
