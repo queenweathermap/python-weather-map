@@ -5,7 +5,7 @@
 # JMA 防災情報アドバイザー向け「専門天気図（tgv）」を自動取得し、
 # “天気図ごと（itemごと）” にメール送信（必須）＋Slack投稿（副系）する。
 #
-# ✅ 仕様（あなたの現行URL規則に完全準拠）
+# ✅ 仕様（あなたの現行URL規則に準拠）
 # - FT は VIEWコード末尾で表現（RJTDは init 固定）
 # - GSM: FT=3..30 (3h) 10枚 / item（Slack 1投稿・メール1通）
 # - MSM: FT=1..15(1h) + 18,21,24,27,30 合計20枚 / item（Slack 2投稿・メール1通）
@@ -14,11 +14,12 @@
 #
 # ✅ 環境変数
 # - JMA_ADV_USER / JMA_ADV_PASS  (推奨)   または JMA_AUTH_BASIC ("Basic xxxx")
-# - DELIVERY_MODE = email | slack | both  (default: both)  ※メール必須想定だが切替可
+# - DELIVERY_MODE = email | slack | both  (default: both)
 # - SLACK_BOT_TOKEN / SLACK_CHANNEL_ID    (Slack投稿したい場合)
 # - SLACK_CHUNK = 10                      (default: 10)
 # - JPG_QUALITY = 85                      (default: 85)
 # - INIT_SEARCH_HOURS = 72                (default: 72)
+# - TGV_USE_AUTH = "0"(default) / "1"     ★公開天気図なら0推奨
 # =============================================================================
 
 import sys
@@ -118,7 +119,7 @@ def headers_for(referer: str) -> dict:
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
 
-    # ★公開天気図では Authorization を付けない（デフォルトOFF）
+    # 公開天気図では Authorization を付けない（デフォルトOFF）
     use_auth = os.getenv("TGV_USE_AUTH", "0").strip() == "1"
     if use_auth:
         h["Authorization"] = get_auth_basic()
@@ -148,13 +149,12 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
 # =============================================================================
 def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
     # RJTD: MMDDHHMM (UTC)
-    dt = init_dt_utc.astimezone(timezone.utc).replace(
-        minute=minute, second=0, microsecond=0
-    )
+    dt = init_dt_utc.astimezone(timezone.utc).replace(minute=minute, second=0, microsecond=0)
     return dt.strftime("%m%d%H%M")
 
 
 def floor_to_step(dt_utc: datetime, step_hours: int, minute: int) -> datetime:
+    # 探索起点も minute を揃える（MSM=03, LFM=06 など）
     dt = dt_utc.astimezone(timezone.utc).replace(second=0, microsecond=0)
     h = (dt.hour // step_hours) * step_hours
     return dt.replace(hour=h, minute=minute)
@@ -179,7 +179,7 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 @dataclass
 class Item:
     label: str
-    base: str       # ★ここが重要：itemごとのbase
+    base: str
     layer: str
     view_base: str
     view_digits: int
@@ -190,26 +190,23 @@ class Item:
 class ModelCfg:
     referer: str
     init_step_hours: int
-    rjtd_minute: int         # ★追加（0/3/6）
+    rjtd_minute: int
     init_probe_item: Item
     ft_list: List[int]
     slack_chunk: int
     items: List[Item]
 
 
-
 def ft_list_gsm() -> List[int]:
-    # GSM: FT=3..30 (3h) => 10枚
-    return list(range(3, 31, 3))
+    return list(range(3, 31, 3))  # 3,6,...,30
+
 
 def ft_list_msm() -> List[int]:
-    # MSM: FT=1..15 + 18,21,24,27,30 => 20枚
-    return list(range(1, 16)) + [18, 21, 24, 27, 30]
+    return list(range(1, 16)) + [18, 21, 24, 27, 30]  # 1..15 + 18..30(3h)
+
 
 def ft_list_lfm() -> List[int]:
-    # LFM: FT=1..18 => 18枚
-    return list(range(1, 19))
-
+    return list(range(1, 19))  # 1..18
 
 
 def load_model_groups() -> Dict[str, ModelCfg]:
@@ -229,8 +226,8 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item("500hPa",   MSM_WIDE, "500",  "500000", 2, "MSM_500"),
         Item("500hPa-2", MSM_WIDE, "5002", "510000", 2, "MSM_5002"),
         Item("700hPa",   MSM_WIDE, "700",  "700000", 2, "MSM_700"),
-        Item("8502",     MSM_WIDE, "8502", "860000", 2, "MSM_8502"),   # ★追加
-        Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),    # ★追加（VIEW050201）
+        Item("8502",     MSM_WIDE, "8502", "860000", 2, "MSM_8502"),   # 860001 がFT=1
+        Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),    # 050201 がFT=1
     ]
 
     lfm_items = [
@@ -241,37 +238,35 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item("sfc-2",    LFM_NAR, "sfc2", "010200", 2, "LFM_sfc2"),
     ]
 
-return {
-    "GSM": ModelCfg(
-        referer="https://www.jma.go.jp/bosai/tgv/GSM/",
-        init_step_hours=1,
-        rjtd_minute=0,          # ★GSMは00
-        init_probe_item=gsm_items[0],
-        ft_list=ft_list_gsm(),
-        slack_chunk=10,
-        items=gsm_items,
-    ),
-    "MSM": ModelCfg(
-        referer="https://www.jma.go.jp/bosai/tgv/MSM/",
-        init_step_hours=1,
-        rjtd_minute=3,          # ★MSMは03
-        init_probe_item=msm_items[0],
-        ft_list=ft_list_msm(),
-        slack_chunk=10,
-        items=msm_items,
-    ),
-    "LFM": ModelCfg(
-        referer="https://www.jma.go.jp/bosai/tgv/LFM/",
-        init_step_hours=1,
-        rjtd_minute=6,          # ★LFMは06
-        init_probe_item=lfm_items[0],
-        ft_list=ft_list_lfm(),
-        slack_chunk=10,
-        items=lfm_items,
-    ),
-}
-
-
+    return {
+        "GSM": ModelCfg(
+            referer="https://www.jma.go.jp/bosai/tgv/GSM/",
+            init_step_hours=1,
+            rjtd_minute=0,  # GSM: ..HH00
+            init_probe_item=gsm_items[0],
+            ft_list=ft_list_gsm(),
+            slack_chunk=slack_chunk,
+            items=gsm_items,
+        ),
+        "MSM": ModelCfg(
+            referer="https://www.jma.go.jp/bosai/tgv/MSM/",
+            init_step_hours=1,
+            rjtd_minute=3,  # MSM: ..HH03
+            init_probe_item=msm_items[0],  # Wide側で探索
+            ft_list=ft_list_msm(),
+            slack_chunk=slack_chunk,
+            items=msm_items,
+        ),
+        "LFM": ModelCfg(
+            referer="https://www.jma.go.jp/bosai/tgv/LFM/",
+            init_step_hours=1,
+            rjtd_minute=6,  # LFM: ..HH06
+            init_probe_item=lfm_items[0],
+            ft_list=ft_list_lfm(),
+            slack_chunk=slack_chunk,
+            items=lfm_items,
+        ),
+    }
 
 
 # =============================================================================
@@ -287,10 +282,10 @@ def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
     step = cfg.init_step_hours
     now = datetime.now(timezone.utc)
-    start = floor_to_step(now, step)
+    start = floor_to_step(now, step, cfg.rjtd_minute)  # ★minute必須
 
     it0 = cfg.init_probe_item
-    first_ft = cfg.ft_list[0]  # ★GSM=3, MSM/LFM=1
+    first_ft = cfg.ft_list[0]  # GSM=3, MSM/LFM=1
     view0 = view_for_ft(it0.view_base, first_ft, it0.view_digits)
 
     for back in range(0, max_back_hours + 1, step):
@@ -300,7 +295,6 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
 
         st, ctype, head = probe_init(url, cfg.referer)
 
-        # --- authはこれだけ ---
         if st in (401, 403):
             raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
@@ -310,12 +304,7 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
             print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
             return init_dt
 
-        # 404やそれ以外は「無いだけ」なので継続
-        # print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st}")
-
     raise RuntimeError(f"{model_name}: init not found within back={max_back_hours}h")
-
-
 
 
 # =============================================================================
@@ -328,11 +317,6 @@ def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
 
 
 def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: Item) -> Tuple[List[Attachment], bool]:
-    """
-    1天気図ぶん取得
-    - 404はよくあるので黙ってスキップ（printはOK）
-    - 401/403 or 200なのにHTML（認証ページ疑い）なら auth_failed=True
-    """
     jpg_quality = env_int("JPG_QUALITY", 85)
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
 
@@ -341,8 +325,6 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
 
     for ft in cfg.ft_list:
         view_code = view_for_ft(item.view_base, ft, item.view_digits)
-
-        # ★超重要：itemごとの base を使う（MSMNarrow などが混ざるため）
         url = build_png_url(item.base, item.layer, view_code, rjtd)
 
         status, content, ctype = fetch_png(url, cfg.referer)
@@ -370,20 +352,18 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
     return atts, auth_failed
 
 
-
 # =============================================================================
 # Delivery: Email / Slack (per item)
 # =============================================================================
-def send_item_mail(model_name: str, item: Item, init_dt: datetime, atts: List[Attachment]) -> None:
+def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment]) -> None:
     prefix = env_str("MAIL_SUBJECT_PREFIX", "JMA")
-    init_str = init_dt.strftime("%m/%d %H:00(UTC)")
-    subject = f"{prefix} ADV TGV {model_name} {item.label} RJTD={fmt_rjtd(init_dt)}"
+    subject = f"{prefix} ADV TGV {model_name} {item.label} RJTD={fmt_rjtd(init_dt, cfg.rjtd_minute)}"
 
     body = "\n".join([
         "JMA 防災情報アドバイザー向け 専門天気図（tgv）",
         f"model: {model_name}",
         f"chart: {item.label}",
-        f"RJTD : {fmt_rjtd(init_dt)} (UTC)",
+        f"RJTD : {fmt_rjtd(init_dt, cfg.rjtd_minute)} (UTC)",
         f"files: {len(atts)}",
         "",
         "※ 個人利用・非公開",
@@ -400,12 +380,12 @@ def send_item_mail(model_name: str, item: Item, init_dt: datetime, atts: List[At
     print(f"[OK] mail sent: {model_name} {item.label} files={len(atts)}")
 
 
-def send_item_slack(model_name: str, item: Item, init_dt: datetime, atts: List[Attachment], chunk_size: int) -> None:
+def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment], chunk_size: int) -> None:
     channel = env_str("SLACK_CHANNEL_ID")
     if not channel:
         raise RuntimeError("SLACK_CHANNEL_ID is missing")
 
-    rjtd = fmt_rjtd(init_dt)
+    rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
     header = f"🗺️ ADV TGV {model_name} / {item.label}  RJTD={rjtd}  files={len(atts)}"
 
     pairs = [(fn, blob) for (fn, blob, _mime) in atts]
@@ -432,7 +412,6 @@ def main() -> None:
         cfg = groups[model_name]
         print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
 
-        # 1) init探索
         try:
             init_dt = find_working_init_dt(model_name, cfg, max_back_hours=search_hours)
         except Exception as e:
@@ -444,7 +423,6 @@ def main() -> None:
         model_total = 0
         model_auth_failed = False
 
-        # 2) itemごとに取得 → メール（必須）→ Slack画像（副系）
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
@@ -454,31 +432,26 @@ def main() -> None:
                 break
 
             if not atts:
-                # item全滅はよくあるので通知しない
                 print(f"[WARN] {model_name} {item.label}: no images")
                 continue
 
             model_total += len(atts)
 
-            # メール（本命）
             if mode in ("email", "both"):
                 try:
-                    send_item_mail(model_name, item, init_dt, atts)
+                    send_item_mail(model_name, item, cfg, init_dt, atts)
                 except Exception as e:
                     slack_notify(f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}")
 
-            # Slack（副系）
             if mode in ("slack", "both"):
                 try:
-                    # chunkはモデル共通で10想定（GSM=10, MSM=10+10, LFM=10+8）
-                    send_item_slack(model_name, item, init_dt, atts, chunk_size=cfg.slack_chunk)
+                    send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
                 except Exception as e:
                     print(f"[WARN] Slack image send failed: {model_name} {item.label}: {e}")
 
-        # 3) モデル全滅だけ通知
         if (not model_auth_failed) and (model_total == 0):
             slack_notify(
-                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\nRJTD={fmt_rjtd(init_dt)}"
+                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\nRJTD={fmt_rjtd(init_dt, cfg.rjtd_minute)}"
             )
 
     print("\n=== Done ADV JMA TGV ===")
