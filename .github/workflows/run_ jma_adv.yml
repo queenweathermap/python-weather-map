@@ -95,9 +95,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # RJTD は DDHHMM（6桁）: 01/06 06:00 UTC → 060600
           for h in 00 06 12 18; do
-            rjtd=$(date -u +"%d")${h}06
+            rjtd=$(date -u +"%d")${h}00   # ← ここが重要（分は00）
             url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_${rjtd}.png"
 
             code=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -107,7 +106,6 @@ jobs:
 
             echo "RJTD=${rjtd} HTTP=${code}"
           done
-
 
 
 
