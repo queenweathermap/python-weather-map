@@ -110,14 +110,20 @@ def slack_notify(text: str) -> None:
 # HTTP
 # =============================================================================
 def headers_for(referer: str) -> dict:
-    return {
-        "Authorization": get_auth_basic(),
+    h = {
         "User-Agent": "Mozilla/5.0",
         "Referer": referer,
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
+
+    # ★公開天気図では Authorization を付けない（デフォルトOFF）
+    use_auth = os.getenv("TGV_USE_AUTH", "0").strip() == "1"
+    if use_auth:
+        h["Authorization"] = get_auth_basic()
+
+    return h
 
 
 # =============================================================================
