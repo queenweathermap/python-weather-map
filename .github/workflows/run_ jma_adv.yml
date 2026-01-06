@@ -3,11 +3,10 @@ name: Run JMA ADV
 
 on:
   schedule:
-    - cron: "30 22 * * *"  # 07:30 JST（前日22:30 UTC）
+    - cron: "30 22 * * *"  # 07:30 JST
     - cron: "30 5  * * *"  # 14:30 JST
     - cron: "30 10 * * *"  # 19:30 JST
   workflow_dispatch: {}
-
 
 concurrency:
   group: run-adv-${{ github.ref }}
@@ -22,9 +21,14 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
       # =====================
-      # ★ 公開TGV：認証ヘッダを付けない（重要）
+      # ★ ADV（認証あり）：Authorization を付ける
       # =====================
       TGV_USE_AUTH: "1"
+
+      # =====================
+      # 配信モード：Slack画像投稿はしない（エラー通知のみSlack）
+      # =====================
+      DELIVERY_MODE: "email"
 
       # =====================
       # Mail（mail_utils参照）
@@ -48,7 +52,7 @@ jobs:
       JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
 
       # =====================
-      # Slack（副系：入っていれば使う）
+      # Slack（エラー通知用：入っていれば使う）
       # =====================
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
@@ -57,7 +61,6 @@ jobs:
       # =====================
       # ADV script tuning
       # =====================
-      DELIVERY_MODE: "both"        # email | slack | both
       JPG_QUALITY: "85"
       INIT_SEARCH_HOURS: "72"
 
@@ -92,27 +95,31 @@ jobs:
             pip install requests pillow
           fi
 
-      # ★ここに追加（Run ADV script の直前）
+      # ★ Run ADV script の直前：RJTD形式を Python 側と合わせてチェック（MMDDHHMM）
       - name: Sanity check GSM (must find 200)
         shell: bash
         run: |
           set -euo pipefail
           ok=0
-          for h in 00 06 12 18; do
-            rjtd=$(date -u +"%d")${h}00
+
+          # 直近72hの「:30」を1時間刻みで探索（MMDDHHMM）
+          for back in $(seq 0 72); do
+            rjtd=$(date -u -d "${back} hour ago" +"%m%d%H30")
             url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_${rjtd}.png"
+
             code=$(curl -s -o /dev/null -w "%{http_code}" \
               -u "${JMA_ADV_USER}:${JMA_ADV_PASS}" \
               -H "Referer: https://www.jma.go.jp/bosai/tgv/GSM/" \
               "$url")
+
             echo "GSM RJTD=${rjtd} HTTP=${code}"
             if [ "$code" = "200" ]; then ok=1; break; fi
           done
+
           if [ "$ok" != "1" ]; then
-            echo "GSM sanity failed: no HTTP200"
+            echo "GSM sanity failed: no HTTP200 within 72h"
             exit 1
           fi
-
 
       - name: Run ADV script
         run: |
