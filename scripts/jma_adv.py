@@ -82,7 +82,7 @@ def get_auth_basic_header() -> str:
 
 
 def use_auth_enabled() -> bool:
-    return os.getenv("TGV_USE_AUTH", "0").strip() == "1"
+    return os.getenv("TGV_USE_AUTH", "1").strip() == "1"
 
 
 def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
