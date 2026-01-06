@@ -162,7 +162,7 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
 # =============================================================================
 def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
     dt = init_dt_utc.astimezone(timezone.utc).replace(minute=minute, second=0, microsecond=0)
-    return dt.strftime("%m%d%H%M")
+    return dt.strftime("%d%H%M")
 
 
 def floor_to_step(dt_utc: datetime, step_hours: int, minute: int) -> datetime:
