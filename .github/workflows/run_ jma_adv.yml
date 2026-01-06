@@ -38,7 +38,7 @@ jobs:
       MAX_MAIL_SIZE_MB: "20"
 
       # =====================
-      # JMA ADV 認証（※TGV_USE_AUTH=0 なら実際には使わない）
+      # JMA ADV 認証
       # =====================
       JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
       JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
@@ -62,7 +62,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ★ デバッグ（値は出さない：存在チェックだけ）
       - name: Debug env (presence only)
         shell: bash
         run: |
@@ -89,6 +88,18 @@ jobs:
           else
             pip install requests pillow
           fi
+
+      # ★ここに追加（Run ADV script の直前）
+      - name: Sanity check (status only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_060000.png"
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -u "${JMA_ADV_USER}:${JMA_ADV_PASS}" \
+            -H "Referer: https://www.jma.go.jp/bosai/tgv/GSM/" \
+            "$url")
+          echo "HTTP=$code"
 
       - name: Run ADV script
         run: |
