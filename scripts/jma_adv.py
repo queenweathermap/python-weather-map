@@ -171,21 +171,22 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 @dataclass
 class Item:
     label: str
+    base: str       # ★ここが重要：itemごとのbase
     layer: str
-    view_base: str      # ft=0 相当の VIEWコード（末尾は 00...0）
-    view_digits: int    # FT差し替え桁数（GSM=3, MSM/LFM=2）
+    view_base: str
+    view_digits: int
     jpg_prefix: str
 
 
 @dataclass
 class ModelCfg:
-    base: str
     referer: str
     init_step_hours: int
     init_probe_item: Item
     ft_list: List[int]
     slack_chunk: int
     items: List[Item]
+
 
 
 def ft_list_gsm() -> List[int]:
@@ -205,58 +206,59 @@ def ft_list_lfm() -> List[int]:
 def load_model_groups() -> Dict[str, ModelCfg]:
     slack_chunk = env_int("SLACK_CHUNK", 10)
 
+    GSM_WIDE = "https://www.jma.go.jp/bosai/tgv/data/GSMWide"
+    MSM_WIDE = "https://www.jma.go.jp/bosai/tgv/data/MSMWide"
+    MSM_NAR  = "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow"
+    LFM_NAR  = "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow"
+
     gsm_items = [
-        Item(label="300hPa",   layer="300",  view_base="3001000", view_digits=3, jpg_prefix="GSM_300"),
-        Item(label="300hPa-2", layer="3002", view_base="3101000", view_digits=3, jpg_prefix="GSM_3002"),
+        Item("300hPa",   GSM_WIDE, "300",  "3001000", 3, "GSM_300"),
+        Item("300hPa-2", GSM_WIDE, "3002", "3101000", 3, "GSM_3002"),
     ]
-    
+
     msm_items = [
-        Item(label="500hPa",   layer="500",  view_base="500000", view_digits=2, jpg_prefix="MSM_500"),
-        Item(label="500hPa-2", layer="5002", view_base="510000", view_digits=2, jpg_prefix="MSM_5002"),
-        Item(label="700hPa",   layer="700",  view_base="700000", view_digits=2, jpg_prefix="MSM_700"),
+        Item("500hPa",   MSM_WIDE, "500",  "500000", 2, "MSM_500"),
+        Item("500hPa-2", MSM_WIDE, "5002", "510000", 2, "MSM_5002"),
+        Item("700hPa",   MSM_WIDE, "700",  "700000", 2, "MSM_700"),
+        Item("8502",     MSM_WIDE, "8502", "860000", 2, "MSM_8502"),   # ★追加
+        Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),    # ★追加（VIEW050201）
     ]
-    
+
     lfm_items = [
-        Item(label="850hPa",   layer="850",  view_base="850200", view_digits=2, jpg_prefix="LFM_850"),
-        Item(label="850hPa-2", layer="8502", view_base="860200", view_digits=2, jpg_prefix="LFM_8502"),
-        Item(label="925hPa",   layer="925",  view_base="920200", view_digits=2, jpg_prefix="LFM_925"),
-        Item(label="975hPa",   layer="975",  view_base="970200", view_digits=2, jpg_prefix="LFM_975"),
-        Item(label="sfc",      layer="sfc",  view_base="000200", view_digits=2, jpg_prefix="LFM_sfc"),
-        Item(label="sfc-2",    layer="sfc2", view_base="010200", view_digits=2, jpg_prefix="LFM_sfc2"),
+        Item("850hPa",   LFM_NAR, "850",  "850200", 2, "LFM_850"),
+        Item("925hPa",   LFM_NAR, "925",  "920200", 2, "LFM_925"),
+        Item("975hPa",   LFM_NAR, "975",  "970200", 2, "LFM_975"),
+        Item("sfc",      LFM_NAR, "sfc",  "000200", 2, "LFM_sfc"),
+        Item("sfc-2",    LFM_NAR, "sfc2", "010200", 2, "LFM_sfc2"),
     ]
-
-
-
 
     return {
         "GSM": ModelCfg(
-            base="https://www.jma.go.jp/bosai/tgv/data/GSMWide",
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
-            init_step_hours=1,  # 探索は1h刻みでOK（実際にある時刻にヒットさせやすい）
+            init_step_hours=1,
             init_probe_item=gsm_items[0],
-            ft_list=ft_list_gsm(),
-            slack_chunk=slack_chunk,  # 10
+            ft_list=ft_list_gsm(),     # 3..30
+            slack_chunk=10,
             items=gsm_items,
         ),
         "MSM": ModelCfg(
-            base="https://www.jma.go.jp/bosai/tgv/data/MSMWide",
             referer="https://www.jma.go.jp/bosai/tgv/MSM/",
             init_step_hours=1,
-            init_probe_item=msm_items[0],
-            ft_list=ft_list_msm(),
-            slack_chunk=slack_chunk,  # 10（=10+10）
+            init_probe_item=msm_items[0],  # Wide側で探す
+            ft_list=ft_list_msm(),     # 1..15 + 18..30
+            slack_chunk=10,
             items=msm_items,
         ),
         "LFM": ModelCfg(
-            base="https://www.jma.go.jp/bosai/tgv/data/LFMNarrow",
             referer="https://www.jma.go.jp/bosai/tgv/LFM/",
             init_step_hours=1,
             init_probe_item=lfm_items[0],
-            ft_list=ft_list_lfm(),
-            slack_chunk=slack_chunk,  # 10（=10+8）
+            ft_list=ft_list_lfm(),     # 1..18
+            slack_chunk=10,
             items=lfm_items,
         ),
     }
+
 
 
 # =============================================================================
@@ -275,28 +277,31 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
     start = floor_to_step(now, step)
 
     it0 = cfg.init_probe_item
-
-    # ★ここが重要：ft=0 ではなく、そのモデルの「最初に存在するFT」で探す
-    probe_ft = cfg.ft_list[0]  # GSMなら3 / MSMなら1 / LFMなら1
-    view_probe = view_for_ft(it0.view_base, probe_ft, it0.view_digits)
+    first_ft = cfg.ft_list[0]  # ★GSM=3, MSM/LFM=1
+    view0 = view_for_ft(it0.view_base, first_ft, it0.view_digits)
 
     for back in range(0, max_back_hours + 1, step):
         init_dt = start - timedelta(hours=back)
         rjtd = fmt_rjtd(init_dt)
-        url = build_png_url(cfg.base, it0.layer, view_probe, rjtd)
+        url = build_png_url(it0.base, it0.layer, view0, rjtd)
 
         st, ctype, head = probe_init(url, cfg.referer)
+
+        # --- authはこれだけ ---
+        if st in (401, 403):
+            raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
         if st == 200:
             if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
                 raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
-            print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd}")
+            print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
             return init_dt
 
-        if st in (401, 403):
-            raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
+        # 404やそれ以外は「無いだけ」なので継続
+        # print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st}")
 
     raise RuntimeError(f"{model_name}: init not found within back={max_back_hours}h")
+
 
 
 
@@ -323,12 +328,13 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
 
     for ft in cfg.ft_list:
         view_code = view_for_ft(item.view_base, ft, item.view_digits)
-        url = build_png_url(cfg.base, item.layer, view_code, rjtd)
+
+        # ★超重要：itemごとの base を使う（MSMNarrow などが混ざるため）
+        url = build_png_url(item.base, item.layer, view_code, rjtd)
 
         status, content, ctype = fetch_png(url, cfg.referer)
 
         if status == 200:
-            # 200でHTMLは異常（ログインHTML等）
             if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
                 auth_failed = True
                 print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
@@ -346,14 +352,10 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
             break
 
         if status == 404:
-            # Slackには出さない
-            # print(f"[404] {model_name} {item.label} ft={ft}")
             continue
 
-        # その他
-        # print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} url={url}")
-
     return atts, auth_failed
+
 
 
 # =============================================================================
