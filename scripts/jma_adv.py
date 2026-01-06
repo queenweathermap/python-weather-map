@@ -218,13 +218,14 @@ def load_model_groups() -> Dict[str, ModelCfg]:
     ]
     
     lfm_items = [
-        Item(label="850hPa",   layer="850",  view_base="850200", view_digits=3, jpg_prefix="LFM_850"),
-        Item(label="850hPa-2", layer="8502", view_base="860200", view_digits=3, jpg_prefix="LFM_8502"),
-        Item(label="925hPa",   layer="925",  view_base="920200", view_digits=3, jpg_prefix="LFM_925"),
-        Item(label="975hPa",   layer="975",  view_base="970200", view_digits=3, jpg_prefix="LFM_975"),
-        Item(label="sfc",      layer="sfc",  view_base="000200", view_digits=3, jpg_prefix="LFM_sfc"),
-        Item(label="sfc-2",    layer="sfc2", view_base="010200", view_digits=3, jpg_prefix="LFM_sfc2"),
+        Item(label="850hPa",   layer="850",  view_base="850200", view_digits=2, jpg_prefix="LFM_850"),
+        Item(label="850hPa-2", layer="8502", view_base="860200", view_digits=2, jpg_prefix="LFM_8502"),
+        Item(label="925hPa",   layer="925",  view_base="920200", view_digits=2, jpg_prefix="LFM_925"),
+        Item(label="975hPa",   layer="975",  view_base="970200", view_digits=2, jpg_prefix="LFM_975"),
+        Item(label="sfc",      layer="sfc",  view_base="000200", view_digits=2, jpg_prefix="LFM_sfc"),
+        Item(label="sfc-2",    layer="sfc2", view_base="010200", view_digits=2, jpg_prefix="LFM_sfc2"),
     ]
+
 
     return {
         "GSM": ModelCfg(
@@ -268,28 +269,25 @@ def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
 
 
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
-    """
-    - 404は普通に起きる（HTMLでもOK）ので例外にしない
-    - 401/403は認証エラー
-    - 200なのにHTMLは認証ページ/ブロック疑い
-    """
     step = cfg.init_step_hours
     now = datetime.now(timezone.utc)
     start = floor_to_step(now, step)
 
     it0 = cfg.init_probe_item
-    view0 = view_for_ft(it0.view_base, 0, it0.view_digits)
+
+    # ★ここが重要：ft=0 ではなく、そのモデルの「最初に存在するFT」で探す
+    probe_ft = cfg.ft_list[0]  # GSMなら3 / MSMなら1 / LFMなら1
+    view_probe = view_for_ft(it0.view_base, probe_ft, it0.view_digits)
 
     for back in range(0, max_back_hours + 1, step):
         init_dt = start - timedelta(hours=back)
         rjtd = fmt_rjtd(init_dt)
-        url = build_png_url(cfg.base, it0.layer, view0, rjtd)
+        url = build_png_url(cfg.base, it0.layer, view_probe, rjtd)
 
         st, ctype, head = probe_init(url, cfg.referer)
 
         if st == 200:
             if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
-                # 200でHTMLは異常
                 raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
             print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd}")
             return init_dt
@@ -297,10 +295,8 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
         if st in (401, 403):
             raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
-        # 404等は探索継続
-        # print(f"[NG] {model_name} init RJTD_{rjtd} HTTP{st}")
-
     raise RuntimeError(f"{model_name}: init not found within back={max_back_hours}h")
+
 
 
 # =============================================================================
