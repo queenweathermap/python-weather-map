@@ -121,6 +121,7 @@ def headers_for(referer: str) -> dict:
 
     # 公開天気図では Authorization を付けない（デフォルトOFF）
     use_auth = os.getenv("TGV_USE_AUTH", "0").strip() == "1"
+    print(f"[DEBUG] TGV_USE_AUTH={'1' if use_auth else '0'}")
     if use_auth:
         h["Authorization"] = get_auth_basic()
 
