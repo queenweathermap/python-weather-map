@@ -3,7 +3,7 @@ name: Run JMA ADV
 
 on:
   schedule:
-    - cron: "30 5 * * *"   # UTC（JST 15:30）
+    - cron: "30 5 * * *"   # UTC（JST 14:30）
   workflow_dispatch: {}
 
 concurrency:
