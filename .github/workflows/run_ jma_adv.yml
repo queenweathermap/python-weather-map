@@ -3,8 +3,11 @@ name: Run JMA ADV
 
 on:
   schedule:
-    - cron: "30 5 * * *"   # UTC（JST 14:30）
+    - cron: "30 22 * * *"  # 07:30 JST（前日22:30 UTC）
+    - cron: "30 5  * * *"  # 14:30 JST
+    - cron: "30 10 * * *"  # 19:30 JST
   workflow_dispatch: {}
+
 
 concurrency:
   group: run-adv-${{ github.ref }}
