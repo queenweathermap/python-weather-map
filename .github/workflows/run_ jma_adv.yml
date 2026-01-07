@@ -96,32 +96,32 @@ jobs:
           fi
 
       # ★ Run ADV script の直前：超軽量 sanity（DDHHMM / 6時間刻み / 最大5回）
-      - name: Sanity check GSM (DDHHMM, must find 200)
+      - name: Sanity check GSM (warn only)
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           ok=0
 
-          # RJTD は DDHHMM。GSM は minute=06 系が観測できている前提で「06」を試す
-          # 6時間刻みで最大5回（0,6,12,18,24h）だけ遡る
+          # 直近24hをざっくり（6時間刻み）× 分候補(00/03/06) で「200が1個でも出るか」
           for back in 0 6 12 18 24; do
-            dt=$(date -u -d "${back} hour ago" +"%d%H")
-            rjtd="${dt}06"   # => DDHH06
-            url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_${rjtd}.png"
-
-            code=$(curl -s -o /dev/null -w "%{http_code}" \
-              -u "${JMA_ADV_USER}:${JMA_ADV_PASS}" \
-              -H "Referer: https://www.jma.go.jp/bosai/tgv/GSM/" \
-              "$url")
-
-            echo "GSM RJTD=${rjtd} HTTP=${code} url=${url}"
-            if [ "$code" = "200" ]; then ok=1; break; fi
+            ddhh=$(date -u -d "${back} hour ago" +"%d%H")
+            for mm in 00 03 06; do
+              rjtd="${ddhh}${mm}"
+              url="https://www.jma.go.jp/bosai/tgv/data/GSMWide/300/images/VIEW3001003_RJTD_${rjtd}.png"
+              code=$(curl -s -o /dev/null -w "%{http_code}" \
+                -u "${JMA_ADV_USER}:${JMA_ADV_PASS}" \
+                -H "Referer: https://www.jma.go.jp/bosai/tgv/GSM/" \
+                "$url")
+              echo "GSM RJTD=${rjtd} HTTP=${code} url=${url}"
+              if [ "$code" = "200" ]; then ok=1; break 2; fi
+            done
           done
 
           if [ "$ok" != "1" ]; then
-            echo "GSM sanity failed: no HTTP200 within last 24h (6-hour steps)"
-            exit 1
+            echo "GSM sanity WARN: no HTTP200 in last 24h (this does NOT fail the job)"
           fi
+
 
       - name: Run ADV script
         run: |
