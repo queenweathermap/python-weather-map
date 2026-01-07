@@ -215,7 +215,7 @@ def ft_list_msm() -> List[int]:
 
 
 def ft_list_lfm() -> List[int]:
-    return list(range(1, 19))
+    return list(range(4, 19))
 
 
 def load_model_groups() -> Dict[str, ModelCfg]:
