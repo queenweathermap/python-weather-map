@@ -246,7 +246,7 @@ def maybe_pair_join_attachments(atts: List[Attachment], *, quality: int) -> List
     """
     2枚ずつ横結合して添付数を減らす（JOIN_PAIR=1 のときだけ有効）
     """
-    if not env_bool("JOIN_PAIR", "0"):
+    if not env_bool("JOIN_PAIR", "1"):
         return atts
 
     if len(atts) < 2:
