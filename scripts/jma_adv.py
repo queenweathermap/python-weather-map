@@ -3,17 +3,25 @@
 # scripts/jma_adv.py
 #
 # JMA 防災情報アドバイザー向け「専門天気図（tgv）」を自動取得し、
-# “天気図ごと（itemごと）” にメール送信（必須）＋Slack投稿（副系）する。
+# “天気図ごと（itemごと）” にメール送信（必須）する。
 #
 # ✅ 仕様（あなたの現行URL規則に準拠）
 # - FT は VIEWコード末尾で表現（RJTDは init 固定）
 # - GSM: FT=3..30 (3h) 10枚 / item
 # - MSM: FT=1..15(1h) + 18,21,24,27,30 合計20枚 / item
-# - LFM: FT=1..18(1h) 18枚 / item
+# - LFM: FT=4..18(1h) 15枚 / item（必要に応じて変更OK）
 #
 # ✅ 認証
 # - ADV限定（認証必須） → TGV_USE_AUTH=1 を推奨
 #   (GitHub Actions では secrets の user/pass を使う)
+#
+# ✅ Slack
+# - ここでは「エラー通知のみ」（画像投稿はしない）
+#
+# ✅ 画像結合（任意）
+# - 2枚を横結合して1枚にする（添付枚数を約半分にできる）
+# - JOIN_PAIR=1 のときだけ有効（デフォルトOFF）
+#   例）JOIN_PAIR=1 → (1,2),(3,4)... を横結合。奇数枚の最後はそのまま。
 # =============================================================================
 
 import sys
@@ -33,16 +41,20 @@ import requests
 from PIL import Image
 
 from module.utils.mail_utils import send_mail
-from module.utils.slack_utils import send_slack_text, upload_bytes_slack
+from module.utils.slack_utils import send_slack_text, upload_bytes_slack  # uploadは残すが使わない
 
 
-Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
+# -----------------------------------------------------------------------------
+# 添付の型： (ファイル名, バイナリ, MIME)
+# -----------------------------------------------------------------------------
+Attachment = Tuple[str, bytes, str]
 
 
 # =============================================================================
 # Env utils
 # =============================================================================
 def must_env(name: str) -> str:
+    """必須環境変数。無ければ即エラーで落とす。"""
     v = os.getenv(name)
     if not v:
         raise RuntimeError(f"Missing required env: {name}")
@@ -50,6 +62,7 @@ def must_env(name: str) -> str:
 
 
 def env_int(name: str, default: int) -> int:
+    """int環境変数。無ければ default。壊れていても default。"""
     v = os.getenv(name)
     if v is None or v.strip() == "":
         return default
@@ -60,20 +73,37 @@ def env_int(name: str, default: int) -> int:
 
 
 def env_str(name: str, default: str = "") -> str:
+    """str環境変数。無ければ default。"""
     v = os.getenv(name)
     return default if v is None else v.strip()
+
+
+def env_bool(name: str, default: str = "0") -> bool:
+    """
+    bool環境変数。
+    - "1" / "true" / "yes" / "on" を True とみなす
+    """
+    v = os.getenv(name, default).strip().lower()
+    return v in ("1", "true", "yes", "on")
 
 
 # =============================================================================
 # Auth
 # =============================================================================
 def make_basic_auth_header(user: str, password: str) -> str:
+    """
+    Authorization: Basic xxxx を作る（header方式）
+    ※ ただしADVでは「requests auth=(user,pw)」の方が curl -u に近くて安定することが多い
+    """
     token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
     return f"Basic {token}"
 
 
 def get_auth_basic_header() -> str:
-    # 優先：user/pass → 生成、無ければ JMA_AUTH_BASIC
+    """
+    優先：user/pass → 生成、無ければ JMA_AUTH_BASIC
+    ※ ここは “保険” として残す（実運用は user/pass 推奨）
+    """
     user = os.getenv("JMA_ADV_USER")
     pw = os.getenv("JMA_ADV_PASS")
     if user and pw:
@@ -82,36 +112,54 @@ def get_auth_basic_header() -> str:
 
 
 def use_auth_enabled() -> bool:
+    """
+    ADVは認証必須なのでデフォルト 1 推奨。
+    公開画像を取る用途が混ざる場合のみ 0 にする。
+    """
     return os.getenv("TGV_USE_AUTH", "1").strip() == "1"
 
 
 def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
-    """curl -u と同じ挙動にするため requests の auth を使う"""
+    """
+    curl -u と同じ挙動にするため requests の auth を使う。
+    user/pass があるなら (user,pw) を返す。
+    """
     if not use_auth_enabled():
         return None
+
     user = os.getenv("JMA_ADV_USER")
     pw = os.getenv("JMA_ADV_PASS")
     if user and pw:
         return (user.strip(), pw.strip())
-    # user/pass がない場合は header 方式にフォールバック（JMA_AUTH_BASIC想定）
+
+    # user/pass がない場合は None（headers側で Authorization を付ける可能性）
     return None
 
 
 # =============================================================================
-# Slack (critical only)
+# Slack（エラー通知のみ）
 # =============================================================================
 def slack_enabled() -> bool:
     return bool(env_str("SLACK_BOT_TOKEN")) and bool(env_str("SLACK_CHANNEL_ID"))
 
+
 def slack_notify(text: str) -> None:
+    """
+    Slackは「重要なときだけ」。
+    - 401/403
+    - INIT見つからない
+    - MAIL送信失敗
+    - など
+    """
     if not slack_enabled():
         return
+
     ch = env_str("SLACK_CHANNEL_ID")
     try:
         # Slackは長文で落ちることがあるので分割（目安 3500）
         limit = 3500
         for i in range(0, len(text), limit):
-            send_slack_text(channel=ch, message=text[i:i+limit])
+            send_slack_text(channel=ch, message=text[i:i + limit])
     except Exception as e:
         print(f"[WARN] Slack notify failed: {e}")
 
@@ -120,6 +168,10 @@ def slack_notify(text: str) -> None:
 # HTTP
 # =============================================================================
 def headers_for(referer: str) -> dict:
+    """
+    Referer 付けないと弾かれる系のサイト対策も含む。
+    ADVは認証必須だが、基本は requests の auth=(user,pw) を優先。
+    """
     h = {
         "User-Agent": "Mozilla/5.0",
         "Referer": referer,
@@ -127,13 +179,19 @@ def headers_for(referer: str) -> dict:
         "Pragma": "no-cache",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
-    # user/pass が無い環境向けに、ヘッダ方式も残す（ADVは通常 user/pass でOK）
+
+    # user/passが無い環境向けに、ヘッダ方式も残す（JMA_AUTH_BASIC想定）
     if use_auth_enabled() and (get_requests_auth_tuple() is None):
         h["Authorization"] = get_auth_basic_header()
+
     return h
 
 
 def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
+    """
+    認証：requests の auth=(user,pw) があるならそれを使う（curl -u相当）
+    それが無ければ headers の Authorization に期待する
+    """
     auth = get_requests_auth_tuple()
     return requests.get(
         url,
@@ -144,9 +202,13 @@ def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
 
 
 # =============================================================================
-# PNG -> JPG
+# 画像変換・結合
 # =============================================================================
 def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
+    """
+    PNGをJPEG化（メール添付サイズを少し下げられる）
+    - 透過は白背景にする
+    """
     with Image.open(io.BytesIO(png_bytes)) as im:
         if im.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", im.size, (255, 255, 255))
@@ -160,25 +222,94 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
         return out.getvalue()
 
 
+def join_two_jpegs_horizontally(jpg1: bytes, jpg2: bytes, *, quality: int = 85) -> bytes:
+    """
+    JPEG 2枚を横に連結して1枚にする。
+    - 高さが違う場合：白背景で最大高さに合わせて貼る（上詰め）
+    """
+    im1 = Image.open(io.BytesIO(jpg1)).convert("RGB")
+    im2 = Image.open(io.BytesIO(jpg2)).convert("RGB")
+
+    h = max(im1.height, im2.height)
+    w = im1.width + im2.width
+
+    canvas = Image.new("RGB", (w, h), (255, 255, 255))
+    canvas.paste(im1, (0, 0))
+    canvas.paste(im2, (im1.width, 0))
+
+    out = io.BytesIO()
+    canvas.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
+    return out.getvalue()
+
+
+def maybe_pair_join_attachments(atts: List[Attachment], *, quality: int) -> List[Attachment]:
+    """
+    2枚ずつ横結合して添付数を減らす（JOIN_PAIR=1 のときだけ有効）
+    """
+    if not env_bool("JOIN_PAIR", "0"):
+        return atts
+
+    if len(atts) < 2:
+        return atts
+
+    joined: List[Attachment] = []
+    i = 0
+    while i < len(atts):
+        if i + 1 < len(atts):
+            fn1, b1, _m1 = atts[i]
+            fn2, b2, _m2 = atts[i + 1]
+
+            merged = join_two_jpegs_horizontally(b1, b2, quality=quality)
+
+            # ファイル名は「前の名前 + _pair」にしておく（追跡しやすい）
+            base = fn1.replace(".jpg", "")
+            out_name = f"{base}_pair.jpg"
+
+            joined.append((out_name, merged, "image/jpeg"))
+            i += 2
+        else:
+            # 奇数枚の最後はそのまま
+            joined.append(atts[i])
+            i += 1
+
+    return joined
+
+
 # =============================================================================
 # URL rules
 # =============================================================================
 def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
+    """
+    RJTD の表現（あなたの現状の運用に合わせる）
+    - ここでは DDHHMM を使っている（例: 060600）
+    - minute は cfg.rjtd_minute を使う（現状 0）
+    """
     dt = init_dt_utc.astimezone(timezone.utc).replace(minute=minute, second=0, microsecond=0)
     return dt.strftime("%d%H%M")
 
 
 def floor_to_step(dt_utc: datetime, step_hours: int, minute: int) -> datetime:
+    """
+    INIT探索のスタート地点を「モデルの更新周期」へ寄せる。
+    - step_hours=6 なら 0/6/12/18時系
+    - step_hours=3 なら 0/3/6/9/...
+    """
     dt = dt_utc.astimezone(timezone.utc).replace(second=0, microsecond=0)
     h = (dt.hour // step_hours) * step_hours
     return dt.replace(hour=h, minute=minute)
 
 
 def build_png_url(base: str, layer: str, view_code: str, rjtd: str) -> str:
+    """最終的なPNG URL組み立て"""
     return f"{base}/{layer}/images/VIEW{view_code}_RJTD_{rjtd}.png"
 
 
 def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
+    """
+    FT は VIEWコード末尾で表現
+    - GSM: 末尾3桁 FT（例: 3001000 -> 3001003）
+    - MSM/LFM: 末尾2桁 FT（例: 500000 -> 500001）
+    """
     return f"{view_base[:-digits]}{ft_hours:0{digits}d}"
 
 
@@ -187,6 +318,10 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 # =============================================================================
 @dataclass
 class Item:
+    """
+    1つの天気図レイヤ（300, 500, 050...）の定義
+    base は item ごとに持たせる（MSMNarrow が混ざるため超重要）
+    """
     label: str
     base: str
     layer: str
@@ -197,6 +332,11 @@ class Item:
 
 @dataclass
 class ModelCfg:
+    """
+    モデル単位の設定
+    - rjtd_minute: RJTDの minute 固定（今は 0）
+    - init_step_hours: init 探索刻み
+    """
     referer: str
     init_step_hours: int
     rjtd_minute: int
@@ -207,14 +347,17 @@ class ModelCfg:
 
 
 def ft_list_gsm() -> List[int]:
+    # GSM: 3..30（3h）
     return list(range(3, 31, 3))
 
 
 def ft_list_msm() -> List[int]:
+    # MSM: 1..15(1h) + 18..30(3h)
     return list(range(1, 16)) + [18, 21, 24, 27, 30]
 
 
 def ft_list_lfm() -> List[int]:
+    # LFM: 今は「4から欲しい」運用（4..18）
     return list(range(4, 19))
 
 
@@ -226,19 +369,23 @@ def load_model_groups() -> Dict[str, ModelCfg]:
     MSM_NAR  = "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow"
     LFM_NAR  = "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow"
 
+    # --- GSM ---
     gsm_items = [
         Item("300hPa",   GSM_WIDE, "300",  "3001000", 3, "GSM_300"),
         Item("300hPa-2", GSM_WIDE, "3002", "3101000", 3, "GSM_3002"),
     ]
 
+    # --- MSM ---
     msm_items = [
         Item("500hPa",   MSM_WIDE, "500",  "500000", 2, "MSM_500"),
         Item("500hPa-2", MSM_WIDE, "5002", "510000", 2, "MSM_5002"),
         Item("700hPa",   MSM_WIDE, "700",  "700000", 2, "MSM_700"),
-        Item("8502",     MSM_NAR, "8502", "860000", 2, "MSM_8502"),
+        # 8502 は Narrow 側に寄せたい運用
+        Item("8502",     MSM_NAR,  "8502", "860000", 2, "MSM_8502"),
         Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),
     ]
 
+    # --- LFM ---
     lfm_items = [
         Item("850hPa",   LFM_NAR, "850",  "850200", 2, "LFM_850"),
         Item("925hPa",   LFM_NAR, "925",  "920200", 2, "LFM_925"),
@@ -251,7 +398,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "GSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
             init_step_hours=6,
-            rjtd_minute=0,   # 00分（RJTD=DDHH00）
+            rjtd_minute=0,   # 現状の運用：00分（RJTD=DDHH00）
             init_probe_item=gsm_items[0],
             ft_list=ft_list_gsm(),
             slack_chunk=slack_chunk,
@@ -260,8 +407,8 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "MSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/MSM/",
             init_step_hours=3,
-            rjtd_minute=0,   # 00分（RJTD=DDHH00）
-            init_probe_item=msm_items[0],
+            rjtd_minute=0,   # 現状の運用：00分
+            init_probe_item=msm_items[0],  # 500hPa をプローブにする
             ft_list=ft_list_msm(),
             slack_chunk=slack_chunk,
             items=msm_items,
@@ -269,7 +416,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "LFM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/LFM/",
             init_step_hours=6,
-            rjtd_minute=0,   # 00分（RJTD=DDHH00）
+            rjtd_minute=0,   # 現状の運用：00分
             init_probe_item=lfm_items[0],
             ft_list=ft_list_lfm(),
             slack_chunk=slack_chunk,
@@ -278,11 +425,13 @@ def load_model_groups() -> Dict[str, ModelCfg]:
     }
 
 
-
 # =============================================================================
 # INIT auto-detect
 # =============================================================================
 def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
+    """
+    まず「このURLが存在するか？」を見るための軽量プローブ
+    """
     r = http_get(url, referer=referer, timeout=25)
     ctype = (r.headers.get("Content-Type") or "").lower()
     head = r.content[:200]
@@ -290,12 +439,17 @@ def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
 
 
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
+    """
+    INIT（RJTD）を自動探索する。
+    - 認証エラー（401/403）は即座に致命扱い
+    - 404は「無いだけ」なので探索継続
+    """
     step = cfg.init_step_hours
     now = datetime.now(timezone.utc)
     start = floor_to_step(now, step, cfg.rjtd_minute)
 
     it0 = cfg.init_probe_item
-    first_ft = cfg.ft_list[0]
+    first_ft = cfg.ft_list[0]  # GSMなら3, MSMなら1, LFMなら4
     view0 = view_for_ft(it0.view_base, first_ft, it0.view_digits)
 
     for back in range(0, max_back_hours + 1, step):
@@ -309,6 +463,7 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
             raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
         if st == 200:
+            # 200でHTMLが返ってくるのはログイン画面等の可能性 → 認証事故扱い
             if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
                 raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
             print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
@@ -321,12 +476,22 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
 # Fetch per item
 # =============================================================================
 def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
+    """
+    PNGを取得する。
+    - status / content / content-type を返す
+    """
     r = http_get(url, referer=referer, timeout=40)
     ctype = (r.headers.get("Content-Type") or "").lower()
     return r.status_code, r.content, ctype
 
 
 def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: Item) -> Tuple[List[Attachment], bool]:
+    """
+    1天気図（item）ぶん取得する。
+    - 404 はよくあるので黙ってスキップ
+    - 401/403 or 200なのにHTML（認証ページ疑い）なら auth_failed=True
+    - 最後に JOIN_PAIR=1 なら 2枚ずつ横結合して添付数を減らす
+    """
     jpg_quality = env_int("JPG_QUALITY", 85)
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
 
@@ -335,11 +500,14 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
 
     for ft in cfg.ft_list:
         view_code = view_for_ft(item.view_base, ft, item.view_digits)
+
+        # ★重要：base は item ごと（MSMNarrow が混ざるため）
         url = build_png_url(item.base, item.layer, view_code, rjtd)
 
         status, content, ctype = fetch_png(url, cfg.referer)
 
         if status == 200:
+            # 200でHTMLは異常（ログインHTML等）
             if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
                 auth_failed = True
                 print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
@@ -359,13 +527,23 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
         if status == 404:
             continue
 
+        # その他のHTTPは「たまにある」のでログだけ（必要なら復活）
+        # print(f"[WARN] {model_name} {item.label} ft={ft}: HTTP{status} url={url}")
+
+    # ---- ここで「2枚横結合」を適用（任意） ----
+    # 取得済みの atts を paired にして return する
+    atts = maybe_pair_join_attachments(atts, quality=jpg_quality)
+
     return atts, auth_failed
 
 
 # =============================================================================
-# Delivery
+# Delivery（メールが本命 / Slackはエラー通知のみ）
 # =============================================================================
 def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment]) -> None:
+    """
+    item単位でメール送信（添付あり）
+    """
     prefix = env_str("MAIL_SUBJECT_PREFIX", "JMA")
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
     subject = f"{prefix} ADV TGV {model_name} {item.label} RJTD={rjtd}"
@@ -386,11 +564,12 @@ def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime
         body=body,
         attachment_blobs=atts,
         is_html=False,
-        slack_mode="off",
+        slack_mode="off",   # mail_utils 側の Slack 連携は使わない
     )
     print(f"[OK] mail sent: {model_name} {item.label} files={len(atts)}")
 
 
+# （残しておく：将来 Slack 画像投稿を復活したくなった時用）
 def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment], chunk_size: int) -> None:
     channel = env_str("SLACK_CHANNEL_ID")
     if not channel:
@@ -414,15 +593,18 @@ def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetim
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
-    mode = env_str("DELIVERY_MODE", "both").lower()
+    print(f"[DEBUG] JOIN_PAIR={os.getenv('JOIN_PAIR','')}")
+    mode = env_str("DELIVERY_MODE", "email").lower()
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
 
     groups = load_model_groups()
 
+    # ※ ここは固定順。必要ならリストを変えてOK
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
         print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
 
+        # 1) init探索
         try:
             init_dt = find_working_init_dt(model_name, cfg, max_back_hours=search_hours)
         except Exception as e:
@@ -434,6 +616,7 @@ def main() -> None:
         model_total = 0
         model_auth_failed = False
 
+        # 2) itemごとに取得 → メール送信
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
@@ -454,7 +637,11 @@ def main() -> None:
                 except Exception as e:
                     slack_notify(f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}")
 
+            # Slack画像投稿は今はしない（エラー通知だけにしている）
+            # if mode in ("slack", "both"):
+            #     ...
 
+        # 3) モデル全滅だけ通知
         if (not model_auth_failed) and (model_total == 0):
             slack_notify(
                 f"❌ ADV TGV {model_name}: no images fetched (model total=0)\nRJTD={fmt_rjtd(init_dt, cfg.rjtd_minute)}"
