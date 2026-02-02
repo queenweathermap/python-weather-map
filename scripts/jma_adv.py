@@ -702,8 +702,7 @@ def main() -> None:
                 try:
                     send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
                 except Exception as e:
-                    # 画像投稿は失敗しても “致命” にはしないが、気づけるよう通知
-                    msg = f"❌ ADV TGV {model_name} {item.label}: SLACK UPLOAD FAILED\n{type(e).__name__}: {e}"
+                    slack_notify(f"❌ ADV TGV {model_name} {item.label}: SLACK FAILED\n{type(e).__name__}: {e}")
                     print(msg)
                     slack_notify(msg)
 
