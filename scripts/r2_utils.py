@@ -1,87 +1,113 @@
 # -*- coding: utf-8 -*-
-# module/utils/r2_utils.py
-"""
-Cloudflare R2 (S3互換) アップロード支援
-- put_bytes: bytes をR2へアップロード
-- make_url: Notion等で参照するURLを作る（public or presigned）
-"""
+# =============================================================================
+# scripts/r2_utils.py
+#
+# Cloudflare R2 (S3互換API) ユーティリティ
+# - put_bytes(): bytesをR2へアップロード
+# - make_url(): 公開URL（ASSET_BASE_URL）からオブジェクトURL生成
+#
+# 必要な環境変数（GitHub Actions secrets推奨）
+#   R2_ACCOUNT_ID
+#   R2_ACCESS_KEY_ID
+#   R2_SECRET_ACCESS_KEY
+#   R2_BUCKET
+#   ASSET_BASE_URL          # 例: https://<your-bucket>.<your-account-or-managed>.r2.dev
+#
+# 任意
+#   R2_PREFIX               # 例: "adv-tgv" （キーの先頭に付ける）
+# =============================================================================
+
+from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import boto3
-from botocore.client import Config
+from botocore.config import Config
 
 
 def _env(name: str, default: str = "") -> str:
-    return os.getenv(name, default).strip()
+    v = os.getenv(name)
+    return default if v is None else v.strip()
 
 
-def _must(name: str) -> str:
+def _must_env(name: str) -> str:
     v = _env(name)
     if not v:
-        raise RuntimeError(f"Missing env: {name}")
+        raise RuntimeError(f"Missing required env: {name}")
     return v
 
 
-def r2_client():
-    account_id = _must("R2_ACCOUNT_ID")
-    access_key = _must("R2_ACCESS_KEY_ID")
-    secret_key = _must("R2_SECRET_ACCESS_KEY")
+def _r2_endpoint() -> str:
+    """
+    Cloudflare R2 S3互換エンドポイント
+    例: https://<account_id>.r2.cloudflarestorage.com
+    """
+    account_id = _must_env("R2_ACCOUNT_ID")
+    return f"https://{account_id}.r2.cloudflarestorage.com"
 
-    endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
 
+def _client():
+    """
+    boto3 S3 client for R2
+    - region_name は "auto" でOK（R2向け）
+    - signature_version は v4
+    """
     return boto3.client(
         "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        config=Config(signature_version="s3v4"),
+        endpoint_url=_r2_endpoint(),
+        aws_access_key_id=_must_env("R2_ACCESS_KEY_ID"),
+        aws_secret_access_key=_must_env("R2_SECRET_ACCESS_KEY"),
         region_name="auto",
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
+
+
+def normalize_key(key: str) -> str:
+    """
+    R2のobject key正規化
+    - 先頭の / を除去
+    - R2_PREFIX があれば先頭に付ける
+    """
+    key = key.lstrip("/")
+    prefix = _env("R2_PREFIX", "")
+    if prefix:
+        prefix = prefix.strip("/")
+
+    return f"{prefix}/{key}" if prefix else key
 
 
 def put_bytes(
     key: str,
-    blob: bytes,
+    data: bytes,
     *,
     content_type: str = "application/octet-stream",
     cache_control: str = "public, max-age=31536000, immutable",
+    metadata: Optional[Dict[str, str]] = None,
 ) -> None:
     """
-    bytesをR2へアップロード
+    bytes をR2へアップロードする。
+    - 公開バケット（r2.dev等）にしていれば、ASSET_BASE_URL + key で閲覧できる。
     """
-    bucket = _must("R2_BUCKET")
-    s3 = r2_client()
+    bucket = _must_env("R2_BUCKET")
+    k = normalize_key(key)
 
-    s3.put_object(
-        Bucket=bucket,
-        Key=key,
-        Body=blob,
-        ContentType=content_type,
-        CacheControl=cache_control,
-    )
+    extra: Dict[str, Any] = {
+        "ContentType": content_type,
+        "CacheControl": cache_control,
+    }
+    if metadata:
+        extra["Metadata"] = metadata
+
+    s3 = _client()
+    s3.put_object(Bucket=bucket, Key=k, Body=data, **extra)
 
 
 def make_url(key: str) -> str:
     """
-    Notionに貼るURLを作る
-    - R2_URL_MODE=public: R2_PUBLIC_BASE_URL + /key
-    - R2_URL_MODE=presigned: presigned URL（期限付き）
+    公開URLを組み立てる（Notionに貼る用）
+    - ASSET_BASE_URL は末尾スラッシュ無しを推奨
     """
-    mode = _env("R2_URL_MODE", "public").lower()
-
-    if mode == "public":
-        base = _must("R2_PUBLIC_BASE_URL").rstrip("/")
-        return f"{base}/{key}"
-
-    # presigned
-    bucket = _must("R2_BUCKET")
-    s3 = r2_client()
-    exp = int(_env("R2_PRESIGN_EXPIRE_SEC", "604800"))  # default 7 days
-
-    return s3.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=exp,
-    )
+    base = _must_env("ASSET_BASE_URL").rstrip("/")
+    k = normalize_key(key)
+    return f"{base}/{k}"
