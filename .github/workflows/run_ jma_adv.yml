@@ -59,6 +59,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests boto3 notion-client
 
+      - name: Debug env presence (safe)
+        run: |
+          for k in SMTP_HOST SMTP_USER SMTP_PASS MAIL_FROM MAIL_TO SMTP_PORT; do
+            v="${!k}"
+            if [ -z "$v" ]; then
+              echo "$k = MISSING"
+            else
+              echo "$k = OK (len=${#v})"
+            fi
+          done
+
       - name: Run JMA ADV
         run: |
           python scripts/jma_adv.py
