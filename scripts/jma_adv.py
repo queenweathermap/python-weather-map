@@ -718,6 +718,8 @@ def main() -> None:
                     slack_notify(msg)
 
             # --- Slack 画像投稿 ---
+            print(f"[DEBUG] slack channel={channel} token_head={env_str('SLACK_BOT_TOKEN')[:10]}")
+
             if mode in ("slack", "both"):
                 try:
                     send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
