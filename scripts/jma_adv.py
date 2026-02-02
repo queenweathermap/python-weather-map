@@ -3,7 +3,7 @@
 # scripts/jma_adv.py
 #
 # JMA 防災情報アドバイザー向け「専門天気図（tgv）」を自動取得し、
-# “天気図ごと（itemごと）” にメール送信（必須）する。
+# “天気図ごと（itemごと）” にメール送信（必須）＋Slack投稿（任意）する。
 #
 # ✅ 仕様（あなたの現行URL規則に準拠）
 # - FT は VIEWコード末尾で表現（RJTDは init 固定）
@@ -11,17 +11,21 @@
 # - MSM: FT=1..15(1h) + 18,21,24,27,30 合計20枚 / item
 # - LFM: FT=4..18(1h) 15枚 / item（必要に応じて変更OK）
 #
-# ✅ 認証
-# - ADV限定（認証必須） → TGV_USE_AUTH=1 を推奨
-#   (GitHub Actions では secrets の user/pass を使う)
+# ✅ 認証（ADV限定＝認証必須）
+# - TGV_USE_AUTH=1 を推奨（GitHub Actions では secrets の user/pass を使う）
+# - requests の auth=(user,pw) を優先（curl -u 相当で安定しやすい）
+# - user/pass が無い環境は Authorization ヘッダ（JMA_AUTH_BASIC）にフォールバック
 #
 # ✅ Slack
-# - ここでは「エラー通知のみ」（画像投稿はしない）
+# - DELIVERY_MODE=slack / both のときに画像を投稿
+# - それ以外でも「エラー通知」は Slack トークン/チャンネルがあれば送る
 #
-# ✅ 画像結合（任意）
-# - 2枚を横結合して1枚にする（添付枚数を約半分にできる）
-# - JOIN_PAIR=1 のときだけ有効（デフォルトOFF）
-#   例）JOIN_PAIR=1 → (1,2),(3,4)... を横結合。奇数枚の最後はそのまま。
+# ✅ 画像結合（今回の要望：3枚横結合が基本）
+# - JOIN_TRIPLE=1 のとき有効（デフォルトON）
+# - 3枚を横結合して 1枚にする（添付/投稿数を約1/3へ）
+# - 余り2枚 → 白1枚を足して3枚幅
+# - 余り1枚 → 白2枚を足して3枚幅
+# - すべて同サイズで揃う想定（念のため「高さ違い」は白背景で吸収）
 # =============================================================================
 
 import sys
@@ -35,13 +39,13 @@ import io
 import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Sequence
 
 import requests
 from PIL import Image
 
 from module.utils.mail_utils import send_mail
-from module.utils.slack_utils import send_slack_text, upload_bytes_slack  # uploadは残すが使わない
+from module.utils.slack_utils import send_slack_text, upload_bytes_slack
 
 
 # -----------------------------------------------------------------------------
@@ -137,7 +141,7 @@ def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
 
 
 # =============================================================================
-# Slack（エラー通知のみ）
+# Slack（画像投稿 + エラー通知）
 # =============================================================================
 def slack_enabled() -> bool:
     return bool(env_str("SLACK_BOT_TOKEN")) and bool(env_str("SLACK_CHANNEL_ID"))
@@ -145,18 +149,14 @@ def slack_enabled() -> bool:
 
 def slack_notify(text: str) -> None:
     """
-    Slackは「重要なときだけ」。
-    - 401/403
-    - INIT見つからない
-    - MAIL送信失敗
-    - など
+    エラー通知用のテキスト投稿。
+    Slackは長文で落ちることがあるので分割して送る。
     """
     if not slack_enabled():
         return
 
     ch = env_str("SLACK_CHANNEL_ID")
     try:
-        # Slackは長文で落ちることがあるので分割（目安 3500）
         limit = 3500
         for i in range(0, len(text), limit):
             send_slack_text(channel=ch, message=text[i:i + limit])
@@ -169,7 +169,7 @@ def slack_notify(text: str) -> None:
 # =============================================================================
 def headers_for(referer: str) -> dict:
     """
-    Referer 付けないと弾かれる系のサイト対策も含む。
+    Referer を付けないと弾かれる系のサイト対策も含む。
     ADVは認証必須だが、基本は requests の auth=(user,pw) を優先。
     """
     h = {
@@ -189,8 +189,9 @@ def headers_for(referer: str) -> dict:
 
 def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
     """
-    認証：requests の auth=(user,pw) があるならそれを使う（curl -u相当）
-    それが無ければ headers の Authorization に期待する
+    認証：
+    - requests の auth=(user,pw) があるならそれを使う（curl -u相当）
+    - それが無ければ headers の Authorization に期待する
     """
     auth = get_requests_auth_tuple()
     return requests.get(
@@ -202,11 +203,11 @@ def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
 
 
 # =============================================================================
-# 画像変換・結合
+# 画像：変換・結合
 # =============================================================================
 def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
     """
-    PNGをJPEG化（メール添付サイズを少し下げられる）
+    PNGをJPEG化（メール添付/Slack投稿のサイズを少し下げられる）
     - 透過は白背景にする
     """
     with Image.open(io.BytesIO(png_bytes)) as im:
@@ -222,55 +223,105 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
         return out.getvalue()
 
 
-def join_two_jpegs_horizontally(jpg1: bytes, jpg2: bytes, *, quality: int = 85) -> bytes:
+def make_white_jpg(width: int, height: int, *, quality: int = 85) -> bytes:
     """
-    JPEG 2枚を横に連結して1枚にする。
-    - 高さが違う場合：白背景で最大高さに合わせて貼る（上詰め）
+    指定サイズの白いJPEGを生成して bytes で返す。
+    余り（1枚/2枚）を「3枚幅」に揃えるために使う。
     """
-    im1 = Image.open(io.BytesIO(jpg1)).convert("RGB")
-    im2 = Image.open(io.BytesIO(jpg2)).convert("RGB")
-
-    h = max(im1.height, im2.height)
-    w = im1.width + im2.width
-
-    canvas = Image.new("RGB", (w, h), (255, 255, 255))
-    canvas.paste(im1, (0, 0))
-    canvas.paste(im2, (im1.width, 0))
-
+    im = Image.new("RGB", (width, height), (255, 255, 255))
     out = io.BytesIO()
-    canvas.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
+    im.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
     return out.getvalue()
 
 
-def maybe_pair_join_attachments(atts: List[Attachment], *, quality: int) -> List[Attachment]:
+def concat_jpgs_horiz(jpg_list: Sequence[bytes], *, quality: int = 85) -> bytes:
     """
-    2枚ずつ横結合して添付数を減らす（JOIN_PAIR=1 のときだけ有効）
+    JPEGを任意枚数、横方向に結合して1枚にする。
+    - 高さが違う場合は白背景で最大高さに合わせて貼る（上詰め）
     """
-    if not env_bool("JOIN_PAIR", "1"):
+    ims = [Image.open(io.BytesIO(b)).convert("RGB") for b in jpg_list]
+    try:
+        h = max(im.height for im in ims)
+        w = sum(im.width for im in ims)
+
+        canvas = Image.new("RGB", (w, h), (255, 255, 255))
+        x = 0
+        for im in ims:
+            canvas.paste(im, (x, 0))
+            x += im.width
+
+        out = io.BytesIO()
+        canvas.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
+        return out.getvalue()
+    finally:
+        for im in ims:
+            try:
+                im.close()
+            except Exception:
+                pass
+
+
+def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> List[Attachment]:
+    """
+    3枚ずつ横結合して添付数/投稿数を減らす（JOIN_TRIPLE=1 のときだけ有効）
+    - 余り2枚 → 白1枚を足して3枚幅
+    - 余り1枚 → 白2枚を足して3枚幅
+    """
+    if not env_bool("JOIN_TRIPLE", "1"):
         return atts
 
-    if len(atts) < 2:
+    if not atts:
         return atts
 
     joined: List[Attachment] = []
+
+    # 基準サイズ（白画像のサイズを合わせる）
+    # だいたい同じ図のはずなので、先頭のサイズに合わせる
+    base_w = base_h = None
+    try:
+        with Image.open(io.BytesIO(atts[0][1])) as im0:
+            base_w, base_h = im0.size
+    except Exception:
+        # 万一読めない場合は「結合を諦めてそのまま返す」
+        return atts
+
     i = 0
     while i < len(atts):
-        if i + 1 < len(atts):
-            fn1, b1, _m1 = atts[i]
-            fn2, b2, _m2 = atts[i + 1]
+        group = atts[i:i + 3]
 
-            merged = join_two_jpegs_horizontally(b1, b2, quality=quality)
+        # 3枚そろうならそのまま
+        if len(group) == 3:
+            (fn1, b1, _m1), (_fn2, b2, _m2), (_fn3, b3, _m3) = group
+            merged = concat_jpgs_horiz([b1, b2, b3], quality=quality)
 
-            # ファイル名は「前の名前 + _pair」にしておく（追跡しやすい）
-            base = fn1.replace(".jpg", "")
-            out_name = f"{base}_pair.jpg"
+            # ファイル名：先頭のftに寄せて “_3up” を付ける（追跡しやすい）
+            out_name = fn1.replace(".jpg", "") + "_3up.jpg"
+            joined.append((out_name, merged, "image/jpeg"))
+            i += 3
+            continue
 
+        # 余り2枚 → 白1枚を追加して3枚幅
+        if len(group) == 2:
+            (fn1, b1, _m1), (_fn2, b2, _m2) = group
+            white = make_white_jpg(base_w, base_h, quality=quality)
+            merged = concat_jpgs_horiz([b1, b2, white], quality=quality)
+
+            out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
             joined.append((out_name, merged, "image/jpeg"))
             i += 2
-        else:
-            # 奇数枚の最後はそのまま
-            joined.append(atts[i])
+            continue
+
+        # 余り1枚 → 白2枚を追加して3枚幅
+        if len(group) == 1:
+            (fn1, b1, _m1) = group[0]
+            white1 = make_white_jpg(base_w, base_h, quality=quality)
+            white2 = make_white_jpg(base_w, base_h, quality=quality)
+            merged = concat_jpgs_horiz([b1, white1, white2], quality=quality)
+
+            out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
+            joined.append((out_name, merged, "image/jpeg"))
             i += 1
+            continue
 
     return joined
 
@@ -490,12 +541,12 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
     1天気図（item）ぶん取得する。
     - 404 はよくあるので黙ってスキップ
     - 401/403 or 200なのにHTML（認証ページ疑い）なら auth_failed=True
-    - 最後に JOIN_PAIR=1 なら 2枚ずつ横結合して添付数を減らす
+    - 最後に JOIN_TRIPLE=1 なら 3枚横結合＋白パディング
     """
     jpg_quality = env_int("JPG_QUALITY", 85)
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
 
-    atts: List[Attachment] = []
+    raw_atts: List[Attachment] = []
     auth_failed = False
 
     for ft in cfg.ft_list:
@@ -515,7 +566,7 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
 
             jpg = png_bytes_to_jpg_bytes(content, quality=jpg_quality)
             fname = f"{item.jpg_prefix}_ft{ft:03d}.jpg"
-            atts.append((fname, jpg, "image/jpeg"))
+            raw_atts.append((fname, jpg, "image/jpeg"))
             print(f"[OK] {model_name} {item.label} ft={ft} url={url}")
             continue
 
@@ -527,18 +578,17 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
         if status == 404:
             continue
 
-        # その他のHTTPは「たまにある」のでログだけ（必要なら復活）
+        # その他のHTTPは「たまにある」ので必要ならログ復活
         # print(f"[WARN] {model_name} {item.label} ft={ft}: HTTP{status} url={url}")
 
-    # ---- ここで「2枚横結合」を適用（任意） ----
-    # 取得済みの atts を paired にして return する
-    atts = maybe_pair_join_attachments(atts, quality=jpg_quality)
+    # ---- ここで「3枚横結合＋白パディング」を適用（任意） ----
+    atts = maybe_triple_join_attachments(raw_atts, quality=jpg_quality)
 
     return atts, auth_failed
 
 
 # =============================================================================
-# Delivery（メールが本命 / Slackはエラー通知のみ）
+# Delivery（メール + Slack画像投稿）
 # =============================================================================
 def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment]) -> None:
     """
@@ -569,8 +619,16 @@ def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime
     print(f"[OK] mail sent: {model_name} {item.label} files={len(atts)}")
 
 
-# （残しておく：将来 Slack 画像投稿を復活したくなった時用）
 def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment], chunk_size: int) -> None:
+    """
+    item単位で Slack に画像を投稿する（外部アップロード3-step方式：slack_utils.py）
+    - chunk_size で “1投稿あたり何枚” を調整可能
+    - 3枚結合していれば枚数自体が減るので、chunk_size=10 でも余裕が出る
+    """
+    if not slack_enabled():
+        # Slackが未設定なら何もしない
+        return
+
     channel = env_str("SLACK_CHANNEL_ID")
     if not channel:
         raise RuntimeError("SLACK_CHANNEL_ID is missing")
@@ -584,7 +642,8 @@ def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetim
         comment = header if i == 0 else f"🗺️ ADV TGV {model_name} / {item.label}（続き {i//chunk_size + 1}）"
         upload_bytes_slack(channel=channel, files=chunk, initial_comment=comment)
 
-    print(f"[OK] slack sent: {model_name} {item.label} posts={(len(pairs)+chunk_size-1)//chunk_size}")
+    posts = (len(pairs) + chunk_size - 1) // chunk_size
+    print(f"[OK] slack sent: {model_name} {item.label} posts={posts}")
 
 
 # =============================================================================
@@ -593,7 +652,7 @@ def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetim
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
-    print(f"[DEBUG] JOIN_PAIR={os.getenv('JOIN_PAIR','')}")
+    print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
     mode = env_str("DELIVERY_MODE", "email").lower()
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
 
@@ -616,7 +675,7 @@ def main() -> None:
         model_total = 0
         model_auth_failed = False
 
-        # 2) itemごとに取得 → メール送信
+        # 2) itemごとに取得 → 配信
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
@@ -631,15 +690,22 @@ def main() -> None:
 
             model_total += len(atts)
 
+            # --- メール ---
             if mode in ("email", "both"):
                 try:
                     send_item_mail(model_name, item, cfg, init_dt, atts)
                 except Exception as e:
                     slack_notify(f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}")
 
-            # Slack画像投稿は今はしない（エラー通知だけにしている）
-            # if mode in ("slack", "both"):
-            #     ...
+            # --- Slack 画像投稿 ---
+            if mode in ("slack", "both"):
+                try:
+                    send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
+                except Exception as e:
+                    # 画像投稿は失敗しても “致命” にはしないが、気づけるよう通知
+                    msg = f"❌ ADV TGV {model_name} {item.label}: SLACK UPLOAD FAILED\n{type(e).__name__}: {e}"
+                    print(msg)
+                    slack_notify(msg)
 
         # 3) モデル全滅だけ通知
         if (not model_auth_failed) and (model_total == 0):
