@@ -20,6 +20,10 @@
 # - DELIVERY_MODE=slack / both のときに画像を投稿
 # - それ以外でも「エラー通知」は Slack トークン/チャンネルがあれば送る
 #
+# ✅ R2 + Notion（今回の本命）
+# - Actionsで生成した「横3結合画像」をR2へアップロード
+# - Notionページを作り、外部URL画像として並べる（埋め込み表示）
+#
 # ✅ 画像結合（今回の要望：3枚横結合が基本）
 # - JOIN_TRIPLE=1 のとき有効（デフォルトON）
 # - 3枚を横結合して 1枚にする（添付/投稿数を約1/3へ）
@@ -34,6 +38,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+# scripts/ 直下の util をimportできるようにする（scripts をパッケージ化しなくてOK）
+SCRIPTS_DIR = REPO_ROOT / "scripts"
+sys.path.insert(0, str(SCRIPTS_DIR))
+
 import os
 import io
 import base64
@@ -44,10 +52,12 @@ from typing import Dict, List, Tuple, Optional, Sequence
 import requests
 from PIL import Image
 
-from module.utils.r2_utils import put_bytes, make_url
-from module.utils.notion_utils import create_run_page, append_images
 from module.utils.mail_utils import send_mail
 from module.utils.slack_utils import send_slack_text, upload_bytes_slack
+
+# ここは scripts/ に置いたファイルを import
+from r2_utils import put_bytes, make_url
+from module.utils.notion_utils import create_run_page, append_heading, append_images
 
 
 # -----------------------------------------------------------------------------
@@ -226,10 +236,7 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
 
 
 def make_white_jpg(width: int, height: int, *, quality: int = 85) -> bytes:
-    """
-    指定サイズの白いJPEGを生成して bytes で返す。
-    余り（1枚/2枚）を「3枚幅」に揃えるために使う。
-    """
+    """指定サイズの白いJPEGを生成して bytes で返す。"""
     im = Image.new("RGB", (width, height), (255, 255, 255))
     out = io.BytesIO()
     im.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
@@ -278,7 +285,6 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
     joined: List[Attachment] = []
 
     # 基準サイズ（白画像のサイズを合わせる）
-    # だいたい同じ図のはずなので、先頭のサイズに合わせる
     base_w = base_h = None
     try:
         with Image.open(io.BytesIO(atts[0][1])) as im0:
@@ -295,31 +301,27 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
         if len(group) == 3:
             (fn1, b1, _m1), (_fn2, b2, _m2), (_fn3, b3, _m3) = group
             merged = concat_jpgs_horiz([b1, b2, b3], quality=quality)
-
-            # ファイル名：先頭のftに寄せて “_3up” を付ける（追跡しやすい）
             out_name = fn1.replace(".jpg", "") + "_3up.jpg"
             joined.append((out_name, merged, "image/jpeg"))
             i += 3
             continue
 
-        # 余り2枚 → 白1枚を追加して3枚幅
+        # 余り2枚 → 白1枚
         if len(group) == 2:
             (fn1, b1, _m1), (_fn2, b2, _m2) = group
             white = make_white_jpg(base_w, base_h, quality=quality)
             merged = concat_jpgs_horiz([b1, b2, white], quality=quality)
-
             out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
             joined.append((out_name, merged, "image/jpeg"))
             i += 2
             continue
 
-        # 余り1枚 → 白2枚を追加して3枚幅
+        # 余り1枚 → 白2枚
         if len(group) == 1:
             (fn1, b1, _m1) = group[0]
             white1 = make_white_jpg(base_w, base_h, quality=quality)
             white2 = make_white_jpg(base_w, base_h, quality=quality)
             merged = concat_jpgs_horiz([b1, white1, white2], quality=quality)
-
             out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
             joined.append((out_name, merged, "image/jpeg"))
             i += 1
@@ -334,19 +336,15 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
 def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
     """
     RJTD の表現（あなたの現状の運用に合わせる）
-    - ここでは DDHHMM を使っている（例: 060600）
-    - minute は cfg.rjtd_minute を使う（現状 0）
+    - DDHHMM を使う（例: 060600）
+    - minute は cfg.rjtd_minute（現状 0）
     """
     dt = init_dt_utc.astimezone(timezone.utc).replace(minute=minute, second=0, microsecond=0)
     return dt.strftime("%d%H%M")
 
 
 def floor_to_step(dt_utc: datetime, step_hours: int, minute: int) -> datetime:
-    """
-    INIT探索のスタート地点を「モデルの更新周期」へ寄せる。
-    - step_hours=6 なら 0/6/12/18時系
-    - step_hours=3 なら 0/3/6/9/...
-    """
+    """INIT探索のスタート地点を「モデルの更新周期」へ寄せる。"""
     dt = dt_utc.astimezone(timezone.utc).replace(second=0, microsecond=0)
     h = (dt.hour // step_hours) * step_hours
     return dt.replace(hour=h, minute=minute)
@@ -371,10 +369,7 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 # =============================================================================
 @dataclass
 class Item:
-    """
-    1つの天気図レイヤ（300, 500, 050...）の定義
-    base は item ごとに持たせる（MSMNarrow が混ざるため超重要）
-    """
+    """1つの天気図レイヤ定義（base は item ごとに持つ：MSMNarrow混在のため重要）"""
     label: str
     base: str
     layer: str
@@ -385,11 +380,7 @@ class Item:
 
 @dataclass
 class ModelCfg:
-    """
-    モデル単位の設定
-    - rjtd_minute: RJTDの minute 固定（今は 0）
-    - init_step_hours: init 探索刻み
-    """
+    """モデル単位設定"""
     referer: str
     init_step_hours: int
     rjtd_minute: int
@@ -400,17 +391,14 @@ class ModelCfg:
 
 
 def ft_list_gsm() -> List[int]:
-    # GSM: 3..30（3h）
     return list(range(3, 31, 3))
 
 
 def ft_list_msm() -> List[int]:
-    # MSM: 1..15(1h) + 18..30(3h)
     return list(range(1, 16)) + [18, 21, 24, 27, 30]
 
 
 def ft_list_lfm() -> List[int]:
-    # LFM: 今は「4から欲しい」運用（4..18）
     return list(range(4, 19))
 
 
@@ -422,23 +410,19 @@ def load_model_groups() -> Dict[str, ModelCfg]:
     MSM_NAR  = "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow"
     LFM_NAR  = "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow"
 
-    # --- GSM ---
     gsm_items = [
         Item("300hPa",   GSM_WIDE, "300",  "3001000", 3, "GSM_300"),
         Item("300hPa-2", GSM_WIDE, "3002", "3101000", 3, "GSM_3002"),
     ]
 
-    # --- MSM ---
     msm_items = [
         Item("500hPa",   MSM_WIDE, "500",  "500000", 2, "MSM_500"),
         Item("500hPa-2", MSM_WIDE, "5002", "510000", 2, "MSM_5002"),
         Item("700hPa",   MSM_WIDE, "700",  "700000", 2, "MSM_700"),
-        # 8502 は Narrow 側に寄せたい運用
         Item("8502",     MSM_NAR,  "8502", "860000", 2, "MSM_8502"),
         Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),
     ]
 
-    # --- LFM ---
     lfm_items = [
         Item("850hPa",   LFM_NAR, "850",  "850200", 2, "LFM_850"),
         Item("925hPa",   LFM_NAR, "925",  "920200", 2, "LFM_925"),
@@ -451,7 +435,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "GSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/GSM/",
             init_step_hours=6,
-            rjtd_minute=0,   # 現状の運用：00分（RJTD=DDHH00）
+            rjtd_minute=0,
             init_probe_item=gsm_items[0],
             ft_list=ft_list_gsm(),
             slack_chunk=slack_chunk,
@@ -460,8 +444,8 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "MSM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/MSM/",
             init_step_hours=3,
-            rjtd_minute=0,   # 現状の運用：00分
-            init_probe_item=msm_items[0],  # 500hPa をプローブにする
+            rjtd_minute=0,
+            init_probe_item=msm_items[0],
             ft_list=ft_list_msm(),
             slack_chunk=slack_chunk,
             items=msm_items,
@@ -469,7 +453,7 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         "LFM": ModelCfg(
             referer="https://www.jma.go.jp/bosai/tgv/LFM/",
             init_step_hours=6,
-            rjtd_minute=0,   # 現状の運用：00分
+            rjtd_minute=0,
             init_probe_item=lfm_items[0],
             ft_list=ft_list_lfm(),
             slack_chunk=slack_chunk,
@@ -482,9 +466,6 @@ def load_model_groups() -> Dict[str, ModelCfg]:
 # INIT auto-detect
 # =============================================================================
 def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
-    """
-    まず「このURLが存在するか？」を見るための軽量プローブ
-    """
     r = http_get(url, referer=referer, timeout=25)
     ctype = (r.headers.get("Content-Type") or "").lower()
     head = r.content[:200]
@@ -492,17 +473,12 @@ def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
 
 
 def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
-    """
-    INIT（RJTD）を自動探索する。
-    - 認証エラー（401/403）は即座に致命扱い
-    - 404は「無いだけ」なので探索継続
-    """
     step = cfg.init_step_hours
     now = datetime.now(timezone.utc)
     start = floor_to_step(now, step, cfg.rjtd_minute)
 
     it0 = cfg.init_probe_item
-    first_ft = cfg.ft_list[0]  # GSMなら3, MSMなら1, LFMなら4
+    first_ft = cfg.ft_list[0]
     view0 = view_for_ft(it0.view_base, first_ft, it0.view_digits)
 
     for back in range(0, max_back_hours + 1, step):
@@ -516,7 +492,6 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
             raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
 
         if st == 200:
-            # 200でHTMLが返ってくるのはログイン画面等の可能性 → 認証事故扱い
             if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
                 raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
             print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
@@ -529,22 +504,12 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
 # Fetch per item
 # =============================================================================
 def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
-    """
-    PNGを取得する。
-    - status / content / content-type を返す
-    """
     r = http_get(url, referer=referer, timeout=40)
     ctype = (r.headers.get("Content-Type") or "").lower()
     return r.status_code, r.content, ctype
 
 
 def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: Item) -> Tuple[List[Attachment], bool]:
-    """
-    1天気図（item）ぶん取得する。
-    - 404 はよくあるので黙ってスキップ
-    - 401/403 or 200なのにHTML（認証ページ疑い）なら auth_failed=True
-    - 最後に JOIN_TRIPLE=1 なら 3枚横結合＋白パディング
-    """
     jpg_quality = env_int("JPG_QUALITY", 85)
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
 
@@ -553,14 +518,11 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
 
     for ft in cfg.ft_list:
         view_code = view_for_ft(item.view_base, ft, item.view_digits)
-
-        # ★重要：base は item ごと（MSMNarrow が混ざるため）
         url = build_png_url(item.base, item.layer, view_code, rjtd)
 
         status, content, ctype = fetch_png(url, cfg.referer)
 
         if status == 200:
-            # 200でHTMLは異常（ログインHTML等）
             if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
                 auth_failed = True
                 print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
@@ -580,22 +542,43 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
         if status == 404:
             continue
 
-        # その他のHTTPは「たまにある」ので必要ならログ復活
-        # print(f"[WARN] {model_name} {item.label} ft={ft}: HTTP{status} url={url}")
-
-    # ---- ここで「3枚横結合＋白パディング」を適用（任意） ----
     atts = maybe_triple_join_attachments(raw_atts, quality=jpg_quality)
-
     return atts, auth_failed
+
+
+# =============================================================================
+# R2 + Notion
+# =============================================================================
+def r2_enabled() -> bool:
+    v = env_str("R2_ENABLE", "1").lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def upload_item_images_to_r2(
+    *,
+    run_prefix: str,
+    model_name: str,
+    item_label: str,
+    atts: List[Attachment],
+) -> List[str]:
+    """
+    生成済み（=結合済み）の JPG をR2へアップし、公開URL一覧を返す
+    """
+    if not r2_enabled():
+        return []
+
+    urls: List[str] = []
+    for (fn, blob, mime) in atts:
+        key = f"{run_prefix}/{model_name}/{item_label}/{fn}"
+        put_bytes(key, blob, content_type=mime)
+        urls.append(make_url(key))
+    return urls
 
 
 # =============================================================================
 # Delivery（メール + Slack画像投稿）
 # =============================================================================
 def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment]) -> None:
-    """
-    item単位でメール送信（添付あり）
-    """
     prefix = env_str("MAIL_SUBJECT_PREFIX", "JMA")
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
     subject = f"{prefix} ADV TGV {model_name} {item.label} RJTD={rjtd}"
@@ -616,19 +599,13 @@ def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime
         body=body,
         attachment_blobs=atts,
         is_html=False,
-        slack_mode="off",   # mail_utils 側の Slack 連携は使わない
+        slack_mode="off",
     )
     print(f"[OK] mail sent: {model_name} {item.label} files={len(atts)}")
 
 
 def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment], chunk_size: int) -> None:
-    """
-    item単位で Slack に画像を投稿する（外部アップロード3-step方式：slack_utils.py）
-    - chunk_size で “1投稿あたり何枚” を調整可能
-    - 3枚結合していれば枚数自体が減るので、chunk_size=10 でも余裕が出る
-    """
     if not slack_enabled():
-        # Slackが未設定なら何もしない
         return
 
     channel = env_str("SLACK_CHANNEL_ID")
@@ -654,32 +631,41 @@ def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetim
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
 
-    # ------------------------------------------------------------
-    # ★ 重要：mode は「使う前に」必ず読む（UnboundLocalError 防止）
-    # ------------------------------------------------------------
-    mode = env_str("DELIVERY_MODE", "email").lower()
+    # ★ mode は先に読む（UnboundLocalError対策）
+    mode = env_str("DELIVERY_MODE", "both").lower()
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
 
-    # ------------------------------------------------------------
-    # Debug（presence / 状態確認）
-    # ※ token/channel は一部だけ表示（ログ汚染＆漏洩対策）
-    # ------------------------------------------------------------
+    # Debug（token/channelは一部だけ表示）
     ch = env_str("SLACK_CHANNEL_ID", "")
     tok = env_str("SLACK_BOT_TOKEN", "")
 
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
     print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
-    print(
-        f"[DEBUG] DELIVERY_MODE={mode} "
-        f"slack_enabled={slack_enabled()} "
-        f"channel={ch[:6]}..."
-    )
+    print(f"[DEBUG] DELIVERY_MODE={mode} slack_enabled={slack_enabled()} channel={ch[:6]}...")
     print(f"[DEBUG] token_head={tok[:10]}...")
     print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
+    print(f"[DEBUG] R2_ENABLE={os.getenv('R2_ENABLE','')} NOTION_ENABLE={os.getenv('NOTION_ENABLE','')}")
 
     groups = load_model_groups()
 
-    # ※ ここは固定順。必要ならリストを変えてOK
+    # Notion「実行ページ」を先に作る（R2+Notionを本命にするため）
+    run_page_id = None
+    run_prefix = None
+
+    # まずGSMのinitを取って、runタイトルを安定させる（失敗しても続行）
+    try:
+        init_dt_for_title = find_working_init_dt("GSM", groups["GSM"], max_back_hours=search_hours)
+        rjtd_for_title = fmt_rjtd(init_dt_for_title, groups["GSM"].rjtd_minute)
+        title = f"ADV TGV RJTD={rjtd_for_title} (UTC) / {init_dt_for_title.strftime('%Y-%m-%d %H:%M')}Z"
+        run_page_id = create_run_page(title)
+        run_prefix = f"adv-tgv/{init_dt_for_title.strftime('%Y%m%d')}/RJTD_{rjtd_for_title}"
+        if run_page_id:
+            append_heading(run_page_id, f"RJTD={rjtd_for_title} (UTC)", level=2)
+            append_heading(run_page_id, f"prefix: {run_prefix}", level=3)
+        print(f"[OK] Notion page created: {run_page_id}")
+    except Exception as e:
+        print(f"[WARN] Notion page create skipped: {type(e).__name__}: {e}")
+
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
         print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
@@ -696,11 +682,17 @@ def main() -> None:
         model_total = 0
         model_auth_failed = False
 
-        # 2) itemごとに取得 → 配信
+        # モデル見出し（Notion）
+        if run_page_id:
+            try:
+                append_heading(run_page_id, f"{model_name}", level=2)
+            except Exception as e:
+                print(f"[WARN] notion append heading failed: {e}")
+
+        # 2) itemごとに取得 → 配信 / アップ
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
-            # 認証系の致命：そのモデルはここで打ち切り
             if auth_failed:
                 model_auth_failed = True
                 msg = f"❌ ADV TGV {model_name} {item.label}: auth error (401/403 or HTTP200-HTML)"
@@ -714,6 +706,23 @@ def main() -> None:
 
             model_total += len(atts)
 
+            # --- R2へアップ → Notionへ埋め込み ---
+            if run_page_id and run_prefix and r2_enabled():
+                try:
+                    append_heading(run_page_id, f"{model_name} / {item.label}  ({len(atts)} images)", level=3)
+                    urls = upload_item_images_to_r2(
+                        run_prefix=run_prefix,
+                        model_name=model_name,
+                        item_label=item.label,
+                        atts=atts,
+                    )
+                    append_images(run_page_id, urls, chunk=30)
+                    print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
+                except Exception as e:
+                    msg = f"❌ R2/Notion FAILED {model_name} {item.label}\n{type(e).__name__}: {e}"
+                    print(msg)
+                    slack_notify(msg)
+
             # --- メール ---
             if mode in ("email", "both"):
                 try:
@@ -725,22 +734,14 @@ def main() -> None:
 
             # --- Slack 画像投稿 ---
             if mode in ("slack", "both"):
-                # ここでもう一度、現在値を取り直して安全にログ（任意）
-                ch2 = env_str("SLACK_CHANNEL_ID", "")
-                tok2 = env_str("SLACK_BOT_TOKEN", "")
-                print(f"[DEBUG] slack channel={ch2[:6]}... token_head={tok2[:10]}...")
-
                 try:
-                    send_item_slack(
-                        model_name, item, cfg, init_dt, atts,
-                        chunk_size=cfg.slack_chunk
-                    )
+                    send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
                 except Exception as e:
                     msg = f"❌ ADV TGV {model_name} {item.label}: SLACK FAILED\n{type(e).__name__}: {e}"
                     print(msg)
                     slack_notify(msg)
 
-        # 3) モデル全滅だけ通知（認証失敗で止めた場合は除外）
+        # 3) モデル全滅だけ通知
         if (not model_auth_failed) and (model_total == 0):
             msg = (
                 f"❌ ADV TGV {model_name}: no images fetched (model total=0)\n"
