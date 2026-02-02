@@ -660,15 +660,19 @@ def main() -> None:
 
     # ------------------------------------------------------------
     # Debug（presence / 状態確認）
-    # ※ channel は先頭だけ表示（ログ汚染＆漏洩対策）
+    # ※ token/channel は一部だけ表示（ログ汚染＆漏洩対策）
     # ------------------------------------------------------------
+    ch = env_str("SLACK_CHANNEL_ID", "")
+    tok = env_str("SLACK_BOT_TOKEN", "")
+
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
     print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
     print(
         f"[DEBUG] DELIVERY_MODE={mode} "
         f"slack_enabled={slack_enabled()} "
-        f"channel={env_str('SLACK_CHANNEL_ID','')[:6]}..."
+        f"channel={ch[:6]}..."
     )
+    print(f"[DEBUG] token_head={tok[:10]}...")
     print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
 
     groups = load_model_groups()
@@ -718,13 +722,18 @@ def main() -> None:
                     slack_notify(msg)
 
             # --- Slack 画像投稿 ---
-            print(f"[DEBUG] slack channel={channel} token_head={env_str('SLACK_BOT_TOKEN')[:10]}")
-
             if mode in ("slack", "both"):
+                # ここでもう一度、現在値を取り直して安全にログ（任意）
+                ch2 = env_str("SLACK_CHANNEL_ID", "")
+                tok2 = env_str("SLACK_BOT_TOKEN", "")
+                print(f"[DEBUG] slack channel={ch2[:6]}... token_head={tok2[:10]}...")
+
                 try:
-                    send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
+                    send_item_slack(
+                        model_name, item, cfg, init_dt, atts,
+                        chunk_size=cfg.slack_chunk
+                    )
                 except Exception as e:
-                    # ★ここは「msg」を使うので、必ずここで定義する（元コードのバグ潰し）
                     msg = f"❌ ADV TGV {model_name} {item.label}: SLACK FAILED\n{type(e).__name__}: {e}"
                     print(msg)
                     slack_notify(msg)
