@@ -1,134 +1,108 @@
 # -*- coding: utf-8 -*-
-# =============================================================================
-# module/utils/notion_utils.py
-#
-# Notion API ユーティリティ（外部URLの画像を埋め込み）
-# - create_run_page(): 親ページ配下に「実行ページ」を作る
-# - append_heading(): 見出しを追加
-# - append_images(): 外部URL画像を並べる（Notion側で埋め込み表示）
-#
-# 必要な環境変数
-#   NOTION_TOKEN
-#   NOTION_PARENT_PAGE_ID
-#
-# 任意
-#   NOTION_ENABLE=1         # 0なら何もしない（テスト用）
-# =============================================================================
+"""
+module/utils/notion_utils.py
+
+Notion データベースに「天気図アーカイブ」を自動追加するユーティリティ。
+
+環境変数:
+- NOTION_TOKEN
+- NOTION_DATABASE_ID
+
+Notion 側のDBプロパティ例（推奨）
+- Name (title)             : タイトル（例 "2026-02-02 GSM item01"）
+- Date (date)              : 日付
+- Model (select)           : GSM/MSM/LFM
+- Item (rich_text or select): item名（例 "850hPa", "SURF" など）
+- FT (number or rich_text) : 予報時間
+- Map (files)              : Files & media（external url で画像表示）
+- URL (url)                : 画像URLを別途保存しておく場合
+- Status (select)          : ok / partial / error など任意
+
+※ DB側のプロパティ名はあなたの運用に合わせて変えてOK。
+   変更したらこのコード内のキーも合わせてください。
+"""
 
 from __future__ import annotations
 
 import os
-import requests
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
+
+from notion_client import Client
 
 
-NOTION_VERSION = "2022-06-28"
-API_BASE = "https://api.notion.com/v1"
+@dataclass
+class NotionConfig:
+    token: str
+    database_id: str
 
 
-def _env(name: str, default: str = "") -> str:
-    v = os.getenv(name)
-    return default if v is None else v.strip()
+def load_notion_config() -> NotionConfig:
+    token = os.environ.get("NOTION_TOKEN", "").strip()
+    dbid = os.environ.get("NOTION_DATABASE_ID", "").strip()
+
+    missing = []
+    if not token:
+        missing.append("NOTION_TOKEN")
+    if not dbid:
+        missing.append("NOTION_DATABASE_ID")
+    if missing:
+        raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
+
+    return NotionConfig(token=token, database_id=dbid)
 
 
-def _must_env(name: str) -> str:
-    v = _env(name)
-    if not v:
-        raise RuntimeError(f"Missing required env: {name}")
-    return v
+def _client() -> Client:
+    cfg = load_notion_config()
+    return Client(auth=cfg.token)
 
 
-def notion_enabled() -> bool:
-    v = _env("NOTION_ENABLE", "1").lower()
-    return v in ("1", "true", "yes", "on")
-
-
-def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {_must_env('NOTION_TOKEN')}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
-
-
-def create_run_page(title: str, *, icon_emoji: str = "🗺️") -> Optional[str]:
+def create_weather_page(
+    *,
+    title: str,
+    date_iso: str,
+    model: str,
+    item: str,
+    ft: str,
+    image_url: str,
+    status: str = "ok",
+    extra_props: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
-    親ページ配下に新規ページを作成して page_id を返す
+    Notion DBに1行追加（画像 external URL を Files&media に入れる）
     """
-    if not notion_enabled():
-        return None
+    cfg = load_notion_config()
+    notion = _client()
 
-    parent_id = _must_env("NOTION_PARENT_PAGE_ID")
-
-    payload = {
-        "parent": {"type": "page_id", "page_id": parent_id},
-        "icon": {"type": "emoji", "emoji": icon_emoji},
-        "properties": {
-            "title": {
-                "title": [{"type": "text", "text": {"content": title}}]
-            }
-        },
-    }
-
-    r = requests.post(f"{API_BASE}/pages", headers=_headers(), json=payload, timeout=60)
-    r.raise_for_status()
-    return r.json()["id"]
-
-
-def append_heading(page_id: str, text: str, *, level: int = 2) -> None:
-    """
-    見出しブロック（heading_2 / heading_3）を追加
-    """
-    if not notion_enabled():
-        return
-
-    if level not in (2, 3):
-        level = 2
-    t = "heading_2" if level == 2 else "heading_3"
-
-    payload = {
-        "children": [
-            {
-                "object": "block",
-                "type": t,
-                t: {
-                    "rich_text": [{"type": "text", "text": {"content": text}}],
-                },
-            }
-        ]
-    }
-
-    r = requests.patch(f"{API_BASE}/blocks/{page_id}/children", headers=_headers(), json=payload, timeout=60)
-    r.raise_for_status()
-
-
-def append_images(page_id: str, urls: List[str], *, chunk: int = 50) -> None:
-    """
-    外部URL画像を Notionページに埋め込みで追加。
-    Notion APIは一度に大量のblocksを投げると落ちやすいので chunk 分割。
-    """
-    if not notion_enabled():
-        return
-
-    urls = [u for u in urls if u]
-    if not urls:
-        return
-
-    for i in range(0, len(urls), chunk):
-        part = urls[i:i + chunk]
-        children = []
-        for u in part:
-            children.append(
+    props: Dict[str, Any] = {
+        "Name": {"title": [{"text": {"content": title}}]},
+        "Date": {"date": {"start": date_iso}},
+        "Model": {"select": {"name": model}},
+        "Item": {"rich_text": [{"text": {"content": item}}]},
+        "FT": {"rich_text": [{"text": {"content": str(ft)}}]},
+        "Map": {
+            "files": [
                 {
-                    "object": "block",
-                    "type": "image",
-                    "image": {
-                        "type": "external",
-                        "external": {"url": u},
-                    },
+                    "name": title,
+                    "external": {"url": image_url},
                 }
-            )
+            ]
+        },
+        "URL": {"url": image_url},
+        "Status": {"select": {"name": status}},
+    }
 
-        payload = {"children": children}
-        r = requests.patch(f"{API_BASE}/blocks/{page_id}/children", headers=_headers(), json=payload, timeout=60)
-        r.raise_for_status()
+    if extra_props:
+        props.update(extra_props)
+
+    return notion.pages.create(
+        parent={"database_id": cfg.database_id},
+        properties=props,
+    )
+
+
+def is_notion_enabled() -> bool:
+    """
+    NOTION_TOKEN/DBIDが無ければNotion投稿をスキップできるようにする。
+    """
+    return bool(os.environ.get("NOTION_TOKEN", "").strip() and os.environ.get("NOTION_DATABASE_ID", "").strip())
