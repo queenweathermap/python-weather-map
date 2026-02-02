@@ -234,4 +234,7 @@ xarray==2025.6.1
     #   metpy
 yarl==1.20.1
     # via aiohttp
+requests
+boto3
+pillow
 
