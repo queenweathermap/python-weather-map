@@ -28,7 +28,7 @@ jobs:
       # =====================
       # 配信モード：Slack画像投稿はしない（エラー通知のみSlack）
       # =====================
-      DELIVERY_MODE: "email"
+      DELIVERY_MODE: "both"
 
       # =====================
       # Mail（mail_utils参照）
