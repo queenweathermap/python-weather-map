@@ -115,15 +115,17 @@ jobs:
 
 
       - name: Debug env presence (safe)
+        shell: bash
         run: |
+          set -euo pipefail
           for k in SMTP_HOST SMTP_USER SMTP_PASS MAIL_FROM MAIL_TO SMTP_PORT; do
-            v="${!k}"
-            if [ -z "$v" ]; then
-              echo "$k = MISSING"
+            if [ -n "${!k:-}" ]; then
+              echo "$k = OK"
             else
-              echo "$k = OK (len=${#v})"
+              echo "$k = MISSING"
             fi
           done
+
 
       - name: Run JMA ADV
         run: |
