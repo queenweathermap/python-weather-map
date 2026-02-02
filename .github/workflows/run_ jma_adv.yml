@@ -107,9 +107,12 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
+        shell: bash
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
-          pip install requests boto3 notion-client
+          pip install -r requirements-adv.txt
+
 
       - name: Debug env presence (safe)
         run: |
