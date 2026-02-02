@@ -1,0 +1,5 @@
+requests
+pillow
+boto3
+slack-sdk
+notion-client
