@@ -1,58 +1,110 @@
-name: run_adv
+# .github/workflows/run_adv.yml
+name: Run JMA ADV
 
 on:
-  workflow_dispatch:
-    inputs:
-      run_date:
-        description: "Run date (YYYY-MM-DD). Empty = today"
-        required: false
-        default: ""
   schedule:
-    # 毎日 07:05 JST = 22:05 UTC（目安）
-    - cron: "5 22 * * *"
+    - cron: "30 22 * * *"  # 07:30 JST
+    - cron: "30 5  * * *"  # 14:30 JST
+    - cron: "30 10 * * *"  # 19:30 JST
+  workflow_dispatch: {}
+
+concurrency:
+  group: run-adv-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  run:
+  run_adv:
     runs-on: ubuntu-latest
+
     env:
       TZ: Asia/Tokyo
+      PYTHONUNBUFFERED: "1"
 
-      # Optional override
-      RUN_DATE: ${{ github.event.inputs.run_date }}
+      # =====================
+      # JMA ADV 認証
+      # =====================
+      TGV_USE_AUTH: "1"
+      JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
+      JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
+      JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
 
-      # SMTP (required)
-      SMTP_HOST: ${{ secrets.SMTP_SERVER }}
+      # =====================
+      # 配信
+      # =====================
+      DELIVERY_MODE: "both"  # email | slack | both
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      SLACK_CHUNK: "10"
+
+      # =====================
+      # Mail（mail_utils参照）
+      # =====================
+      FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+      TO_EMAIL: ${{ secrets.TO_EMAIL }}
+      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USER: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASS: ${{ secrets.SMTP_PASSWORD }}
-      MAIL_FROM: ${{ secrets.FROM_EMAIL }}
-      MAIL_TO: ${{ secrets.TO_EMAIL }}
-      MAIL_SUBJECT_PREFIX: ${{ secrets.MAIL_SUBJECT_PREFIX }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      MAIL_SUBJECT_PREFIX: "JMA"
+      SMTP_STARTTLS: "1"
+      MAIL_DEBUG: "0"
+      MAX_MAIL_SIZE_MB: "20"
 
-      # R2 (optional)
+      # =====================
+      # script tuning
+      # =====================
+      JPG_QUALITY: "85"
+      INIT_SEARCH_HOURS: "72"
+
+      # =====================
+      # 画像結合（横3：基本ON）
+      # =====================
+      JOIN_TRIPLE: "1"
+
+      # =====================
+      # R2（Cloudflare）
+      # =====================
+      R2_ENABLE: "1"
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+      ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
+      R2_PREFIX: "adv-tgv"  # 任意：オブジェクトキーの先頭
 
-      # Slack (optional)
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      SLACK_POST_IMAGES: ${{ secrets.SLACK_POST_IMAGES }}
-      SLACK_POST_ERRORS: ${{ secrets.SLACK_POST_ERRORS }}
-
-      # Notion (optional)
+      # =====================
+      # Notion
+      # =====================
+      NOTION_ENABLE: "1"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Debug env (presence only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in \
+            TGV_USE_AUTH JMA_ADV_USER JMA_ADV_PASS \
+            SLACK_CHANNEL_ID SLACK_BOT_TOKEN \
+            R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET ASSET_BASE_URL \
+            NOTION_TOKEN NOTION_PARENT_PAGE_ID
+          do
+            if [ -n "${!v:-}" ]; then
+              echo "$v=OK"
+            else
+              echo "$v=MISSING"
+            fi
+          done
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
