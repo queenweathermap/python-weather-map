@@ -46,6 +46,15 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
+# --- import path fix (GitHub Actions / local both) -----------------
+# scripts/ 配下のスクリプトを `python scripts/jma_adv.py` で実行しても
+# `from scripts.xxx import ...` が通るように、プロジェクトルートを sys.path に追加する
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+# -------------------------------------------------------------------
+
+
 # 同一リポジトリ想定
 from scripts.r2_utils import upload_file_to_r2
 from module.utils.notion_utils import create_weather_page, is_notion_enabled
