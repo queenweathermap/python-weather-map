@@ -653,6 +653,7 @@ def main() -> None:
     print("=== Start ADV JMA TGV ===")
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
     print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
+    print(f"[DEBUG] DELIVERY_MODE={mode} slack_enabled={slack_enabled()} channel={env_str('SLACK_CHANNEL_ID','')[:6]}...")
     mode = env_str("DELIVERY_MODE", "email").lower()
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
 
