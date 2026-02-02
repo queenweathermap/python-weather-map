@@ -651,11 +651,25 @@ def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetim
 # =============================================================================
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
-    print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
-    print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
-    print(f"[DEBUG] DELIVERY_MODE={mode} slack_enabled={slack_enabled()} channel={env_str('SLACK_CHANNEL_ID','')[:6]}...")
+
+    # ------------------------------------------------------------
+    # ★ 重要：mode は「使う前に」必ず読む（UnboundLocalError 防止）
+    # ------------------------------------------------------------
     mode = env_str("DELIVERY_MODE", "email").lower()
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
+
+    # ------------------------------------------------------------
+    # Debug（presence / 状態確認）
+    # ※ channel は先頭だけ表示（ログ汚染＆漏洩対策）
+    # ------------------------------------------------------------
+    print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
+    print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
+    print(
+        f"[DEBUG] DELIVERY_MODE={mode} "
+        f"slack_enabled={slack_enabled()} "
+        f"channel={env_str('SLACK_CHANNEL_ID','')[:6]}..."
+    )
+    print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
 
     groups = load_model_groups()
 
@@ -680,9 +694,12 @@ def main() -> None:
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
+            # 認証系の致命：そのモデルはここで打ち切り
             if auth_failed:
                 model_auth_failed = True
-                slack_notify(f"❌ ADV TGV {model_name} {item.label}: auth error (401/403 or HTTP200-HTML)")
+                msg = f"❌ ADV TGV {model_name} {item.label}: auth error (401/403 or HTTP200-HTML)"
+                print(msg)
+                slack_notify(msg)
                 break
 
             if not atts:
@@ -696,22 +713,28 @@ def main() -> None:
                 try:
                     send_item_mail(model_name, item, cfg, init_dt, atts)
                 except Exception as e:
-                    slack_notify(f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}")
+                    msg = f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}"
+                    print(msg)
+                    slack_notify(msg)
 
             # --- Slack 画像投稿 ---
             if mode in ("slack", "both"):
                 try:
                     send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
                 except Exception as e:
-                    slack_notify(f"❌ ADV TGV {model_name} {item.label}: SLACK FAILED\n{type(e).__name__}: {e}")
+                    # ★ここは「msg」を使うので、必ずここで定義する（元コードのバグ潰し）
+                    msg = f"❌ ADV TGV {model_name} {item.label}: SLACK FAILED\n{type(e).__name__}: {e}"
                     print(msg)
                     slack_notify(msg)
 
-        # 3) モデル全滅だけ通知
+        # 3) モデル全滅だけ通知（認証失敗で止めた場合は除外）
         if (not model_auth_failed) and (model_total == 0):
-            slack_notify(
-                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\nRJTD={fmt_rjtd(init_dt, cfg.rjtd_minute)}"
+            msg = (
+                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\n"
+                f"RJTD={fmt_rjtd(init_dt, cfg.rjtd_minute)}"
             )
+            print(msg)
+            slack_notify(msg)
 
     print("\n=== Done ADV JMA TGV ===")
 
