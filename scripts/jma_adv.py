@@ -17,7 +17,6 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import os
 import io
 import base64
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional, Sequence
 
@@ -246,97 +245,10 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 
 
 # =============================================================================
-# Model configs
+# Model configs (externalized)
 # =============================================================================
-@dataclass
-class Item:
-    label: str
-    base: str
-    layer: str
-    view_base: str
-    view_digits: int
-    jpg_prefix: str
+from module.adv_tgv.models import load_model_groups, Item, ModelCfg
 
-
-@dataclass
-class ModelCfg:
-    referer: str
-    init_step_hours: int
-    rjtd_minute: int
-    init_probe_item: Item
-    ft_list: List[int]
-    slack_chunk: int
-    items: List[Item]
-
-
-def ft_list_gsm() -> List[int]:
-    return list(range(3, 31, 3))
-
-
-def ft_list_msm() -> List[int]:
-    return list(range(1, 16)) + [18, 21, 24, 27, 30]
-
-
-def ft_list_lfm() -> List[int]:
-    return list(range(4, 19))
-
-
-def load_model_groups() -> Dict[str, ModelCfg]:
-    slack_chunk = env_int("SLACK_CHUNK", 10)
-
-    GSM_WIDE = "https://www.jma.go.jp/bosai/tgv/data/GSMWide"
-    MSM_WIDE = "https://www.jma.go.jp/bosai/tgv/data/MSMWide"
-    MSM_NAR  = "https://www.jma.go.jp/bosai/tgv/data/MSMNarrow"
-    LFM_NAR  = "https://www.jma.go.jp/bosai/tgv/data/LFMNarrow"
-
-    gsm_items = [
-        Item("300hPa",   GSM_WIDE, "300",  "3001000", 3, "GSM_300"),
-        Item("300hPa-2", GSM_WIDE, "3002", "3101000", 3, "GSM_3002"),
-    ]
-    msm_items = [
-        Item("500hPa",   MSM_WIDE, "500",  "500000", 2, "MSM_500"),
-        Item("500hPa-2", MSM_WIDE, "5002", "510000", 2, "MSM_5002"),
-        Item("700hPa",   MSM_WIDE, "700",  "700000", 2, "MSM_700"),
-        Item("8502",     MSM_NAR,  "8502", "860000", 2, "MSM_8502"),
-        Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),
-    ]
-    lfm_items = [
-        Item("850hPa",   LFM_NAR, "850",  "850200", 2, "LFM_850"),
-        Item("925hPa",   LFM_NAR, "925",  "920200", 2, "LFM_925"),
-        Item("975hPa",   LFM_NAR, "975",  "970200", 2, "LFM_975"),
-        Item("sfc",      LFM_NAR, "sfc",  "000200", 2, "LFM_sfc"),
-        Item("sfc-2",    LFM_NAR, "sfc2", "010200", 2, "LFM_sfc2"),
-    ]
-
-    return {
-        "GSM": ModelCfg(
-            referer="https://www.jma.go.jp/bosai/tgv/GSM/",
-            init_step_hours=6,
-            rjtd_minute=0,
-            init_probe_item=gsm_items[0],
-            ft_list=ft_list_gsm(),
-            slack_chunk=slack_chunk,
-            items=gsm_items,
-        ),
-        "MSM": ModelCfg(
-            referer="https://www.jma.go.jp/bosai/tgv/MSM/",
-            init_step_hours=3,
-            rjtd_minute=0,
-            init_probe_item=msm_items[0],
-            ft_list=ft_list_msm(),
-            slack_chunk=slack_chunk,
-            items=msm_items,
-        ),
-        "LFM": ModelCfg(
-            referer="https://www.jma.go.jp/bosai/tgv/LFM/",
-            init_step_hours=6,
-            rjtd_minute=0,
-            init_probe_item=lfm_items[0],
-            ft_list=ft_list_lfm(),
-            slack_chunk=slack_chunk,
-            items=lfm_items,
-        ),
-    }
 
 
 # =============================================================================
@@ -495,7 +407,18 @@ def main() -> None:
 
         print(f"[OK] Notion DB row created: {page_id}")
     except Exception as e:
-        print(f"[WARN] Notion DB row create skipped: {type(e).__name__}: {e}")
+        import traceback
+        print("[WARN] Notion DB row create skipped (full):")
+        traceback.print_exc()
+
+        # NotionのHTTPエラーなら本文を出す（400の詳細がここに入る）
+        try:
+            import requests
+            if isinstance(e, requests.HTTPError) and e.response is not None:
+                print("[WARN] Notion response status:", e.response.status_code)
+                print("[WARN] Notion response body:", e.response.text[:2000])
+        except Exception:
+            pass
 
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
