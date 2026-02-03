@@ -2,34 +2,7 @@
 # =============================================================================
 # scripts/jma_adv.py
 #
-# JMA 防災情報アドバイザー向け「専門天気図（tgv）」を自動取得し、
-# “天気図ごと（itemごと）” にメール送信（必須）＋Slack投稿（任意）する。
-#
-# ✅ 仕様（あなたの現行URL規則に準拠）
-# - FT は VIEWコード末尾で表現（RJTDは init 固定）
-# - GSM: FT=3..30 (3h) 10枚 / item
-# - MSM: FT=1..15(1h) + 18,21,24,27,30 合計20枚 / item
-# - LFM: FT=4..18(1h) 15枚 / item（必要に応じて変更OK）
-#
-# ✅ 認証（ADV限定＝認証必須）
-# - TGV_USE_AUTH=1 を推奨（GitHub Actions では secrets の user/pass を使う）
-# - requests の auth=(user,pw) を優先（curl -u 相当で安定しやすい）
-# - user/pass が無い環境は Authorization ヘッダ（JMA_AUTH_BASIC）にフォールバック
-#
-# ✅ Slack
-# - DELIVERY_MODE=slack / both のときに画像を投稿
-# - それ以外でも「エラー通知」は Slack トークン/チャンネルがあれば送る
-#
-# ✅ R2 + Notion（今回の本命）
-# - Actionsで生成した「横3結合画像」をR2へアップロード
-# - Notionページを作り、外部URL画像として並べる（埋め込み表示）
-#
-# ✅ 画像結合（今回の要望：3枚横結合が基本）
-# - JOIN_TRIPLE=1 のとき有効（デフォルトON）
-# - 3枚を横結合して 1枚にする（添付/投稿数を約1/3へ）
-# - 余り2枚 → 白1枚を足して3枚幅
-# - 余り1枚 → 白2枚を足して3枚幅
-# - すべて同サイズで揃う想定（念のため「高さ違い」は白背景で吸収）
+# ADV TGV: 取得 → JPG化(3up) → R2 → Notion(DB) → Mail/Slack
 # =============================================================================
 
 import sys
@@ -51,26 +24,24 @@ from typing import Dict, List, Tuple, Optional, Sequence
 import requests
 from PIL import Image
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
 from module.utils.mail_utils import send_mail
 from module.utils.slack_utils import send_slack_text, upload_bytes_slack
 
 from r2_utils import put_bytes, make_url
-
-# ★ Notion: DB対応関数を使う
 from module.utils.notion_utils import (
-    create_db_run_page,
+    create_db_row,
+    set_page_cover,
     append_heading,
-    append_image,
-    append_toggle_images,
+    append_toggle,
+    append_images,
 )
 
-Attachment = Tuple[str, bytes, str]
+Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
 
 
+# =============================================================================
+# Env utils
+# =============================================================================
 def must_env(name: str) -> str:
     v = os.getenv(name)
     if not v:
@@ -98,6 +69,9 @@ def env_bool(name: str, default: str = "0") -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+# =============================================================================
+# Auth
+# =============================================================================
 def make_basic_auth_header(user: str, password: str) -> str:
     token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
     return f"Basic {token}"
@@ -125,6 +99,9 @@ def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
     return None
 
 
+# =============================================================================
+# Slack
+# =============================================================================
 def slack_enabled() -> bool:
     return bool(env_str("SLACK_BOT_TOKEN")) and bool(env_str("SLACK_CHANNEL_ID"))
 
@@ -141,6 +118,9 @@ def slack_notify(text: str) -> None:
         print(f"[WARN] Slack notify failed: {e}")
 
 
+# =============================================================================
+# HTTP
+# =============================================================================
 def headers_for(referer: str) -> dict:
     h = {
         "User-Agent": "Mozilla/5.0",
@@ -156,14 +136,12 @@ def headers_for(referer: str) -> dict:
 
 def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
     auth = get_requests_auth_tuple()
-    return requests.get(
-        url,
-        headers=headers_for(referer),
-        auth=auth,
-        timeout=timeout,
-    )
+    return requests.get(url, headers=headers_for(referer), auth=auth, timeout=timeout)
 
 
+# =============================================================================
+# Image helpers
+# =============================================================================
 def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
     with Image.open(io.BytesIO(png_bytes)) as im:
         if im.mode in ("RGBA", "LA"):
@@ -172,7 +150,6 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
             im2 = bg
         else:
             im2 = im.convert("RGB")
-
         out = io.BytesIO()
         im2.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
         return out.getvalue()
@@ -190,13 +167,11 @@ def concat_jpgs_horiz(jpg_list: Sequence[bytes], *, quality: int = 85) -> bytes:
     try:
         h = max(im.height for im in ims)
         w = sum(im.width for im in ims)
-
         canvas = Image.new("RGB", (w, h), (255, 255, 255))
         x = 0
         for im in ims:
             canvas.paste(im, (x, 0))
             x += im.width
-
         out = io.BytesIO()
         canvas.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
         return out.getvalue()
@@ -216,7 +191,6 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
 
     joined: List[Attachment] = []
 
-    base_w = base_h = None
     try:
         with Image.open(io.BytesIO(atts[0][1])) as im0:
             base_w, base_h = im0.size
@@ -228,7 +202,7 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
         group = atts[i:i + 3]
 
         if len(group) == 3:
-            (fn1, b1, _), (_fn2, b2, _), (_fn3, b3, _) = group
+            (fn1, b1, _), (_, b2, _), (_, b3, _) = group
             merged = concat_jpgs_horiz([b1, b2, b3], quality=quality)
             out_name = fn1.replace(".jpg", "") + "_3up.jpg"
             joined.append((out_name, merged, "image/jpeg"))
@@ -236,7 +210,7 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
             continue
 
         if len(group) == 2:
-            (fn1, b1, _), (_fn2, b2, _) = group
+            (fn1, b1, _), (_, b2, _) = group
             white = make_white_jpg(base_w, base_h, quality=quality)
             merged = concat_jpgs_horiz([b1, b2, white], quality=quality)
             out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
@@ -257,6 +231,9 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
     return joined
 
 
+# =============================================================================
+# URL rules
+# =============================================================================
 def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
     dt = init_dt_utc.astimezone(timezone.utc).replace(minute=minute, second=0, microsecond=0)
     return dt.strftime("%d%H%M")
@@ -276,6 +253,9 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
     return f"{view_base[:-digits]}{ft_hours:0{digits}d}"
 
 
+# =============================================================================
+# Model configs
+# =============================================================================
 @dataclass
 class Item:
     label: str
@@ -321,7 +301,6 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item("300hPa",   GSM_WIDE, "300",  "3001000", 3, "GSM_300"),
         Item("300hPa-2", GSM_WIDE, "3002", "3101000", 3, "GSM_3002"),
     ]
-
     msm_items = [
         Item("500hPa",   MSM_WIDE, "500",  "500000", 2, "MSM_500"),
         Item("500hPa-2", MSM_WIDE, "5002", "510000", 2, "MSM_5002"),
@@ -329,7 +308,6 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item("8502",     MSM_NAR,  "8502", "860000", 2, "MSM_8502"),
         Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),
     ]
-
     lfm_items = [
         Item("850hPa",   LFM_NAR, "850",  "850200", 2, "LFM_850"),
         Item("925hPa",   LFM_NAR, "925",  "920200", 2, "LFM_925"),
@@ -369,6 +347,9 @@ def load_model_groups() -> Dict[str, ModelCfg]:
     }
 
 
+# =============================================================================
+# INIT auto-detect
+# =============================================================================
 def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
     r = http_get(url, referer=referer, timeout=25)
     ctype = (r.headers.get("Content-Type") or "").lower()
@@ -404,6 +385,9 @@ def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int 
     raise RuntimeError(f"{model_name}: init not found within back={max_back_hours}h")
 
 
+# =============================================================================
+# Fetch per item
+# =============================================================================
 def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
     r = http_get(url, referer=referer, timeout=40)
     ctype = (r.headers.get("Content-Type") or "").lower()
@@ -447,6 +431,9 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
     return atts, auth_failed
 
 
+# =============================================================================
+# R2
+# =============================================================================
 def r2_enabled() -> bool:
     v = env_str("R2_ENABLE", "1").lower()
     return v in ("1", "true", "yes", "on")
@@ -461,7 +448,6 @@ def upload_item_images_to_r2(
 ) -> List[str]:
     if not r2_enabled():
         return []
-
     urls: List[str] = []
     for (fn, blob, mime) in atts:
         key = f"{run_prefix}/{model_name}/{item_label}/{fn}"
@@ -470,6 +456,9 @@ def upload_item_images_to_r2(
     return urls
 
 
+# =============================================================================
+# Mail / Slack
+# =============================================================================
 def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment]) -> None:
     prefix = env_str("MAIL_SUBJECT_PREFIX", "JMA")
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
@@ -486,13 +475,7 @@ def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime
         "※ GitHub Actions 実行",
     ])
 
-    send_mail(
-        subject=subject,
-        body=body,
-        attachment_blobs=atts,
-        is_html=False,
-        slack_mode="off",
-    )
+    send_mail(subject=subject, body=body, attachment_blobs=atts, is_html=False, slack_mode="off")
     print(f"[OK] mail sent: {model_name} {item.label} files={len(atts)}")
 
 
@@ -501,9 +484,6 @@ def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetim
         return
 
     channel = env_str("SLACK_CHANNEL_ID")
-    if not channel:
-        raise RuntimeError("SLACK_CHANNEL_ID is missing")
-
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
     header = f"🗺️ ADV TGV {model_name} / {item.label}  RJTD={rjtd}  files={len(atts)}"
 
@@ -517,45 +497,55 @@ def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetim
     print(f"[OK] slack sent: {model_name} {item.label} posts={posts}")
 
 
+# =============================================================================
+# main
+# =============================================================================
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
 
     mode = env_str("DELIVERY_MODE", "both").lower()
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
 
-    ch = env_str("SLACK_CHANNEL_ID", "")
-    tok = env_str("SLACK_BOT_TOKEN", "")
-
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
     print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
-    print(f"[DEBUG] DELIVERY_MODE={mode} slack_enabled={slack_enabled()} channel={ch[:6]}...")
-    print(f"[DEBUG] token_head={tok[:10]}...")
+    print(f"[DEBUG] DELIVERY_MODE={mode} slack_enabled={slack_enabled()}")
     print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
     print(f"[DEBUG] R2_ENABLE={os.getenv('R2_ENABLE','')} NOTION_ENABLE={os.getenv('NOTION_ENABLE','')}")
 
     groups = load_model_groups()
 
-    # ★ DBに「実行レコード（=ページ）」を作る
-    run_page_id = None
+    # --- DB row create (Notion) ---
+    page_id = None
     run_prefix = None
+    first_cover_url = ""
 
     try:
         init_dt_for_title = find_working_init_dt("GSM", groups["GSM"], max_back_hours=search_hours)
         rjtd_for_title = fmt_rjtd(init_dt_for_title, groups["GSM"].rjtd_minute)
 
+        # 初期時刻（JST）を Date(時刻あり) として入れる
+        jst = timezone(timedelta(hours=9))
+        init_jst_iso = init_dt_for_title.astimezone(jst).isoformat()
+
         title = f"ADV TGV RJTD={rjtd_for_title} (UTC) / {init_dt_for_title.strftime('%Y-%m-%d %H:%M')}Z"
+        page_id = create_db_row(
+            title=title,
+            category="ADV",
+            init_jst_iso=init_jst_iso,
+            memo="",
+            r2_url="",
+            autogen=True,
+        )
+
         run_prefix = f"adv-tgv/{init_dt_for_title.strftime('%Y%m%d')}/RJTD_{rjtd_for_title}"
 
-        # まずは cover なしで作成（代表画像URLがまだ無いので）
-        run_page_id = create_db_run_page(title, icon_emoji="🗺️")
+        if page_id:
+            append_heading(page_id, f"RJTD={rjtd_for_title} (UTC)", level=2)
+            append_heading(page_id, f"prefix: {run_prefix}", level=3)
 
-        if run_page_id:
-            append_heading(run_page_id, f"RJTD={rjtd_for_title} (UTC)", level=2)
-            append_heading(run_page_id, f"prefix: {run_prefix}", level=3)
-
-        print(f"[OK] Notion DB page created: {run_page_id}")
+        print(f"[OK] Notion DB row created: {page_id}")
     except Exception as e:
-        print(f"[WARN] Notion DB page create skipped: {type(e).__name__}: {e}")
+        print(f"[WARN] Notion DB row create skipped: {type(e).__name__}: {e}")
 
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
@@ -572,9 +562,9 @@ def main() -> None:
         model_total = 0
         model_auth_failed = False
 
-        if run_page_id:
+        if page_id:
             try:
-                append_heading(run_page_id, f"{model_name}", level=2)
+                append_heading(page_id, f"{model_name}", level=2)
             except Exception as e:
                 print(f"[WARN] notion append heading failed: {e}")
 
@@ -594,8 +584,8 @@ def main() -> None:
 
             model_total += len(atts)
 
-            # --- R2へアップ → Notion(DBページ)へ「代表1枚＋toggle全文」 ---
-            if run_page_id and run_prefix and r2_enabled():
+            # --- R2 -> Notion(toggle) ---
+            if page_id and run_prefix and r2_enabled():
                 try:
                     urls = upload_item_images_to_r2(
                         run_prefix=run_prefix,
@@ -604,22 +594,23 @@ def main() -> None:
                         atts=atts,
                     )
 
-                    if urls:
-                        rep = urls[0]
-                        rest = urls[1:]
+                    # 初回だけ代表画像をカバーにする（最初のURL）
+                    if (not first_cover_url) and urls:
+                        first_cover_url = urls[0]
+                        set_page_cover(page_id, first_cover_url)
 
-                        append_heading(run_page_id, f"{model_name} / {item.label}  ({len(urls)} images)", level=3)
-                        append_image(run_page_id, rep)
+                    # toggleの中に画像展開
+                    t_title = f"{model_name} / {item.label}  ({len(urls)} images)"
+                    toggle_id = append_toggle(page_id, t_title)  # returns block_id
 
-                        if rest:
-                            append_toggle_images(
-                                run_page_id,
-                                title=f"全文画像を開く（{len(rest)}枚）",
-                                urls=rest,
-                                chunk=30,
-                            )
+                    if toggle_id:
+                        append_images(toggle_id, urls, chunk=30)
+                    else:
+                        # 保険：トグル作れないなら直下に貼る
+                        append_images(page_id, urls, chunk=30)
 
-                    print(f"[OK] R2+Notion(DB): {model_name} {item.label} urls={len(urls)}")
+                    print(f"[OK] R2+Notion(toggle): {model_name} {item.label} urls={len(urls)}")
+
                 except Exception as e:
                     msg = f"❌ R2/Notion FAILED {model_name} {item.label}\n{type(e).__name__}: {e}"
                     print(msg)
