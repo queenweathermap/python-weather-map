@@ -35,15 +35,14 @@ class ModelCfg:
 
 
 def ft_list_gsm() -> List[int]:
-    return list(range(3, 31, 3))
-
+    return list(range(3, 73, 3))  # 3,6,9,...,72
 
 def ft_list_msm() -> List[int]:
-    return list(range(1, 16)) + [18, 21, 24, 27, 30]
-
+    return list(range(1, 73))  # 1..72
 
 def ft_list_lfm() -> List[int]:
-    return list(range(4, 19))
+    return list(range(4, 19))  # 4..18
+
 
 
 def load_model_groups() -> Dict[str, ModelCfg]:
