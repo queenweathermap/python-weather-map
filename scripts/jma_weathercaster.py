@@ -12,6 +12,11 @@
 # - prefix の整理ルールを ADV と揃える
 #   => {R2_PREFIX}/{YYYYMMDD}/RJTD_{ddHHMM}
 #
+# 追加要件（今回・エマグラム）:
+# - 外部GIF（例: bk-pro.jp の ema_aki_00.gif）を取得し、同じ Notion ページ本文へ追加
+#   - cover は既存通り「最初の代表画像（PDF由来）」を維持
+#   - エマグラムは images の末尾へ追加して rep_url を変えない
+#
 # DELIVERY_MODE=notion 前提
 # =============================================================================
 
@@ -42,8 +47,8 @@ BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
 PDF_FILES = [
     "AUPA20.pdf", "AUPN30.pdf", "AXJP140.pdf",
     "COMP12.pdf", "COMP36.pdf", "COMP72.pdf",
-     "FXJP854.pdf","FXXN519.pdf", "FZCX50.pdf",
-     "TKAISETU.pdf", "SKAISETU.pdf", "FEFE19.pdf",
+    "FXJP854.pdf", "FXXN519.pdf", "FZCX50.pdf",
+    "TKAISETU.pdf", "SKAISETU.pdf", "FEFE19.pdf",
 ]
 
 USER = os.environ.get("WEATHERCASTER_USER", "").strip()
@@ -58,6 +63,11 @@ JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 # ADV と揃えるため、R2_PREFIX を尊重（workflow で "weathercaster" を入れている想定）
 R2_PREFIX = os.environ.get("R2_PREFIX", "weathercaster").strip().strip("/")
+
+# ---- 追加：エマグラム ----
+EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", "yes", "on")
+EMAGRAM_URL = os.environ.get("EMAGRAM_URL", "https://bk-pro.jp/images/ema/ema_aki_00.gif").strip()
+EMAGRAM_FILENAME = os.environ.get("EMAGRAM_FILENAME", "ema_aki_00.gif").strip()
 
 # --- Notion property names ---
 PROP_TITLE = os.environ.get("NOTION_PROP_TITLE", "名前")
@@ -121,6 +131,27 @@ def fetch_pdf_content(name: str) -> Tuple[Optional[bytes], Optional[str], Option
         return None, None, None
 
 
+def fetch_image_content(url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int], Optional[str]]:
+    """
+    returns: (content, last_modified_header, http_status, content_type)
+    """
+    try:
+        # 外部サイトなので負荷を抑える：timeout短め、UA明示（礼儀）
+        headers = {"User-Agent": "weathercaster-jma-bot/1.0"}
+        r = requests.get(url, headers=headers, timeout=30)
+        lm = r.headers.get("Last-Modified")
+        ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+
+        if r.status_code == 200:
+            return r.content, lm, r.status_code, ct
+
+        print(f"[NG] image HTTP {r.status_code}: {url}")
+        return None, lm, r.status_code, ct
+    except Exception as e:
+        print(f"[ERR] image: {e} ({url})")
+        return None, None, None, None
+
+
 def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, force_all: bool = False) -> List[Attachment]:
     images = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
     if not images:
@@ -145,7 +176,7 @@ def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, force_all: bool = Fa
 def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     """
     returns:
-      - images: 変換済み JPG
+      - images: 変換済み JPG + 追加画像（例：エマグラムGIF）
       - errors: 失敗一覧
       - issued_dt_utc_guess: Last-Modified の最小値（推定）を UTC で返す（取れなければ None）
     """
@@ -183,6 +214,30 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
                 f.write(blob)
 
         images.extend(atts)
+
+    # ---- 追加：エマグラム（GIF）を同じ Notion ページ本文へ ----
+    if EMAGRAM_ENABLE and EMAGRAM_URL:
+        blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
+
+        if last_mod:
+            dt = _httpdate_to_utc_dt(last_mod)
+            if dt:
+                lm_dts.append(dt)
+
+        if blob:
+            mimetype = ct if ct else "image/gif"
+            fname = EMAGRAM_FILENAME or "ema_aki_00.gif"
+            # rep_url（cover）を変えないため、末尾に追加（images.append）
+            images.append((fname, blob, mimetype))
+
+            # ローカルにも保存（任意：デバッグ用）
+            try:
+                with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                    f.write(blob)
+            except Exception:
+                pass
+        else:
+            errors.append(f"EMAGRAM: download failed (HTTP={st})")
 
     issued_dt_utc_guess = min(lm_dts) if lm_dts else None
     return images, errors, issued_dt_utc_guess
@@ -295,9 +350,8 @@ def notion_write_db(
     if errors:
         memo_lines.append("ERROR:")
         memo_lines += [f"- {e}" for e in errors]
-    
-    memo = "\n".join(memo_lines)
 
+    memo = "\n".join(memo_lines)
 
     page_id = _create_db_row_compat(
         title=title,
