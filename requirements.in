@@ -19,3 +19,5 @@ beautifulsoup4
 pdf2image
 pillow
 boto3
+beautifulsoup4
+lxml
