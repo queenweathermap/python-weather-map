@@ -13,18 +13,19 @@ concurrency:
 jobs:
   run-jma:
     runs-on: ubuntu-latest
+
     env:
       TZ: Asia/Tokyo
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: ${{ github.workspace }}
 
       # =====================
-      # 配信モード（最終形：notion）
+      # 配信モード（最終形）
       # =====================
-      DELIVERY_MODE: "notion"  # notion only
+      DELIVERY_MODE: "notion"
 
       # =====================
-      # Weathercaster 認証（必要）
+      # Weathercaster 認証
       # =====================
       WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
       WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
@@ -38,16 +39,16 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
-      R2_PREFIX: "weathercaster"  # 任意
+      R2_PREFIX: "weathercaster"
 
       # =====================
-      # Notion（同一DBへ格納）
+      # Notion（wx 天気図 DB）
       # =====================
       NOTION_ENABLE: "1"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
 
-      # DBプロパティ名（必要なら上書き）
+      # DB プロパティ名
       NOTION_PROP_TITLE: "名前"
       NOTION_PROP_CATEGORY: "区分"
       NOTION_PROP_INIT_JST: "初期時刻（JST）"
@@ -56,20 +57,6 @@ jobs:
       NOTION_PROP_R2URL: "R2 URL"
       NOTION_PROP_AUTOGEN: "自動生成"
       NOTION_PROP_MEMO: "メモ"
-
-      # =====================
-      # Mail / Slack（最終的に不要：今は空でもOKにしておく）
-      # ※ スクリプト側で完全分離したら、このブロックも消せる
-      # =====================
-      FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
-      TO_EMAIL:   ${{ secrets.TO_EMAIL }}
-      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-      SMTP_PORT:   ${{ secrets.SMTP_PORT }}
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      MAIL_SUBJECT_PREFIX: "[JMA]"
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -91,5 +78,5 @@ jobs:
           python -m pip install -U pip
           pip install requests pdf2image pillow
 
-      - name: Run JMA Weathercaster script
+      - name: Run JMA Weathercaster
         run: python scripts/jma_weathercaster.py
