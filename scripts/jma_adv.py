@@ -4,15 +4,19 @@
 #
 # ADV TGV: 取得 → JPG化(3up) → R2 → Notion(DB)
 # - Notion / R2 のみ（Slack/Mail完全撤去）
-# - GSM / MSM / LFM はトグルで格納（モデル→アイテムの二段トグル）
 #
-# 追加（今回 / 安定運用）:
-# - ガイダンス表（3種）は取得しない（HTTP401対策）
-# - Notion本文に「リンクカード（bookmark）」で3URLを追加
+# ✅ 構成（希望どおり）
+# - GSM / MSM / LFM は「見出し（タイトル）」で並べる（トグルではない）
+# - 各モデル配下に、アイテムごとのトグルを作り、その中に画像を入れる
+#
+# ✅ ガイダンス（安定運用）
+# - HTML表は取得しない（HTTP401/構造変化対策）
+# - Notion本文に「リンクカード（bookmark）」で3URLを追加（トグルOK）
 #
 # 環境変数（主なもの）
 # - JMA_AUTH_BASIC or (JMA_ADV_USER/JMA_ADV_PASS)
 # - TGV_USE_AUTH=1
+# - JOIN_TRIPLE=1（3up結合する）
 # - R2_ENABLE=1
 # - R2_PREFIX=adv-tgv（推奨）
 # - NOTION_ENABLE=1 / NOTION_TOKEN / NOTION_DATABASE_ID
@@ -26,14 +30,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-
-SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import os
 import io
-import re
-import csv
 import base64
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional, Sequence
@@ -48,10 +48,11 @@ from module.utils.notion_utils import (
     append_heading,
     append_toggle,
     append_images,
-    append_code_block,
-    append_files,
-    append_bookmark,  # ← 追加（リンクカード）
+    append_bookmark,
 )
+
+from module.adv_tgv.models import load_model_groups, Item, ModelCfg
+
 
 Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
 
@@ -183,6 +184,9 @@ def concat_jpgs_horiz(jpg_list: Sequence[bytes], *, quality: int = 85) -> bytes:
 
 
 def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> List[Attachment]:
+    """
+    3枚を横3upで結合（余りは白でパディング）
+    """
     if not env_bool("JOIN_TRIPLE", "1"):
         return atts
     if not atts:
@@ -252,12 +256,6 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 
 
 # =============================================================================
-# Model configs (externalized)
-# =============================================================================
-from module.adv_tgv.models import load_model_groups, Item, ModelCfg
-
-
-# =============================================================================
 # INIT auto-detect
 # =============================================================================
 def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
@@ -305,6 +303,9 @@ def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
 
 
 def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: Item) -> Tuple[List[Attachment], bool]:
+    """
+    returns: (attachments, auth_failed)
+    """
     jpg_quality = env_int("JPG_QUALITY", 85)
     rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
 
@@ -318,6 +319,7 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
         status, content, ctype = fetch_png(url, cfg.referer)
 
         if status == 200:
+            # 200でもHTMLが返る（認証失敗など）
             if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
                 auth_failed = True
                 print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
@@ -335,6 +337,7 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
             break
 
         if status == 404:
+            # 欠けは許容
             continue
 
     atts = maybe_triple_join_attachments(raw_atts, quality=jpg_quality)
@@ -367,7 +370,7 @@ def upload_item_images_to_r2(
 
 
 # =============================================================================
-# Advisor guidance links (bookmark only)
+# Guidance links (bookmark only)
 # =============================================================================
 GUIDE_ENABLE = env_bool("GUIDE_ENABLE", "1")
 
@@ -396,11 +399,7 @@ def main() -> None:
 
     groups = load_model_groups()
 
-    page_id: Optional[str] = None
-    run_prefix: Optional[str] = None
-    first_cover_url: str = ""
-
-    # ページの基準（タイトル/プロパティ用）は GSM の init から取る（従来踏襲）
+    # --- ページの基準（タイトル/プロパティ用）は GSM init を採用 ---
     init_dt_for_title = find_working_init_dt("GSM", groups["GSM"], max_back_hours=search_hours)
     rjtd_for_title = fmt_rjtd(init_dt_for_title, groups["GSM"].rjtd_minute)
 
@@ -423,8 +422,12 @@ def main() -> None:
     )
     print(f"[OK] Notion DB row created: {page_id}")
 
+    first_cover_url: Optional[str] = None
+
     # =============================================================================
-    # 1) GSM/MSM/LFM（トグル）
+    # 1) GSM / MSM / LFM
+    #    - モデルは「見出し」
+    #    - アイテムは「トグル」
     # =============================================================================
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
@@ -436,11 +439,12 @@ def main() -> None:
             print(f"[NG] {model_name}: INIT not found / auth error {type(e).__name__}: {e}")
             continue
 
-        model_toggle_id: Optional[str] = None
-        if page_id:
-            model_toggle_id = append_toggle(page_id, f"{model_name}")
-            if not model_toggle_id:
-                append_heading(page_id, model_name, level=2)
+        # ✅ 見出し（タイトル）を作って、その下にぶら下げたい
+        # notion_utils.append_heading が block_id を返す実装ならそれを使う
+        model_parent: str = page_id
+        hid = append_heading(page_id, model_name, level=2)
+        if hid:
+            model_parent = hid
 
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
@@ -453,39 +457,37 @@ def main() -> None:
                 print(f"[WARN] {model_name} {item.label}: no images")
                 continue
 
-            if page_id and run_prefix and r2_enabled():
-                urls = upload_item_images_to_r2(
-                    run_prefix=run_prefix,
-                    model_name=model_name,
-                    item_label=item.label,
-                    atts=atts,
-                )
+            urls = upload_item_images_to_r2(
+                run_prefix=run_prefix,
+                model_name=model_name,
+                item_label=item.label,
+                atts=atts,
+            )
+            if not urls:
+                continue
 
-                # cover：初回のみ
-                if (not first_cover_url) and urls:
-                    first_cover_url = urls[0]
-                    set_page_cover(page_id, first_cover_url)
+            # cover：初回のみ
+            if (first_cover_url is None) and urls:
+                first_cover_url = urls[0]
+                set_page_cover(page_id, first_cover_url)
 
-                # item トグル（モデルトグルの下）
-                parent = model_toggle_id or page_id
-                item_title = f"{item.label}  ({len(urls)} images)"
-                item_toggle_id = append_toggle(parent, item_title)
+            # アイテムはトグル
+            item_title = f"{item.label}  ({len(urls)} images)"
+            item_toggle_id = append_toggle(model_parent, item_title)
 
-                if item_toggle_id:
-                    append_images(item_toggle_id, urls, chunk=30)
-                else:
-                    append_images(parent, urls, chunk=30)
+            if item_toggle_id:
+                append_images(item_toggle_id, urls, chunk=30)
+            else:
+                append_images(model_parent, urls, chunk=30)
 
-                print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
+            print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
 
     # =============================================================================
     # 2) ガイダンス（リンクカードのみ）
     # =============================================================================
-    if page_id and GUIDE_ENABLE:
+    if GUIDE_ENABLE:
         g_toggle = append_toggle(page_id, "ガイダンス（リンク）")
         g_parent = g_toggle or page_id
-
-        # Notionのリンクカード（bookmark）
         for caption, url in GUIDE_LINKS:
             append_bookmark(g_parent, url, caption=caption)
 
