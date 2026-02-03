@@ -18,3 +18,4 @@ google-auth
 beautifulsoup4
 pdf2image
 pillow
+boto3
