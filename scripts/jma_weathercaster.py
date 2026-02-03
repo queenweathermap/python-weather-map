@@ -284,12 +284,33 @@ def _extract_best_table_rows(soup: BeautifulSoup) -> List[List[str]]:
 def _find_frame_like_src(soup: BeautifulSoup) -> Optional[str]:
     """
     iframe / frame の src を探す（表本体が別URLにあるケース対策）
+    優先順位:
+      1) name="data_area"
+      2) src に "fuken_2.cgi"
+      3) それ以外の iframe/frame
     """
-    for tag in ("iframe", "frame"):
-        el = soup.find(tag)
-        if el and el.get("src"):
-            return el.get("src")
+    frames = soup.find_all(["iframe", "frame"])
+    if not frames:
+        return None
+
+    # 1) data_area を最優先
+    for f in frames:
+        if (f.get("name") or "").strip() == "data_area" and f.get("src"):
+            return f.get("src")
+
+    # 2) fuken_2.cgi を次点
+    for f in frames:
+        src = f.get("src") or ""
+        if "fuken_2.cgi" in src and src:
+            return src
+
+    # 3) 最後は先頭
+    for f in frames:
+        if f.get("src"):
+            return f.get("src")
+
     return None
+
 
 
 def _html_to_lines(html: str) -> List[str]:
@@ -394,18 +415,38 @@ def _fetch_and_parse_amedas(url: str, station_names: List[str]) -> Tuple[Optiona
     # 1) table を探す
     rows = _extract_best_table_rows(soup)
 
-    # 2) tableが無ければ iframe/frame を追う
+    # 2) tableが無ければ iframe/frame を追う（全部試す）
     if not rows:
-        src = _find_frame_like_src(soup)
-        if src:
-            next_url = _abs_url(url, src)
-            html2, _, st2 = fetch_html_content(next_url, auth_required=True)
-            if html2:
-                soup2 = BeautifulSoup(html2, "html.parser")
-                rows = _extract_best_table_rows(soup2)
-                if not rows and AMEDAS_DEBUG:
-                    return None, None, f"AMEDAS: table not found (after frame) src={next_url}"
+        frames = soup.find_all(["iframe", "frame"])
+
+        # data_area → fuken_2.cgi → その他 の順に試す
+        def frame_priority(tag) -> int:
+            name = (tag.get("name") or "").strip()
+            src = (tag.get("src") or "")
+            if name == "data_area":
+                return 0
+            if "fuken_2.cgi" in src:
+                return 1
+            return 2
+
+        frames = sorted([f for f in frames if f.get("src")], key=frame_priority)
+
+        for f in frames:
+            next_url = _abs_url(url, f.get("src"))
+            html2, _, _ = fetch_html_content(next_url, auth_required=True)
+            if not html2:
+                continue
+
+            soup2 = BeautifulSoup(html2, "html.parser")
+            rows = _extract_best_table_rows(soup2)
+
+            if rows:
                 html = html2  # fallback用
+                break
+
+        if not rows and AMEDAS_DEBUG:
+            tried = ", ".join(_abs_url(url, f.get("src")) for f in frames[:5])
+            return None, None, f"AMEDAS: table not found (after frames) tried={tried}"
 
     if rows:
         header, body = _infer_header_and_body(rows)
