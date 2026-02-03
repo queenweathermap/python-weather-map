@@ -3,3 +3,5 @@ pillow
 boto3
 slack-sdk
 notion-client
+beautifulsoup4
+lxml
