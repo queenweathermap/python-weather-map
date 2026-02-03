@@ -221,6 +221,26 @@ def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, force_all: bool = Fa
 # AMEDAS parsing (robust)
 # ------------------------------------------------------------------
 
+# === AMEDAS settings (ここを関数より前に置くのが重要) ===
+AMEDAS_ENABLE = os.environ.get("AMEDAS_ENABLE", "1").lower() in ("1", "true", "yes", "on")
+
+AMEDAS_FUKEN_URL = os.environ.get(
+    "AMEDAS_FUKEN_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html",
+).strip()
+
+AMEDAS_ALL_URL = os.environ.get(
+    "AMEDAS_ALL_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/allamedas.html",
+).strip()
+
+# 例: "秋田,大館,横手" のようにカンマ区切りで指定可能
+AMEDAS_STATIONS = os.environ.get("AMEDAS_STATIONS", "秋田").strip()
+
+# ★ これが NameError の原因だったやつ：必ず関数より前
+AMEDAS_DEBUG = os.environ.get("AMEDAS_DEBUG", "0").lower() in ("1", "true", "yes", "on")
+
+
 def _normalize_ws(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").replace("\u3000", " ")).strip()
 
@@ -232,14 +252,13 @@ def _abs_url(base_url: str, maybe_rel: str) -> str:
 
 def _extract_best_table_rows(soup: BeautifulSoup) -> List[List[str]]:
     """
-    <table> がある場合は最良の表を返す（従来）
+    <table> がある場合は最良の表を返す
     """
     best: List[List[str]] = []
     best_score = -1
 
-    tables = soup.find_all("table")
-    for t in tables:
-        rows = []
+    for t in soup.find_all("table"):
+        rows: List[List[str]] = []
         for tr in t.find_all("tr"):
             cells = tr.find_all(["th", "td"])
             if not cells:
@@ -279,15 +298,14 @@ def _html_to_lines(html: str) -> List[str]:
     """
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text("\n", strip=True)
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    return lines
+    return [l.strip() for l in text.splitlines() if l.strip()]
 
 
 def _lines_pick_block(lines: List[str], keywords: List[str], *, window: int = 6, max_lines: int = 60) -> List[str]:
     """
     keywords が含まれる行の周辺をまとめて抜く（テキストfallback）
     """
-    idxs = []
+    idxs: List[int] = []
     for i, line in enumerate(lines):
         if any(k in line for k in keywords):
             idxs.append(i)
@@ -312,16 +330,14 @@ def _lines_pick_block(lines: List[str], keywords: List[str], *, window: int = 6,
 def _infer_header_and_body(rows: List[List[str]]) -> Tuple[List[str], List[List[str]]]:
     if not rows:
         return [], []
-    header = rows[0]
-    body = rows[1:]
-    return header, body
+    return rows[0], rows[1:]
 
 
 def _filter_rows_by_station_names(header: List[str], body: List[List[str]], station_names: List[str]) -> List[List[str]]:
     wanted = [s for s in (station_names or []) if s]
     if not wanted:
         return []
-    picked = []
+    picked: List[List[str]] = []
     for r in body:
         joined = " ".join(r)
         if any(name in joined for name in wanted):
@@ -333,10 +349,9 @@ def _rows_to_aligned_text(header: List[str], rows: List[List[str]], max_rows: in
     if not header:
         return ""
     cols = len(header)
-    norm_rows = []
+    norm_rows: List[List[str]] = []
     for r in rows[:max_rows]:
-        rr = (r + [""] * cols)[:cols]
-        norm_rows.append(rr)
+        norm_rows.append((r + [""] * cols)[:cols])
 
     widths = [len(h) for h in header]
     for r in norm_rows:
@@ -397,14 +412,12 @@ def _fetch_and_parse_amedas(url: str, station_names: List[str]) -> Tuple[Optiona
         picked = _filter_rows_by_station_names(header, body, station_names)
 
         if not picked:
-            # “秋田”を含む行を拾う保険
             picked = [r for r in body if "秋田" in " ".join(r)]
         if not picked:
             picked = body[:10]
 
         excerpt = f"Weathercaster AMeDAS（{', '.join(station_names) or '秋田'}）\nURL: {url}\n\n"
         excerpt += _rows_to_aligned_text(header, picked, max_rows=30)
-
         csv_bytes = _rows_to_csv_bytes(header, picked)
         return excerpt, csv_bytes, None
 
@@ -413,7 +426,6 @@ def _fetch_and_parse_amedas(url: str, station_names: List[str]) -> Tuple[Optiona
     block = _lines_pick_block(lines, station_names or ["秋田"], window=6, max_lines=80)
     excerpt = f"Weathercaster AMeDAS（text fallback）\nURL: {url}\n\n" + "\n".join(block)
 
-    # CSVは「行テキストCSV」にしておく（最低限“添付”を成立させる）
     csv_text = "\n".join(block)
     csv_bytes = ("\ufeff" + csv_text).encode("utf-8")
     return excerpt, csv_bytes, None
@@ -435,11 +447,10 @@ def fetch_akita_amedas() -> Tuple[Optional[str], Optional[bytes], Optional[str],
     if not station_names:
         station_names = ["秋田"]
 
-    # first try: fuken
+    # first try: fuken（Last-Modified 取得のために1回ヘッダを見る）
     html, last_mod, st = fetch_html_content(AMEDAS_FUKEN_URL, auth_required=True)
     lm_dt_utc = _httpdate_to_utc_dt(last_mod) if last_mod else None
 
-    # ここでは html の中身を直接パースせず、共通関数でやり直す（iframe追跡など含む）
     excerpt, csv_bytes, err = _fetch_and_parse_amedas(AMEDAS_FUKEN_URL, station_names)
     if not err and excerpt:
         return excerpt, csv_bytes, last_mod, lm_dt_utc, None
@@ -449,12 +460,12 @@ def fetch_akita_amedas() -> Tuple[Optional[str], Optional[bytes], Optional[str],
     if not err2 and excerpt2:
         return excerpt2, csv_bytes2, last_mod, lm_dt_utc, None
 
-    # debug: 先頭の一部をエラーに残す
     if AMEDAS_DEBUG and html:
         head = html[:400].replace("\n", " ")
         return None, None, last_mod, lm_dt_utc, f"AMEDAS: parse failed. (head) {head}"
 
     return None, None, last_mod, lm_dt_utc, err2 or err or "AMEDAS: unknown error"
+
 
 
 
