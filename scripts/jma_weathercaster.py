@@ -225,14 +225,9 @@ def notion_write_db(today: str, rep_url: Optional[str], all_urls: List[str], err
     if rep_url:
         set_page_cover(page_id, rep_url)
 
-    append_heading(page_id, "代表画像", level=3)
-    if rep_url:
-        append_images(page_id, [rep_url], chunk=30)
+    # 本文には全文画像だけ並べる（代表は cover のみ）
+    append_images(page_id, all_urls, chunk=30)
 
-    append_heading(page_id, "全文画像", level=3)
-    toggle_id = append_toggle(page_id, "▼ 全文画像を開く")
-    if toggle_id:
-        append_images(toggle_id, all_urls, chunk=30)
 
     return page_id
 
