@@ -171,14 +171,12 @@ def set_page_cover(page_id: str, image_url: str) -> None:
 # -----------------------------------------------------------------------------
 # Blocks append
 # -----------------------------------------------------------------------------
-def append_heading(page_or_block_id: str, text: str, *, level: int = 2) -> None:
+def append_heading(page_or_block_id: str, text: str, *, level: int = 2) -> Optional[str]:
     """
-    見出しブロック（heading_2 / heading_3）を追加
+    見出しブロック（heading_2 / heading_3）を追加し、その block_id を返す
     """
     if not notion_enabled():
-        return
-    if not text:
-        return
+        return None
 
     if level not in (2, 3):
         level = 2
@@ -196,6 +194,13 @@ def append_heading(page_or_block_id: str, text: str, *, level: int = 2) -> None:
 
     r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
     r.raise_for_status()
+
+    data = r.json()
+    results = data.get("results") or []
+    if not results:
+        return None
+    return results[0]["id"]
+
 
 
 def append_toggle(page_or_block_id: str, title: str) -> Optional[str]:
