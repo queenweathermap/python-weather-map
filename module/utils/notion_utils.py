@@ -261,3 +261,119 @@ def append_images(page_or_block_id: str, urls: List[str], *, chunk: int = 50) ->
         payload = {"children": children}
         r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
         r.raise_for_status()
+
+# -----------------------------------------------------------------------------
+# Text / Code / File blocks append (追加)
+# -----------------------------------------------------------------------------
+def append_paragraph(page_or_block_id: str, text: str, *, chunk_chars: int = 1800) -> None:
+    """
+    段落（paragraph）を追加
+    - Notionのrich_textは長すぎると落ちるので、適度に分割
+    """
+    if not notion_enabled():
+        return
+
+    text = (text or "").strip()
+    if not text:
+        return
+
+    for i in range(0, len(text), chunk_chars):
+        part = text[i:i + chunk_chars]
+        payload = {
+            "children": [
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [{"type": "text", "text": {"content": part}}],
+                    },
+                }
+            ]
+        }
+        r = requests.patch(
+            f"{API_BASE}/blocks/{page_or_block_id}/children",
+            headers=_headers(),
+            json=payload,
+            timeout=60
+        )
+        r.raise_for_status()
+
+
+def append_code_block(page_or_block_id: str, text: str, *, language: str = "plain text", chunk_chars: int = 1800) -> None:
+    """
+    コードブロック（code）を追加
+    - 表の抜粋を等幅で貼る用途に最適
+    """
+    if not notion_enabled():
+        return
+
+    text = (text or "").rstrip()
+    if not text:
+        return
+
+    # Notionのcodeは1ブロックのrich_text制限が厳しいので分割
+    for i in range(0, len(text), chunk_chars):
+        part = text[i:i + chunk_chars]
+        payload = {
+            "children": [
+                {
+                    "object": "block",
+                    "type": "code",
+                    "code": {
+                        "rich_text": [{"type": "text", "text": {"content": part}}],
+                        "language": language,
+                    },
+                }
+            ]
+        }
+        r = requests.patch(
+            f"{API_BASE}/blocks/{page_or_block_id}/children",
+            headers=_headers(),
+            json=payload,
+            timeout=60
+        )
+        r.raise_for_status()
+
+
+def append_files(page_or_block_id: str, files: List[dict], *, chunk: int = 20) -> None:
+    """
+    外部URLファイルを Notion に添付（fileブロック）
+    files: [{"url": "...", "name": "xxx.csv"}, ...]
+    """
+    if not notion_enabled():
+        return
+
+    files = [f for f in (files or []) if f.get("url")]
+    if not files:
+        return
+
+    for i in range(0, len(files), chunk):
+        part = files[i:i + chunk]
+        children = []
+        for f in part:
+            url = f["url"]
+            name = (f.get("name") or "").strip()
+
+            # Notionのfileブロック（external）
+            file_obj = {
+                "object": "block",
+                "type": "file",
+                "file": {
+                    "type": "external",
+                    "external": {"url": url},
+                },
+            }
+            # キャプションにファイル名を入れておく（一覧性UP）
+            if name:
+                file_obj["file"]["caption"] = [{"type": "text", "text": {"content": name}}]
+
+            children.append(file_obj)
+
+        payload = {"children": children}
+        r = requests.patch(
+            f"{API_BASE}/blocks/{page_or_block_id}/children",
+            headers=_headers(),
+            json=payload,
+            timeout=60
+        )
+        r.raise_for_status()
