@@ -6,9 +6,9 @@
 # - Notion / R2 のみ（Slack/Mail完全撤去）
 # - GSM / MSM / LFM はトグルで格納（モデル→アイテムの二段トグル）
 #
-# 追加（今回）:
-# - ADV advisor ガイダンス表（3種）を取得し、秋田だけ抜粋をNotion本文に追加（トグルOK）
-# - 3種の「秋田抽出CSV」をR2へ置き、Notion本文に file 添付
+# 追加（今回 / 安定運用）:
+# - ガイダンス表（3種）は取得しない（HTTP401対策）
+# - Notion本文に「リンクカード（bookmark）」で3URLを追加
 #
 # 環境変数（主なもの）
 # - JMA_AUTH_BASIC or (JMA_ADV_USER/JMA_ADV_PASS)
@@ -17,9 +17,8 @@
 # - R2_PREFIX=adv-tgv（推奨）
 # - NOTION_ENABLE=1 / NOTION_TOKEN / NOTION_DATABASE_ID
 #
-# ガイダンス
+# ガイダンス（リンクだけ）
 # - GUIDE_ENABLE=1
-# - GUIDE_STATION=秋田（基本これでOK）
 # =============================================================================
 
 import sys
@@ -40,7 +39,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional, Sequence
 
 import requests
-from bs4 import BeautifulSoup
 from PIL import Image
 
 from r2_utils import put_bytes, make_url
@@ -52,6 +50,7 @@ from module.utils.notion_utils import (
     append_images,
     append_code_block,
     append_files,
+    append_bookmark,  # ← 追加（リンクカード）
 )
 
 Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
@@ -137,11 +136,6 @@ def headers_for(referer: str) -> dict:
 def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
     auth = get_requests_auth_tuple()
     return requests.get(url, headers=headers_for(referer), auth=auth, timeout=timeout)
-
-
-def http_get_text(url: str, *, timeout: int = 60) -> requests.Response:
-    headers = {"User-Agent": "adv-tgv-bot/1.0"}
-    return requests.get(url, headers=headers, timeout=timeout)
 
 
 # =============================================================================
@@ -324,7 +318,6 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
         status, content, ctype = fetch_png(url, cfg.referer)
 
         if status == 200:
-            # 認証がHTMLで返ってくるケース（200でもHTML）
             if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
                 auth_failed = True
                 print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
@@ -373,165 +366,16 @@ def upload_item_images_to_r2(
     return urls
 
 
-def upload_bytes_to_r2(run_prefix: str, filename: str, blob: bytes, content_type: str) -> Optional[str]:
-    if not r2_enabled():
-        return None
-    if not filename or not blob:
-        return None
-    key = f"{run_prefix}/csv/{filename}"
-    put_bytes(key, blob, content_type=content_type)
-    return make_url(key)
-
-
 # =============================================================================
-# Advisor guidance tables (JMA) - 秋田だけ抜粋 + CSV
+# Advisor guidance links (bookmark only)
 # =============================================================================
 GUIDE_ENABLE = env_bool("GUIDE_ENABLE", "1")
-GUIDE_STATION = env_str("GUIDE_STATION", "秋田")  # 基本「秋田」でOK
 
-GUIDE_URLS: Dict[str, str] = {
-    "guid": "https://www.jma.go.jp/bosai/advisor/guid_table.html",
-    "wind": "https://www.jma.go.jp/bosai/advisor/guid_table_wind.html",
-    "cold": "https://www.jma.go.jp/bosai/advisor/cold_table.html",
-}
-
-
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "").replace("\u3000", " ")).strip()
-
-
-def _find_best_table_rows(soup: BeautifulSoup) -> List[List[str]]:
-    best: List[List[str]] = []
-    best_score = -1
-
-    for t in soup.find_all("table"):
-        rows: List[List[str]] = []
-        for tr in t.find_all("tr"):
-            cells = tr.find_all(["th", "td"])
-            if not cells:
-                continue
-            row = [_norm(c.get_text(" ", strip=True)) for c in cells]
-            if any(x for x in row):
-                rows.append(row)
-        if len(rows) < 2:
-            continue
-
-        col_lens = [len(r) for r in rows]
-        median_cols = sorted(col_lens)[len(col_lens) // 2]
-        score = median_cols * len(rows)
-
-        if score > best_score:
-            best_score = score
-            best = rows
-
-    return best
-
-
-def _split_header_body(rows: List[List[str]]) -> Tuple[List[str], List[List[str]]]:
-    if not rows:
-        return [], []
-    return rows[0], rows[1:]
-
-
-def _pick_rows_by_keyword(body: List[List[str]], keyword: str) -> List[List[str]]:
-    if not keyword:
-        return []
-    out: List[List[str]] = []
-    for r in body:
-        if keyword in " ".join(r):
-            out.append(r)
-    return out
-
-
-def _aligned_text(header: List[str], rows: List[List[str]], max_rows: int = 40) -> str:
-    if not header:
-        return ""
-    cols = len(header)
-    norm_rows: List[List[str]] = []
-    for r in rows[:max_rows]:
-        rr = (r + [""] * cols)[:cols]
-        norm_rows.append(rr)
-
-    widths = [len(h) for h in header]
-    for r in norm_rows:
-        for i, v in enumerate(r):
-            widths[i] = max(widths[i], len(v))
-
-    def fmt_row(r: List[str]) -> str:
-        return " | ".join((v or "").ljust(widths[i]) for i, v in enumerate(r))
-
-    sep = "-+-".join("-" * w for w in widths)
-    out = [fmt_row(header), sep]
-    out += [fmt_row(r) for r in norm_rows]
-    return "\n".join(out)
-
-
-def _csv_bytes(header: List[str], rows: List[List[str]]) -> bytes:
-    sio = io.StringIO()
-    w = csv.writer(sio, lineterminator="\n")
-    if header:
-        w.writerow(header)
-    cols = len(header) if header else None
-    for r in rows:
-        rr = (r + [""] * cols)[:cols] if cols else r
-        w.writerow(rr)
-    return ("\ufeff" + sio.getvalue()).encode("utf-8")  # BOM付き
-
-
-def fetch_guidance_one(kind: str, url: str, station_keyword: str) -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
-    """
-    returns: (excerpt_text_for_codeblock, csv_bytes, error_message)
-    """
-    try:
-        r = http_get_text(url, timeout=60)
-        if r.status_code != 200:
-            return None, None, f"GUIDE({kind}): HTTP{r.status_code}"
-        r.encoding = r.apparent_encoding or r.encoding
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        rows = _find_best_table_rows(soup)
-        if not rows:
-            return None, None, f"GUIDE({kind}): table not found"
-
-        header, body = _split_header_body(rows)
-        picked = _pick_rows_by_keyword(body, station_keyword)
-
-        if not picked:
-            # 構造変化検知用に先頭数行
-            picked = body[:10]
-
-        txt = f"{kind.upper()} / 抜粋キーワード: {station_keyword}\nURL: {url}\n\n"
-        txt += _aligned_text(header, picked, max_rows=40)
-
-        csvb = _csv_bytes(header, picked)
-        return txt, csvb, None
-
-    except Exception as e:
-        return None, None, f"GUIDE({kind}): {type(e).__name__}: {e}"
-
-
-def build_guidance_payloads(station_keyword: str) -> Tuple[Dict[str, str], Dict[str, bytes], List[str]]:
-    """
-    returns:
-      - excerpts: kind -> codeblock text
-      - csvs:     kind -> csv bytes
-      - errors:   list
-    """
-    excerpts: Dict[str, str] = {}
-    csvs: Dict[str, bytes] = {}
-    errors: List[str] = []
-
-    for kind, url in GUIDE_URLS.items():
-        txt, csvb, err = fetch_guidance_one(kind, url, station_keyword)
-        if err:
-            errors.append(err)
-            continue
-        if txt:
-            excerpts[kind] = txt
-        if csvb:
-            csvs[kind] = csvb
-
-    return excerpts, csvs, errors
+GUIDE_LINKS: List[Tuple[str, str]] = [
+    ("ガイダンス（降水）", "https://www.jma.go.jp/bosai/advisor/guid_table.html"),
+    ("ガイダンス（風）", "https://www.jma.go.jp/bosai/advisor/guid_table_wind.html"),
+    ("ガイダンス（寒気）", "https://www.jma.go.jp/bosai/advisor/cold_table.html"),
+]
 
 
 # =============================================================================
@@ -548,11 +392,10 @@ def main() -> None:
     print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
     print(f"[DEBUG] R2_ENABLE={os.getenv('R2_ENABLE','')} NOTION_ENABLE={os.getenv('NOTION_ENABLE','')}")
     print(f"[DEBUG] R2_PREFIX={r2_prefix}")
-    print(f"[DEBUG] GUIDE_ENABLE={GUIDE_ENABLE} GUIDE_STATION={GUIDE_STATION}")
+    print(f"[DEBUG] GUIDE_ENABLE={GUIDE_ENABLE}")
 
     groups = load_model_groups()
 
-    # --- DB row create (Notion) ---
     page_id: Optional[str] = None
     run_prefix: Optional[str] = None
     first_cover_url: str = ""
@@ -595,10 +438,8 @@ def main() -> None:
 
         model_toggle_id: Optional[str] = None
         if page_id:
-            # モデル単位トグル
             model_toggle_id = append_toggle(page_id, f"{model_name}")
             if not model_toggle_id:
-                # 保険：トグルが作れない場合は見出し
                 append_heading(page_id, model_name, level=2)
 
         for item in cfg.items:
@@ -638,37 +479,15 @@ def main() -> None:
                 print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
 
     # =============================================================================
-    # 2) ガイダンス（トグル）— 秋田だけ抜粋 + CSV添付
+    # 2) ガイダンス（リンクカードのみ）
     # =============================================================================
-    if page_id and run_prefix and GUIDE_ENABLE:
-        g_toggle = append_toggle(page_id, f"ガイダンス（{GUIDE_STATION} 抜粋）")
+    if page_id and GUIDE_ENABLE:
+        g_toggle = append_toggle(page_id, "ガイダンス（リンク）")
         g_parent = g_toggle or page_id
 
-        excerpts, csvs, g_errors = build_guidance_payloads(GUIDE_STATION)
-
-        # 抜粋（code block）
-        if excerpts:
-            for kind in ("guid", "wind", "cold"):
-                if kind in excerpts:
-                    append_heading(g_parent, kind.upper(), level=3)
-                    append_code_block(g_parent, excerpts[kind], language="plain text")
-
-        # CSV（R2→Notion file）
-        file_blocks: List[dict] = []
-        for kind, csvb in csvs.items():
-            fname = f"{kind}_{GUIDE_STATION}.csv".replace(" ", "_")
-            url = upload_bytes_to_r2(run_prefix, fname, csvb, content_type="text/csv")
-            if url:
-                file_blocks.append({"url": url, "name": fname})
-
-        if file_blocks:
-            append_heading(g_parent, "CSV（添付）", level=3)
-            append_files(g_parent, file_blocks)
-
-        # エラーはガイダンス内に残す（Notionに可視化）
-        if g_errors:
-            append_heading(g_parent, "取得エラー", level=3)
-            append_code_block(g_parent, "\n".join(g_errors), language="plain text")
+        # Notionのリンクカード（bookmark）
+        for caption, url in GUIDE_LINKS:
+            append_bookmark(g_parent, url, caption=caption)
 
     print("\n=== Done ADV JMA TGV ===")
 
