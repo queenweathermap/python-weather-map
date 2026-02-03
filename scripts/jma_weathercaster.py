@@ -40,10 +40,10 @@ from module.utils.notion_utils import (
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
 
 PDF_FILES = [
-    "TKAISETU.pdf", "SKAISETU.pdf", "FEFE19.pdf",
     "AUPA20.pdf", "AUPN30.pdf", "AXJP140.pdf",
     "COMP12.pdf", "COMP36.pdf", "COMP72.pdf",
      "FXJP854.pdf","FXXN519.pdf", "FZCX50.pdf",
+     "TKAISETU.pdf", "SKAISETU.pdf", "FEFE19.pdf",
 ]
 
 USER = os.environ.get("WEATHERCASTER_USER", "").strip()
