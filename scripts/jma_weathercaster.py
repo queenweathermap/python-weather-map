@@ -379,7 +379,7 @@ def notion_write_db(
     # --- AMeDAS: リンクだけ必ず出す ---
     if AMEDAS_LINK_ENABLE and AMEDAS_FUKEN_URL:
         append_heading(page_id, "アメダス（リンク）", level=2)
-        append_text(page_id, f"秋田 AMeDAS（府県別）: {AMEDAS_FUKEN_URL}")
+        append_bookmark(page_id, AMEDAS_FUKEN_URL, caption="秋田 AMeDAS（府県別）")
 
     # 本文：画像一式（PDF由来＋エマグラム）
     if all_image_urls:
