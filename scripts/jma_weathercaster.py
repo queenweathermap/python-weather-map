@@ -43,6 +43,7 @@ from module.utils.notion_utils import (
     append_images,
     append_heading,
     append_text,
+    append_bookmark,   # ← 追加
 )
 
 # --------- 設定 ---------
