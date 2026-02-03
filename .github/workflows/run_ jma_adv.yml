@@ -31,24 +31,7 @@ jobs:
       # =====================
       # 配信
       # =====================
-      DELIVERY_MODE: "both"  # email | slack | both
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-      SLACK_CHUNK: "10"
-
-      # =====================
-      # Mail（mail_utils参照）
-      # =====================
-      FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
-      TO_EMAIL: ${{ secrets.TO_EMAIL }}
-      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      MAIL_SUBJECT_PREFIX: "JMA"
-      SMTP_STARTTLS: "1"
-      MAIL_DEBUG: "0"
-      MAX_MAIL_SIZE_MB: "20"
+      DELIVERY_MODE: "notion"  # notion only
 
       # =====================
       # script tuning
@@ -77,7 +60,17 @@ jobs:
       # =====================
       NOTION_ENABLE: "1"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+
+      # DBプロパティ名（必要なら上書き）
+      NOTION_PROP_TITLE: "名前"
+      NOTION_PROP_CATEGORY: "区分"
+      NOTION_PROP_INIT_JST: "初期時刻（JST）"
+      NOTION_PROP_RJTD: "RJTD"
+      NOTION_PROP_PREFIX: "prefix"
+      NOTION_PROP_R2URL: "R2 URL"
+      NOTION_PROP_AUTOGEN: "自動生成"
+      NOTION_PROP_MEMO: "メモ"
 
     steps:
       - name: Checkout repository
@@ -91,7 +84,7 @@ jobs:
             TGV_USE_AUTH JMA_ADV_USER JMA_ADV_PASS \
             SLACK_CHANNEL_ID SLACK_BOT_TOKEN \
             R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET ASSET_BASE_URL \
-            NOTION_TOKEN NOTION_PARENT_PAGE_ID
+            NOTION_TOKEN NOTION_DATABASE_ID
           do
             if [ -n "${!v:-}" ]; then
               echo "$v=OK"
@@ -112,20 +105,6 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements-adv.txt
-
-
-      - name: Debug env presence (safe)
-        shell: bash
-        run: |
-          set -euo pipefail
-          for k in SMTP_HOST SMTP_USER SMTP_PASS MAIL_FROM MAIL_TO SMTP_PORT; do
-            if [ -n "${!k:-}" ]; then
-              echo "$k = OK"
-            else
-              echo "$k = MISSING"
-            fi
-          done
-
 
       - name: Run JMA ADV
         run: |
