@@ -4,7 +4,7 @@
 #
 # Weathercaster PDF → JPG → R2 → Notion DB（wx 天気図 DB）
 # - カバー画像：代表1枚（必須）
-# - 本文：全文画像をそのまま並べる（toggle不要・代表画像の重複なし）
+# - 本文：PDF画像一式（代表画像の重複なし）
 # - Slack / Mail 完全撤去
 #
 # 要件:
@@ -16,9 +16,8 @@
 # - 外部GIFを取得し、同じ Notion ページ本文へ追加（coverはPDF代表を維持）
 #
 # 追加（秋田アメダス）:
-# - Weathercaster 会員ページ（fuken.html）から実況を取得
-# - Notion本文に「秋田（指定観測所）」抜粋を code block で追記
-# - CSV（秋田抽出）をR2へ置き、Notion本文に file ブロックで添付
+# - 「抽出せず」リンクだけを Notion 本文へ必ず追加
+#   https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html
 #
 # DELIVERY_MODE=notion 前提
 # =============================================================================
@@ -27,15 +26,12 @@ from __future__ import annotations
 
 import io
 import os
-import csv   # ← 追加
-import re
 import shutil
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from typing import List, Tuple, Optional, Dict, Any
 
 import requests
-from bs4 import BeautifulSoup
 from pdf2image import convert_from_bytes
 
 from r2_utils import put_bytes, make_url
@@ -46,8 +42,7 @@ from module.utils.notion_utils import (
     set_page_cover,
     append_images,
     append_heading,
-    append_code_block,
-    append_files,
+    append_text,
 )
 
 # --------- 設定 ---------
@@ -70,6 +65,7 @@ JPEG_DPI = int(os.environ.get("JPEG_DPI", "200"))
 JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
+# ADV と揃えるため、R2_PREFIX を尊重（workflow で "weathercaster" を入れている想定）
 R2_PREFIX = os.environ.get("R2_PREFIX", "weathercaster").strip().strip("/")
 
 # ---- エマグラム ----
@@ -77,20 +73,12 @@ EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", 
 EMAGRAM_URL = os.environ.get("EMAGRAM_URL", "https://bk-pro.jp/images/ema/ema_aki_00.gif").strip()
 EMAGRAM_FILENAME = os.environ.get("EMAGRAM_FILENAME", "ema_aki_00.gif").strip()
 
-# ---- 秋田アメダス（Weathercaster会員）----
-# 県別ページ（秋田が入っていればOK）
-AMEDAS_ENABLE = os.environ.get("AMEDAS_ENABLE", "1").lower() in ("1", "true", "yes", "on")
+# ---- AMeDASリンク（リンクだけ運用）----
+AMEDAS_LINK_ENABLE = os.environ.get("AMEDAS_LINK_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 AMEDAS_FUKEN_URL = os.environ.get(
     "AMEDAS_FUKEN_URL",
-    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html"
+    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html",
 ).strip()
-
-# 抜粋したい観測所（カンマ区切り）
-# 例: "秋田,大館,横手,能代"
-AMEDAS_STATIONS = os.environ.get("AMEDAS_STATIONS", "秋田").strip()
-
-# CSVのファイル名（R2に置く）
-AMEDAS_CSV_NAME = os.environ.get("AMEDAS_CSV_NAME", "amedas_akita.csv").strip()
 
 # --- Notion property names ---
 PROP_TITLE = os.environ.get("NOTION_PROP_TITLE", "名前")
@@ -174,29 +162,6 @@ def fetch_image_content(url: str) -> Tuple[Optional[bytes], Optional[str], Optio
         return None, None, None, None
 
 
-def fetch_html_content(url: str, *, auth_required: bool = True) -> Tuple[Optional[str], Optional[str], Optional[int]]:
-    """
-    returns: (html_text, last_modified_header, http_status)
-    """
-    try:
-        headers = {"User-Agent": "weathercaster-jma-bot/1.0"}
-        if auth_required:
-            r = requests.get(url, auth=(USER, PASS), headers=headers, timeout=60)
-        else:
-            r = requests.get(url, headers=headers, timeout=60)
-
-        lm = r.headers.get("Last-Modified")
-        if r.status_code == 200:
-            r.encoding = r.apparent_encoding or r.encoding
-            return r.text, lm, r.status_code
-
-        print(f"[NG] html HTTP {r.status_code}: {url}")
-        return None, lm, r.status_code
-    except Exception as e:
-        print(f"[ERR] html: {e} ({url})")
-        return None, None, None
-
-
 def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, force_all: bool = False) -> List[Attachment]:
     images = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
     if not images:
@@ -218,309 +183,12 @@ def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, force_all: bool = Fa
     return out
 
 
-# ------------------------------------------------------------------
-# AMEDAS parsing (robust)
-# ------------------------------------------------------------------
-
-# === AMEDAS settings (ここを関数より前に置くのが重要) ===
-AMEDAS_ENABLE = os.environ.get("AMEDAS_ENABLE", "1").lower() in ("1", "true", "yes", "on")
-
-AMEDAS_FUKEN_URL = os.environ.get(
-    "AMEDAS_FUKEN_URL",
-    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html",
-).strip()
-
-AMEDAS_ALL_URL = os.environ.get(
-    "AMEDAS_ALL_URL",
-    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/allamedas.html",
-).strip()
-
-# 例: "秋田,大館,横手" のようにカンマ区切りで指定可能
-AMEDAS_STATIONS = os.environ.get("AMEDAS_STATIONS", "秋田").strip()
-
-# ★ これが NameError の原因だったやつ：必ず関数より前
-AMEDAS_DEBUG = os.environ.get("AMEDAS_DEBUG", "0").lower() in ("1", "true", "yes", "on")
-
-
-def _normalize_ws(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "").replace("\u3000", " ")).strip()
-
-
-def _abs_url(base_url: str, maybe_rel: str) -> str:
-    from urllib.parse import urljoin
-    return urljoin(base_url, maybe_rel)
-
-
-def _extract_best_table_rows(soup: BeautifulSoup) -> List[List[str]]:
-    """
-    <table> がある場合は最良の表を返す
-    """
-    best: List[List[str]] = []
-    best_score = -1
-
-    for t in soup.find_all("table"):
-        rows: List[List[str]] = []
-        for tr in t.find_all("tr"):
-            cells = tr.find_all(["th", "td"])
-            if not cells:
-                continue
-            row = [_normalize_ws(c.get_text(" ", strip=True)) for c in cells]
-            if any(x for x in row):
-                rows.append(row)
-
-        if len(rows) < 2:
-            continue
-
-        col_lens = [len(r) for r in rows]
-        median_cols = sorted(col_lens)[len(col_lens) // 2]
-        score = median_cols * len(rows)
-
-        if score > best_score:
-            best_score = score
-            best = rows
-
-    return best
-
-
-def _find_frame_like_src(soup: BeautifulSoup) -> Optional[str]:
-    """
-    iframe / frame の src を探す（表本体が別URLにあるケース対策）
-    優先順位:
-      1) name="data_area"
-      2) src に "fuken_2.cgi"
-      3) それ以外の iframe/frame
-    """
-    frames = soup.find_all(["iframe", "frame"])
-    if not frames:
-        return None
-
-    # 1) data_area を最優先
-    for f in frames:
-        if (f.get("name") or "").strip() == "data_area" and f.get("src"):
-            return f.get("src")
-
-    # 2) fuken_2.cgi を次点
-    for f in frames:
-        src = f.get("src") or ""
-        if "fuken_2.cgi" in src and src:
-            return src
-
-    # 3) 最後は先頭
-    for f in frames:
-        if f.get("src"):
-            return f.get("src")
-
-    return None
-
-
-
-def _html_to_lines(html: str) -> List[str]:
-    """
-    tableが無い場合のフォールバック：ページの可視テキストを行にする
-    """
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text("\n", strip=True)
-    return [l.strip() for l in text.splitlines() if l.strip()]
-
-
-def _lines_pick_block(lines: List[str], keywords: List[str], *, window: int = 6, max_lines: int = 60) -> List[str]:
-    """
-    keywords が含まれる行の周辺をまとめて抜く（テキストfallback）
-    """
-    idxs: List[int] = []
-    for i, line in enumerate(lines):
-        if any(k in line for k in keywords):
-            idxs.append(i)
-
-    if not idxs:
-        return lines[:max_lines]
-
-    picked: List[str] = []
-    seen = set()
-    for i in idxs:
-        a = max(0, i - window)
-        b = min(len(lines), i + window + 1)
-        for j in range(a, b):
-            if j not in seen:
-                picked.append(lines[j])
-                seen.add(j)
-        if len(picked) >= max_lines:
-            break
-    return picked[:max_lines]
-
-
-def _infer_header_and_body(rows: List[List[str]]) -> Tuple[List[str], List[List[str]]]:
-    if not rows:
-        return [], []
-    return rows[0], rows[1:]
-
-
-def _filter_rows_by_station_names(header: List[str], body: List[List[str]], station_names: List[str]) -> List[List[str]]:
-    wanted = [s for s in (station_names or []) if s]
-    if not wanted:
-        return []
-    picked: List[List[str]] = []
-    for r in body:
-        joined = " ".join(r)
-        if any(name in joined for name in wanted):
-            picked.append(r)
-    return picked
-
-
-def _rows_to_aligned_text(header: List[str], rows: List[List[str]], max_rows: int = 30) -> str:
-    if not header:
-        return ""
-    cols = len(header)
-    norm_rows: List[List[str]] = []
-    for r in rows[:max_rows]:
-        norm_rows.append((r + [""] * cols)[:cols])
-
-    widths = [len(h) for h in header]
-    for r in norm_rows:
-        for i, v in enumerate(r):
-            widths[i] = max(widths[i], len(v))
-
-    def fmt_row(r: List[str]) -> str:
-        return " | ".join((v or "").ljust(widths[i]) for i, v in enumerate(r))
-
-    sep = "-+-".join("-" * w for w in widths)
-    out = [fmt_row(header), sep]
-    out += [fmt_row(r) for r in norm_rows]
-    return "\n".join(out)
-
-
-def _rows_to_csv_bytes(header: List[str], rows: List[List[str]]) -> bytes:
-    buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\n")
-    if header:
-        w.writerow(header)
-
-    cols = len(header) if header else None
-    for r in rows:
-        rr = (r + [""] * cols)[:cols] if cols else r
-        w.writerow(rr)
-
-    return ("\ufeff" + buf.getvalue()).encode("utf-8")
-
-
-def _fetch_and_parse_amedas(url: str, station_names: List[str]) -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
-    """
-    returns: (excerpt_text, csv_bytes, error)
-    """
-    html, last_mod, st = fetch_html_content(url, auth_required=True)
-    if not html:
-        return None, None, f"AMEDAS: download failed (HTTP={st})"
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    # 1) table を探す
-    rows = _extract_best_table_rows(soup)
-
-    # 2) tableが無ければ iframe/frame を追う（全部試す）
-    if not rows:
-        frames = soup.find_all(["iframe", "frame"])
-
-        # data_area → fuken_2.cgi → その他 の順に試す
-        def frame_priority(tag) -> int:
-            name = (tag.get("name") or "").strip()
-            src = (tag.get("src") or "")
-            if name == "data_area":
-                return 0
-            if "fuken_2.cgi" in src:
-                return 1
-            return 2
-
-        frames = sorted([f for f in frames if f.get("src")], key=frame_priority)
-
-        for f in frames:
-            next_url = _abs_url(url, f.get("src"))
-            html2, _, _ = fetch_html_content(next_url, auth_required=True)
-            if not html2:
-                continue
-
-            soup2 = BeautifulSoup(html2, "html.parser")
-            rows = _extract_best_table_rows(soup2)
-
-            if rows:
-                html = html2  # fallback用
-                break
-
-        if not rows and AMEDAS_DEBUG:
-            tried = ", ".join(_abs_url(url, f.get("src")) for f in frames[:5])
-            return None, None, f"AMEDAS: table not found (after frames) tried={tried}"
-
-    if rows:
-        header, body = _infer_header_and_body(rows)
-        picked = _filter_rows_by_station_names(header, body, station_names)
-
-        if not picked:
-            picked = [r for r in body if "秋田" in " ".join(r)]
-        if not picked:
-            picked = body[:10]
-
-        excerpt = f"Weathercaster AMeDAS（{', '.join(station_names) or '秋田'}）\nURL: {url}\n\n"
-        excerpt += _rows_to_aligned_text(header, picked, max_rows=30)
-        csv_bytes = _rows_to_csv_bytes(header, picked)
-        return excerpt, csv_bytes, None
-
-    # 3) 最終fallback：ページ可視テキストから周辺ブロックを抽出
-    lines = _html_to_lines(html)
-    block = _lines_pick_block(lines, station_names or ["秋田"], window=6, max_lines=80)
-    excerpt = f"Weathercaster AMeDAS（text fallback）\nURL: {url}\n\n" + "\n".join(block)
-
-    csv_text = "\n".join(block)
-    csv_bytes = ("\ufeff" + csv_text).encode("utf-8")
-    return excerpt, csv_bytes, None
-
-
-def fetch_akita_amedas() -> Tuple[Optional[str], Optional[bytes], Optional[str], Optional[datetime], Optional[str]]:
-    """
-    returns:
-      excerpt_text: Notion本文用（code block）
-      csv_bytes:    CSV添付用（秋田抽出）
-      last_mod:     Last-Modified header（最初のURLのもの）
-      lm_dt_utc:    parsed utc dt (if available)
-      err:          エラー文言（成功時はNone）
-    """
-    if not AMEDAS_ENABLE:
-        return None, None, None, None, None
-
-    station_names = [_normalize_ws(x) for x in AMEDAS_STATIONS.split(",") if _normalize_ws(x)]
-    if not station_names:
-        station_names = ["秋田"]
-
-    # first try: fuken（Last-Modified 取得のために1回ヘッダを見る）
-    html, last_mod, st = fetch_html_content(AMEDAS_FUKEN_URL, auth_required=True)
-    lm_dt_utc = _httpdate_to_utc_dt(last_mod) if last_mod else None
-
-    excerpt, csv_bytes, err = _fetch_and_parse_amedas(AMEDAS_FUKEN_URL, station_names)
-    if not err and excerpt:
-        return excerpt, csv_bytes, last_mod, lm_dt_utc, None
-
-    # second try: allamedas
-    excerpt2, csv_bytes2, err2 = _fetch_and_parse_amedas(AMEDAS_ALL_URL, station_names)
-    if not err2 and excerpt2:
-        return excerpt2, csv_bytes2, last_mod, lm_dt_utc, None
-
-    if AMEDAS_DEBUG and html:
-        head = html[:400].replace("\n", " ")
-        return None, None, last_mod, lm_dt_utc, f"AMEDAS: parse failed. (head) {head}"
-
-    return None, None, last_mod, lm_dt_utc, err2 or err or "AMEDAS: unknown error"
-
-
-
-
-# ------------------------------------------------------------------
-
-def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime], Optional[str], Optional[bytes]]:
+def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     """
     returns:
       - images: 変換済み JPG + 追加画像（エマグラム）
       - errors: 失敗一覧
       - issued_dt_utc_guess: Last-Modified の最小値（推定）を UTC で返す（取れなければ None）
-      - amedas_excerpt: Notion本文用テキスト（code block）
-      - amedas_csv: CSV bytes（秋田抽出）
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -549,9 +217,13 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime], Op
             errors.append(f"{name}: conversion failed")
             continue
 
+        # デバッグ用途の保存（任意）
         for fname, blob, _ in atts:
-            with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
-                f.write(blob)
+            try:
+                with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                    f.write(blob)
+            except Exception:
+                pass
 
         images.extend(atts)
 
@@ -577,21 +249,8 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime], Op
         else:
             errors.append(f"EMAGRAM: download failed (HTTP={st})")
 
-    # --- AMeDAS（秋田） ---
-    amedas_excerpt: Optional[str] = None
-    amedas_csv: Optional[bytes] = None
-    if AMEDAS_ENABLE:
-        excerpt, csv_bytes, last_mod, lm_dt_utc, err = fetch_akita_amedas()
-        if lm_dt_utc:
-            lm_dts.append(lm_dt_utc)
-        if err:
-            errors.append(err)
-        else:
-            amedas_excerpt = excerpt
-            amedas_csv = csv_bytes
-
     issued_dt_utc_guess = min(lm_dts) if lm_dts else None
-    return images, errors, issued_dt_utc_guess, amedas_excerpt, amedas_csv
+    return images, errors, issued_dt_utc_guess
 
 
 def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Optional[str]]:
@@ -616,19 +275,6 @@ def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Op
     return urls, rep
 
 
-def upload_bytes_to_r2(run_prefix: str, filename: str, blob: bytes, content_type: str) -> Optional[str]:
-    """
-    1ファイルをR2へアップロードしてURLを返す
-    """
-    if not R2_ENABLE:
-        return None
-    if not filename or not blob:
-        return None
-    key = f"{run_prefix}/{filename}"
-    put_bytes(key, blob, content_type=content_type)
-    return make_url(key)
-
-
 def _create_db_row_compat(
     title: str,
     category: str,
@@ -640,7 +286,10 @@ def _create_db_row_compat(
 ) -> Optional[str]:
     """
     notion_utils.create_db_row の実装差を吸収する互換ラッパー。
+    - (A) 引数型: create_db_row(title=..., category=..., init_jst_iso=..., memo=..., rjtd=..., prefix=..., r2_url=..., autogen=..., icon_emoji=...)
+    - (B) properties型: create_db_row(database_id=..., properties=..., rjtd=..., prefix=..., icon_emoji=...)
     """
+    # A: 引数型
     try:
         return create_db_row(
             title=title,
@@ -656,7 +305,7 @@ def _create_db_row_compat(
     except TypeError:
         pass
 
-    # properties型（古い/別実装に備える）
+    # B: properties型
     try:
         db = os.environ.get("NOTION_DATABASE_ID", "").strip()
         if not db:
@@ -695,9 +344,6 @@ def notion_write_db(
     rep_url: Optional[str],
     all_image_urls: List[str],
     errors: List[str],
-    issued_guess_utc: Optional[datetime],
-    amedas_excerpt: Optional[str],
-    amedas_csv_url: Optional[str],
 ) -> Optional[str]:
     if not notion_enabled():
         return None
@@ -729,19 +375,14 @@ def notion_write_db(
     if rep_url:
         set_page_cover(page_id, rep_url)
 
+    # --- AMeDAS: リンクだけ必ず出す ---
+    if AMEDAS_LINK_ENABLE and AMEDAS_FUKEN_URL:
+        append_heading(page_id, "アメダス（リンク）", level=2)
+        append_text(page_id, f"秋田 AMeDAS（府県別）: {AMEDAS_FUKEN_URL}")
+
     # 本文：画像一式（PDF由来＋エマグラム）
     if all_image_urls:
         append_images(page_id, all_image_urls, chunk=30)
-
-    # 本文：秋田アメダス抜粋（code block）
-    if amedas_excerpt:
-        append_heading(page_id, "アメダス（秋田 抜粋）", level=2)
-        append_code_block(page_id, amedas_excerpt, language="plain text")
-
-    # 本文：CSV添付（秋田抽出）
-    if amedas_csv_url:
-        append_heading(page_id, "CSV 添付", level=3)
-        append_files(page_id, [{"url": amedas_csv_url, "name": AMEDAS_CSV_NAME}])
 
     return page_id
 
@@ -750,7 +391,7 @@ def notion_write_db(
 
 def main() -> None:
     try:
-        images, errors, issued_guess_utc, amedas_excerpt, amedas_csv = build_outputs()
+        images, errors, issued_guess_utc = build_outputs()
 
         # 発行基準：Last-Modified の最小値があればそれ、なければ現在UTC
         base_utc_src = issued_guess_utc or _now_utc()
@@ -767,18 +408,8 @@ def main() -> None:
         if images:
             all_image_urls, rep_url = upload_to_r2(run_prefix, images)
 
-        # CSVをR2へ（秋田抽出）
-        amedas_csv_url: Optional[str] = None
-        if amedas_csv:
-            amedas_csv_url = upload_bytes_to_r2(
-                run_prefix=run_prefix,
-                filename=AMEDAS_CSV_NAME,
-                blob=amedas_csv,
-                content_type="text/csv"
-            )
-
-        # Notionへ
-        if all_image_urls or amedas_excerpt or amedas_csv_url:
+        # Notionへ（画像が無くてもリンクだけ出したい場合があるので、条件はゆるく）
+        if notion_enabled():
             notion_write_db(
                 issue_base_utc=issue_base_utc,
                 rjtd=rjtd,
@@ -786,9 +417,6 @@ def main() -> None:
                 rep_url=rep_url,
                 all_image_urls=all_image_urls,
                 errors=errors,
-                issued_guess_utc=issued_guess_utc,
-                amedas_excerpt=amedas_excerpt,
-                amedas_csv_url=amedas_csv_url,
             )
 
     finally:
