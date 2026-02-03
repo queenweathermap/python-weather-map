@@ -218,17 +218,21 @@ def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, force_all: bool = Fa
 
 
 # ------------------------------------------------------------------
-# AMEDAS parsing
+# AMEDAS parsing (robust)
 # ------------------------------------------------------------------
 
 def _normalize_ws(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").replace("\u3000", " ")).strip()
 
 
-def _parse_table_like_rows(soup: BeautifulSoup) -> List[List[str]]:
+def _abs_url(base_url: str, maybe_rel: str) -> str:
+    from urllib.parse import urljoin
+    return urljoin(base_url, maybe_rel)
+
+
+def _extract_best_table_rows(soup: BeautifulSoup) -> List[List[str]]:
     """
-    できるだけ汎用に「いちばんそれっぽい表」を拾う。
-    - <table> を複数持つページでも、最も列が揃っていて行数が多いものを選ぶ。
+    <table> がある場合は最良の表を返す（従来）
     """
     best: List[List[str]] = []
     best_score = -1
@@ -241,14 +245,12 @@ def _parse_table_like_rows(soup: BeautifulSoup) -> List[List[str]]:
             if not cells:
                 continue
             row = [_normalize_ws(c.get_text(" ", strip=True)) for c in cells]
-            # 空行は捨てる
             if any(x for x in row):
                 rows.append(row)
 
         if len(rows) < 2:
             continue
 
-        # スコア：列数の中央値 × 行数（雑に「表らしさ」を評価）
         col_lens = [len(r) for r in rows]
         median_cols = sorted(col_lens)[len(col_lens) // 2]
         score = median_cols * len(rows)
@@ -260,11 +262,54 @@ def _parse_table_like_rows(soup: BeautifulSoup) -> List[List[str]]:
     return best
 
 
+def _find_frame_like_src(soup: BeautifulSoup) -> Optional[str]:
+    """
+    iframe / frame の src を探す（表本体が別URLにあるケース対策）
+    """
+    for tag in ("iframe", "frame"):
+        el = soup.find(tag)
+        if el and el.get("src"):
+            return el.get("src")
+    return None
+
+
+def _html_to_lines(html: str) -> List[str]:
+    """
+    tableが無い場合のフォールバック：ページの可視テキストを行にする
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text("\n", strip=True)
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    return lines
+
+
+def _lines_pick_block(lines: List[str], keywords: List[str], *, window: int = 6, max_lines: int = 60) -> List[str]:
+    """
+    keywords が含まれる行の周辺をまとめて抜く（テキストfallback）
+    """
+    idxs = []
+    for i, line in enumerate(lines):
+        if any(k in line for k in keywords):
+            idxs.append(i)
+
+    if not idxs:
+        return lines[:max_lines]
+
+    picked: List[str] = []
+    seen = set()
+    for i in idxs:
+        a = max(0, i - window)
+        b = min(len(lines), i + window + 1)
+        for j in range(a, b):
+            if j not in seen:
+                picked.append(lines[j])
+                seen.add(j)
+        if len(picked) >= max_lines:
+            break
+    return picked[:max_lines]
+
+
 def _infer_header_and_body(rows: List[List[str]]) -> Tuple[List[str], List[List[str]]]:
-    """
-    rows からヘッダ行っぽいものを推定して (header, body) を返す。
-    - 先頭行に th が含まれるとは限らないので「先頭行をヘッダ」扱いを基本にする。
-    """
     if not rows:
         return [], []
     header = rows[0]
@@ -273,13 +318,9 @@ def _infer_header_and_body(rows: List[List[str]]) -> Tuple[List[str], List[List[
 
 
 def _filter_rows_by_station_names(header: List[str], body: List[List[str]], station_names: List[str]) -> List[List[str]]:
-    """
-    station_names に一致する行だけ抜粋（どの列に観測所名があるかは不明なので、行全体で部分一致）
-    """
     wanted = [s for s in (station_names or []) if s]
     if not wanted:
         return []
-
     picked = []
     for r in body:
         joined = " ".join(r)
@@ -289,20 +330,14 @@ def _filter_rows_by_station_names(header: List[str], body: List[List[str]], stat
 
 
 def _rows_to_aligned_text(header: List[str], rows: List[List[str]], max_rows: int = 30) -> str:
-    """
-    等幅表示用に整形したテキストを作る（Notion code block用）
-    """
     if not header:
         return ""
-
-    # 行を header 長に揃える
     cols = len(header)
     norm_rows = []
     for r in rows[:max_rows]:
         rr = (r + [""] * cols)[:cols]
         norm_rows.append(rr)
 
-    # 幅
     widths = [len(h) for h in header]
     for r in norm_rows:
         for i, v in enumerate(r):
@@ -318,11 +353,6 @@ def _rows_to_aligned_text(header: List[str], rows: List[List[str]], max_rows: in
 
 
 def _rows_to_csv_bytes(header: List[str], rows: List[List[str]]) -> bytes:
-    """
-    UTF-8 CSV（Excelでも読めるよう BOM 付き）
-    """
-    import csv
-
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     if header:
@@ -330,15 +360,63 @@ def _rows_to_csv_bytes(header: List[str], rows: List[List[str]]) -> bytes:
 
     cols = len(header) if header else None
     for r in rows:
-        if cols:
-            rr = (r + [""] * cols)[:cols]
-        else:
-            rr = r
+        rr = (r + [""] * cols)[:cols] if cols else r
         w.writerow(rr)
 
-    text = buf.getvalue()
-    # BOM付きUTF-8
-    return ("\ufeff" + text).encode("utf-8")
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+def _fetch_and_parse_amedas(url: str, station_names: List[str]) -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
+    """
+    returns: (excerpt_text, csv_bytes, error)
+    """
+    html, last_mod, st = fetch_html_content(url, auth_required=True)
+    if not html:
+        return None, None, f"AMEDAS: download failed (HTTP={st})"
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # 1) table を探す
+    rows = _extract_best_table_rows(soup)
+
+    # 2) tableが無ければ iframe/frame を追う
+    if not rows:
+        src = _find_frame_like_src(soup)
+        if src:
+            next_url = _abs_url(url, src)
+            html2, _, st2 = fetch_html_content(next_url, auth_required=True)
+            if html2:
+                soup2 = BeautifulSoup(html2, "html.parser")
+                rows = _extract_best_table_rows(soup2)
+                if not rows and AMEDAS_DEBUG:
+                    return None, None, f"AMEDAS: table not found (after frame) src={next_url}"
+                html = html2  # fallback用
+
+    if rows:
+        header, body = _infer_header_and_body(rows)
+        picked = _filter_rows_by_station_names(header, body, station_names)
+
+        if not picked:
+            # “秋田”を含む行を拾う保険
+            picked = [r for r in body if "秋田" in " ".join(r)]
+        if not picked:
+            picked = body[:10]
+
+        excerpt = f"Weathercaster AMeDAS（{', '.join(station_names) or '秋田'}）\nURL: {url}\n\n"
+        excerpt += _rows_to_aligned_text(header, picked, max_rows=30)
+
+        csv_bytes = _rows_to_csv_bytes(header, picked)
+        return excerpt, csv_bytes, None
+
+    # 3) 最終fallback：ページ可視テキストから周辺ブロックを抽出
+    lines = _html_to_lines(html)
+    block = _lines_pick_block(lines, station_names or ["秋田"], window=6, max_lines=80)
+    excerpt = f"Weathercaster AMeDAS（text fallback）\nURL: {url}\n\n" + "\n".join(block)
+
+    # CSVは「行テキストCSV」にしておく（最低限“添付”を成立させる）
+    csv_text = "\n".join(block)
+    csv_bytes = ("\ufeff" + csv_text).encode("utf-8")
+    return excerpt, csv_bytes, None
 
 
 def fetch_akita_amedas() -> Tuple[Optional[str], Optional[bytes], Optional[str], Optional[datetime], Optional[str]]:
@@ -346,52 +424,38 @@ def fetch_akita_amedas() -> Tuple[Optional[str], Optional[bytes], Optional[str],
     returns:
       excerpt_text: Notion本文用（code block）
       csv_bytes:    CSV添付用（秋田抽出）
-      last_mod:     Last-Modified header
+      last_mod:     Last-Modified header（最初のURLのもの）
       lm_dt_utc:    parsed utc dt (if available)
       err:          エラー文言（成功時はNone）
     """
     if not AMEDAS_ENABLE:
         return None, None, None, None, None
 
+    station_names = [_normalize_ws(x) for x in AMEDAS_STATIONS.split(",") if _normalize_ws(x)]
+    if not station_names:
+        station_names = ["秋田"]
+
+    # first try: fuken
     html, last_mod, st = fetch_html_content(AMEDAS_FUKEN_URL, auth_required=True)
     lm_dt_utc = _httpdate_to_utc_dt(last_mod) if last_mod else None
 
-    if not html:
-        return None, None, last_mod, lm_dt_utc, f"AMEDAS: download failed (HTTP={st})"
+    # ここでは html の中身を直接パースせず、共通関数でやり直す（iframe追跡など含む）
+    excerpt, csv_bytes, err = _fetch_and_parse_amedas(AMEDAS_FUKEN_URL, station_names)
+    if not err and excerpt:
+        return excerpt, csv_bytes, last_mod, lm_dt_utc, None
 
-    soup = BeautifulSoup(html, "html.parser")
-    rows = _parse_table_like_rows(soup)
-    if not rows:
-        return None, None, last_mod, lm_dt_utc, "AMEDAS: table not found"
+    # second try: allamedas
+    excerpt2, csv_bytes2, err2 = _fetch_and_parse_amedas(AMEDAS_ALL_URL, station_names)
+    if not err2 and excerpt2:
+        return excerpt2, csv_bytes2, last_mod, lm_dt_utc, None
 
-    header, body = _infer_header_and_body(rows)
-    if not header or not body:
-        return None, None, last_mod, lm_dt_utc, "AMEDAS: table empty"
+    # debug: 先頭の一部をエラーに残す
+    if AMEDAS_DEBUG and html:
+        head = html[:400].replace("\n", " ")
+        return None, None, last_mod, lm_dt_utc, f"AMEDAS: parse failed. (head) {head}"
 
-    station_names = [_normalize_ws(x) for x in AMEDAS_STATIONS.split(",") if _normalize_ws(x)]
-    picked = _filter_rows_by_station_names(header, body, station_names)
+    return None, None, last_mod, lm_dt_utc, err2 or err or "AMEDAS: unknown error"
 
-    # 「秋田」だけにしたい：観測所指定が1つも引っかからない場合は、
-    # 代替として “秋田” を含む行を拾う（県名や観測所名に入っていることが多い）
-    if not picked:
-        fallback = []
-        for r in body:
-            joined = " ".join(r)
-            if "秋田" in joined:
-                fallback.append(r)
-        picked = fallback
-
-    if not picked:
-        # 最後の保険：先頭数行だけでも返して「構造が変わった」ことを検知できるようにする
-        picked = body[:10]
-
-    excerpt_title = " / ".join(station_names) if station_names else "秋田（抽出）"
-    excerpt_text = f"Weathercaster AMeDAS（{excerpt_title}）\nURL: {AMEDAS_FUKEN_URL}\n\n"
-    excerpt_text += _rows_to_aligned_text(header, picked, max_rows=30)
-
-    csv_bytes = _rows_to_csv_bytes(header, picked)
-
-    return excerpt_text, csv_bytes, last_mod, lm_dt_utc, None
 
 
 # ------------------------------------------------------------------
