@@ -58,7 +58,7 @@ NOTION_DB_ID = os.environ.get("NOTION_DATABASE_ID", "").strip()
 # --- Notion property names ---
 PROP_TITLE = os.environ.get("NOTION_PROP_TITLE", "名前")
 PROP_CATEGORY = os.environ.get("NOTION_PROP_CATEGORY", "区分")
-PROP_INITJST = os.environ.get("NOTION_PROP_INIT_JST", "初期時刻（JST）")
+PROP_INITJST = os.environ.get("NOTION_PROP_INIT_JST", "発行基準時刻")
 PROP_MEMO = os.environ.get("NOTION_PROP_MEMO", "メモ")
 
 PROP_R2URL = os.environ.get("NOTION_PROP_R2URL", "R2 URL")
