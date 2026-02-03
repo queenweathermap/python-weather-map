@@ -262,6 +262,56 @@ def append_images(page_or_block_id: str, urls: List[str], *, chunk: int = 50) ->
         r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
         r.raise_for_status()
 
+def append_text(page_or_block_id: str, text: str) -> None:
+    """
+    段落（paragraph）ブロックとしてテキストを追加
+    """
+    if not notion_enabled():
+        return
+    if not text:
+        return
+
+    payload = {
+        "children": [
+            {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{"type": "text", "text": {"content": text}}],
+                },
+            }
+        ]
+    }
+    r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
+    r.raise_for_status()
+
+
+def append_code_block(page_or_block_id: str, code: str, *, language: str = "plain text") -> None:
+    """
+    codeブロックとして追加（表の貼り付けやログ用途）
+    language: "plain text" / "markdown" など
+    """
+    if not notion_enabled():
+        return
+    if not code:
+        return
+
+    payload = {
+        "children": [
+            {
+                "object": "block",
+                "type": "code",
+                "code": {
+                    "rich_text": [{"type": "text", "text": {"content": code}}],
+                    "language": language,
+                },
+            }
+        ]
+    }
+    r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
+    r.raise_for_status()
+
+
 # -----------------------------------------------------------------------------
 # Text / Code / File blocks append (追加)
 # -----------------------------------------------------------------------------
