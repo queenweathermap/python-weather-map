@@ -4,7 +4,9 @@
 #
 # Notion API ユーティリティ
 # - DBへ1行（=ページ）を作る: create_db_row()
-# - ページ配下にブロック追加: append_heading(), append_toggle(), append_images()
+# - ページ配下にブロック追加:
+#     append_heading(), append_toggle(), append_images(),
+#     append_text(), append_code_block(), append_files(), append_bookmark()
 # - 代表画像をカバーにする: set_page_cover()
 #
 # 必要な環境変数
@@ -30,8 +32,9 @@
 from __future__ import annotations
 
 import os
-import requests
 from typing import List, Optional, Dict, Any
+
+import requests
 
 
 NOTION_VERSION = "2022-06-28"
@@ -127,14 +130,9 @@ def create_db_row(
         _prop_init_jst(): {"date": {"start": init_jst_iso}},
     }
 
-    # memo (rich_text)
     if memo:
         props[_prop_memo()] = {"rich_text": [{"type": "text", "text": {"content": memo}}]}
-    else:
-        # 空でもプロパティを作っているDBなら問題ないが、無くてもOK
-        pass
 
-    # optional
     if rjtd:
         props[_prop_rjtd()] = {"rich_text": [{"type": "text", "text": {"content": rjtd}}]}
     if prefix:
@@ -165,9 +163,7 @@ def set_page_cover(page_id: str, image_url: str) -> None:
     if not image_url:
         return
 
-    payload = {
-        "cover": {"type": "external", "external": {"url": image_url}},
-    }
+    payload = {"cover": {"type": "external", "external": {"url": image_url}}}
     r = requests.patch(f"{API_BASE}/pages/{page_id}", headers=_headers(), json=payload, timeout=60)
     r.raise_for_status()
 
@@ -178,9 +174,10 @@ def set_page_cover(page_id: str, image_url: str) -> None:
 def append_heading(page_or_block_id: str, text: str, *, level: int = 2) -> None:
     """
     見出しブロック（heading_2 / heading_3）を追加
-    ※ page_id でも block_id でもOK（/blocks/{id}/children）
     """
     if not notion_enabled():
+        return
+    if not text:
         return
 
     if level not in (2, 3):
@@ -192,9 +189,7 @@ def append_heading(page_or_block_id: str, text: str, *, level: int = 2) -> None:
             {
                 "object": "block",
                 "type": t,
-                t: {
-                    "rich_text": [{"type": "text", "text": {"content": text}}],
-                },
+                t: {"rich_text": [{"type": "text", "text": {"content": text}}]},
             }
         ]
     }
@@ -208,6 +203,8 @@ def append_toggle(page_or_block_id: str, title: str) -> Optional[str]:
     toggleブロックを追加し、その block_id を返す
     """
     if not notion_enabled():
+        return None
+    if not title:
         return None
 
     payload = {
@@ -239,115 +236,29 @@ def append_images(page_or_block_id: str, urls: List[str], *, chunk: int = 50) ->
     if not notion_enabled():
         return
 
-    urls = [u for u in urls if u]
+    urls = [u for u in (urls or []) if u]
     if not urls:
         return
 
     for i in range(0, len(urls), chunk):
         part = urls[i:i + chunk]
-        children = []
-        for u in part:
-            children.append(
-                {
-                    "object": "block",
-                    "type": "image",
-                    "image": {
-                        "type": "external",
-                        "external": {"url": u},
-                    },
-                }
-            )
+        children = [
+            {
+                "object": "block",
+                "type": "image",
+                "image": {"type": "external", "external": {"url": u}},
+            }
+            for u in part
+        ]
 
         payload = {"children": children}
         r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
         r.raise_for_status()
 
 
-def append_bookmark(page_or_block_id: str, url: str, *, caption: str = "") -> None:
-    """
-    ブックマーク（カード）を追加
-    """
-    if not notion_enabled():
-        return
-    if not url:
-        return
-
-    block = {
-        "object": "block",
-        "type": "bookmark",
-        "bookmark": {
-            "url": url,
-        },
-    }
-
-    # caption は任意（表示したい時だけ）
-    if caption:
-        block["bookmark"]["caption"] = [
-            {"type": "text", "text": {"content": caption}}
-        ]
-
-    payload = {"children": [block]}
-    r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
-    r.raise_for_status()
-
-
-def append_text(page_or_block_id: str, text: str) -> None:
+def append_text(page_or_block_id: str, text: str, *, chunk_chars: int = 1800) -> None:
     """
     段落（paragraph）ブロックとしてテキストを追加
-    """
-    if not notion_enabled():
-        return
-    if not text:
-        return
-
-    payload = {
-        "children": [
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [{"type": "text", "text": {"content": text}}],
-                },
-            }
-        ]
-    }
-    r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
-    r.raise_for_status()
-
-
-def append_code_block(page_or_block_id: str, code: str, *, language: str = "plain text") -> None:
-    """
-    codeブロックとして追加（表の貼り付けやログ用途）
-    language: "plain text" / "markdown" など
-    """
-    if not notion_enabled():
-        return
-    if not code:
-        return
-
-    payload = {
-        "children": [
-            {
-                "object": "block",
-                "type": "code",
-                "code": {
-                    "rich_text": [{"type": "text", "text": {"content": code}}],
-                    "language": language,
-                },
-            }
-        ]
-    }
-    r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
-    r.raise_for_status()
-
-
-# -----------------------------------------------------------------------------
-# Text / Code / File blocks append (追加)
-# -----------------------------------------------------------------------------
-def append_paragraph(page_or_block_id: str, text: str, *, chunk_chars: int = 1800) -> None:
-    """
-    段落（paragraph）を追加
-    - Notionのrich_textは長すぎると落ちるので、適度に分割
     """
     if not notion_enabled():
         return
@@ -363,25 +274,17 @@ def append_paragraph(page_or_block_id: str, text: str, *, chunk_chars: int = 180
                 {
                     "object": "block",
                     "type": "paragraph",
-                    "paragraph": {
-                        "rich_text": [{"type": "text", "text": {"content": part}}],
-                    },
+                    "paragraph": {"rich_text": [{"type": "text", "text": {"content": part}}]},
                 }
             ]
         }
-        r = requests.patch(
-            f"{API_BASE}/blocks/{page_or_block_id}/children",
-            headers=_headers(),
-            json=payload,
-            timeout=60
-        )
+        r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
         r.raise_for_status()
 
 
 def append_code_block(page_or_block_id: str, text: str, *, language: str = "plain text", chunk_chars: int = 1800) -> None:
     """
-    コードブロック（code）を追加
-    - 表の抜粋を等幅で貼る用途に最適
+    codeブロックとして追加（表の貼り付けやログ用途）
     """
     if not notion_enabled():
         return
@@ -390,7 +293,7 @@ def append_code_block(page_or_block_id: str, text: str, *, language: str = "plai
     if not text:
         return
 
-    # Notionのcodeは1ブロックのrich_text制限が厳しいので分割
+    # code も長いと落ちるので分割
     for i in range(0, len(text), chunk_chars):
         part = text[i:i + chunk_chars]
         payload = {
@@ -405,12 +308,7 @@ def append_code_block(page_or_block_id: str, text: str, *, language: str = "plai
                 }
             ]
         }
-        r = requests.patch(
-            f"{API_BASE}/blocks/{page_or_block_id}/children",
-            headers=_headers(),
-            json=payload,
-            timeout=60
-        )
+        r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
         r.raise_for_status()
 
 
@@ -430,29 +328,44 @@ def append_files(page_or_block_id: str, files: List[dict], *, chunk: int = 20) -
         part = files[i:i + chunk]
         children = []
         for f in part:
-            url = f["url"]
+            url = (f.get("url") or "").strip()
             name = (f.get("name") or "").strip()
 
-            # Notionのfileブロック（external）
             file_obj = {
                 "object": "block",
                 "type": "file",
-                "file": {
-                    "type": "external",
-                    "external": {"url": url},
-                },
+                "file": {"type": "external", "external": {"url": url}},
             }
-            # キャプションにファイル名を入れておく（一覧性UP）
             if name:
                 file_obj["file"]["caption"] = [{"type": "text", "text": {"content": name}}]
 
             children.append(file_obj)
 
         payload = {"children": children}
-        r = requests.patch(
-            f"{API_BASE}/blocks/{page_or_block_id}/children",
-            headers=_headers(),
-            json=payload,
-            timeout=60
-        )
+        r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
         r.raise_for_status()
+
+
+def append_bookmark(page_or_block_id: str, url: str, *, caption: str = "") -> None:
+    """
+    ブックマーク（リンクカード）を追加
+    """
+    if not notion_enabled():
+        return
+
+    url = (url or "").strip()
+    if not url:
+        return
+
+    block: Dict[str, Any] = {
+        "object": "block",
+        "type": "bookmark",
+        "bookmark": {"url": url},
+    }
+
+    if caption:
+        block["bookmark"]["caption"] = [{"type": "text", "text": {"content": caption}}]
+
+    payload = {"children": [block]}
+    r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
+    r.raise_for_status()
