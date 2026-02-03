@@ -3,7 +3,8 @@ name: Run JMA Weathercaster
 
 on:
   schedule:
-    - cron: "30 4 * * *"   # 13:30 JST = 04:30 UTC
+    - cron: "30 19 * * *"  # 04:30 JST
+    - cron: "30 7 * * *"  # 16:30 JST
   workflow_dispatch: {}
 
 concurrency:
