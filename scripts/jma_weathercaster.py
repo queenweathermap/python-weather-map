@@ -295,9 +295,9 @@ def notion_write_db(
     if errors:
         memo_lines.append("ERROR:")
         memo_lines += [f"- {e}" for e in errors]
-    if issued_guess_utc:
-        memo_lines.append(f"issued_guess_utc={issued_guess_utc.isoformat()}")
+    
     memo = "\n".join(memo_lines)
+
 
     page_id = _create_db_row_compat(
         title=title,
