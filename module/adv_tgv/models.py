@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List, Callable
+from typing import Dict, List
 
 
 @dataclass(frozen=True)
