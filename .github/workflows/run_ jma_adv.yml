@@ -65,7 +65,8 @@ jobs:
       # DBプロパティ名（必要なら上書き）
       NOTION_PROP_TITLE: "名前"
       NOTION_PROP_CATEGORY: "区分"
-      NOTION_PROP_INIT_JST: "実行時刻"
+      NOTION_PROP_MODEL: "区分"      # Weathercaster互換
+      NOTION_PROP_INIT_JST: "発行基準時刻"
       NOTION_PROP_RJTD: "RJTD"
       NOTION_PROP_PREFIX: "prefix"
       NOTION_PROP_R2URL: "R2 URL"
