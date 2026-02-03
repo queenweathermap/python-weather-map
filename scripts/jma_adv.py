@@ -395,7 +395,7 @@ def main() -> None:
         title = f"ADV TGV / {init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
         page_id = create_db_row(
             title=title,
-            category="ADV",
+            category="ADV TGV",
             init_jst_iso=init_jst_iso,
             memo="",
             rjtd=rjtd_for_title,
