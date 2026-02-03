@@ -237,4 +237,5 @@ yarl==1.20.1
 requests
 boto3
 pillow
-
+beautifulsoup4
+lxml
