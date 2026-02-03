@@ -421,6 +421,14 @@ def main() -> None:
         autogen=True,
     )
     print(f"[OK] Notion DB row created: {page_id}")
+    
+    # ===== ここから追加 =====
+    if GUIDE_ENABLE:
+        append_heading(page_id, "ガイダンス（リンク）", level=2)
+        for caption, url in GUIDE_LINKS:
+            append_bookmark(page_id, url, caption=caption)
+    # ===== ここまで =====
+
 
     first_cover_url: Optional[str] = None
 
@@ -481,14 +489,8 @@ def main() -> None:
 
             print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
 
-    # =============================================================================
-    # 2) ガイダンス（リンクカードのみ）
-    # =============================================================================
-    if GUIDE_ENABLE:
-        g_toggle = append_toggle(page_id, "ガイダンス（リンク）")
-        g_parent = g_toggle or page_id
-        for caption, url in GUIDE_LINKS:
-            append_bookmark(g_parent, url, caption=caption)
+
+
 
     print("\n=== Done ADV JMA TGV ===")
 
