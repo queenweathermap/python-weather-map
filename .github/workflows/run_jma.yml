@@ -76,8 +76,8 @@ jobs:
 
       - name: Install Python deps
         run: |
-          python -m pip install -U pip
-          pip install requests pdf2image pillow
+          python -m pip install --upgrade pip
+          pip install boto3 pdf2image pillow requests
 
       - name: Run JMA Weathercaster
         run: python scripts/jma_weathercaster.py
