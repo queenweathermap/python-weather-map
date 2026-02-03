@@ -23,6 +23,8 @@
 #   NOTION_PROP_MEMO="メモ"
 #   NOTION_PROP_R2URL="R2 URL"
 #   NOTION_PROP_AUTOGEN="自動生成"
+#   NOTION_PROP_RJTD="RJTD"
+#   NOTION_PROP_PREFIX="prefix"
 # =============================================================================
 
 from __future__ import annotations
@@ -88,6 +90,14 @@ def _prop_autogen() -> str:
     return _env("NOTION_PROP_AUTOGEN", "自動生成")
 
 
+def _prop_rjtd() -> str:
+    return _env("NOTION_PROP_RJTD", "RJTD")
+
+
+def _prop_prefix() -> str:
+    return _env("NOTION_PROP_PREFIX", "prefix")
+
+
 # -----------------------------------------------------------------------------
 # DB row create
 # -----------------------------------------------------------------------------
@@ -97,6 +107,8 @@ def create_db_row(
     category: str,                 # "ADV" or "Weathercaster"
     init_jst_iso: str,             # ISO8601 with timezone, e.g. "2026-02-03T09:00:00+09:00"
     memo: str = "",
+    rjtd: str = "",
+    prefix: str = "",
     r2_url: str = "",
     autogen: bool = True,
     icon_emoji: str = "🗺️",
@@ -123,6 +135,11 @@ def create_db_row(
         pass
 
     # optional
+    if rjtd:
+        props[_prop_rjtd()] = {"rich_text": [{"type": "text", "text": {"content": rjtd}}]}
+    if prefix:
+        props[_prop_prefix()] = {"rich_text": [{"type": "text", "text": {"content": prefix}}]}
+
     if r2_url:
         props[_prop_r2url()] = {"url": r2_url}
     if autogen is not None:
