@@ -2,7 +2,24 @@
 # =============================================================================
 # scripts/jma_adv.py
 #
-# ADV TGV: 取得 → JPG化(3up) → R2 → Notion(DB) → Mail/Slack
+# ADV TGV: 取得 → JPG化(3up) → R2 → Notion(DB)
+# - Notion / R2 のみ（Slack/Mail完全撤去）
+# - GSM / MSM / LFM はトグルで格納（モデル→アイテムの二段トグル）
+#
+# 追加（今回）:
+# - ADV advisor ガイダンス表（3種）を取得し、秋田だけ抜粋をNotion本文に追加（トグルOK）
+# - 3種の「秋田抽出CSV」をR2へ置き、Notion本文に file 添付
+#
+# 環境変数（主なもの）
+# - JMA_AUTH_BASIC or (JMA_ADV_USER/JMA_ADV_PASS)
+# - TGV_USE_AUTH=1
+# - R2_ENABLE=1
+# - R2_PREFIX=adv-tgv（推奨）
+# - NOTION_ENABLE=1 / NOTION_TOKEN / NOTION_DATABASE_ID
+#
+# ガイダンス
+# - GUIDE_ENABLE=1
+# - GUIDE_STATION=秋田（基本これでOK）
 # =============================================================================
 
 import sys
@@ -16,13 +33,15 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import os
 import io
+import re
+import csv
 import base64
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional, Sequence
 
 import requests
+from bs4 import BeautifulSoup
 from PIL import Image
-
 
 from r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
@@ -31,6 +50,8 @@ from module.utils.notion_utils import (
     append_heading,
     append_toggle,
     append_images,
+    append_code_block,
+    append_files,
 )
 
 Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
@@ -67,7 +88,7 @@ def env_bool(name: str, default: str = "0") -> bool:
 
 
 # =============================================================================
-# Auth
+# Auth (TGV用)
 # =============================================================================
 def make_basic_auth_header(user: str, password: str) -> str:
     token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
@@ -97,19 +118,6 @@ def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
 
 
 # =============================================================================
-# Delivery (Notion/R2 only)
-# =============================================================================
-
-def slack_enabled() -> bool:
-    return False
-
-
-def slack_notify(text: str) -> None:
-    # Slack is fully disabled in Notion-only mode
-    return
-
-
-# =============================================================================
 # HTTP
 # =============================================================================
 def headers_for(referer: str) -> dict:
@@ -120,6 +128,7 @@ def headers_for(referer: str) -> dict:
         "Pragma": "no-cache",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
+    # requests.get(auth=...) を使わない運用（JMA_AUTH_BASICのみ）にも対応
     if use_auth_enabled() and (get_requests_auth_tuple() is None):
         h["Authorization"] = get_auth_basic_header()
     return h
@@ -128,6 +137,11 @@ def headers_for(referer: str) -> dict:
 def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
     auth = get_requests_auth_tuple()
     return requests.get(url, headers=headers_for(referer), auth=auth, timeout=timeout)
+
+
+def http_get_text(url: str, *, timeout: int = 60) -> requests.Response:
+    headers = {"User-Agent": "adv-tgv-bot/1.0"}
+    return requests.get(url, headers=headers, timeout=timeout)
 
 
 # =============================================================================
@@ -181,7 +195,6 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
         return atts
 
     joined: List[Attachment] = []
-
     try:
         with Image.open(io.BytesIO(atts[0][1])) as im0:
             base_w, base_h = im0.size
@@ -223,7 +236,7 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
 
 
 # =============================================================================
-# URL rules
+# URL rules (TGV)
 # =============================================================================
 def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
     dt = init_dt_utc.astimezone(timezone.utc).replace(minute=minute, second=0, microsecond=0)
@@ -248,7 +261,6 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 # Model configs (externalized)
 # =============================================================================
 from module.adv_tgv.models import load_model_groups, Item, ModelCfg
-
 
 
 # =============================================================================
@@ -312,6 +324,7 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
         status, content, ctype = fetch_png(url, cfg.referer)
 
         if status == 200:
+            # 認証がHTMLで返ってくるケース（200でもHTML）
             if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
                 auth_failed = True
                 print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
@@ -360,66 +373,216 @@ def upload_item_images_to_r2(
     return urls
 
 
+def upload_bytes_to_r2(run_prefix: str, filename: str, blob: bytes, content_type: str) -> Optional[str]:
+    if not r2_enabled():
+        return None
+    if not filename or not blob:
+        return None
+    key = f"{run_prefix}/csv/{filename}"
+    put_bytes(key, blob, content_type=content_type)
+    return make_url(key)
+
+
+# =============================================================================
+# Advisor guidance tables (JMA) - 秋田だけ抜粋 + CSV
+# =============================================================================
+GUIDE_ENABLE = env_bool("GUIDE_ENABLE", "1")
+GUIDE_STATION = env_str("GUIDE_STATION", "秋田")  # 基本「秋田」でOK
+
+GUIDE_URLS: Dict[str, str] = {
+    "guid": "https://www.jma.go.jp/bosai/advisor/guid_table.html",
+    "wind": "https://www.jma.go.jp/bosai/advisor/guid_table_wind.html",
+    "cold": "https://www.jma.go.jp/bosai/advisor/cold_table.html",
+}
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").replace("\u3000", " ")).strip()
+
+
+def _find_best_table_rows(soup: BeautifulSoup) -> List[List[str]]:
+    best: List[List[str]] = []
+    best_score = -1
+
+    for t in soup.find_all("table"):
+        rows: List[List[str]] = []
+        for tr in t.find_all("tr"):
+            cells = tr.find_all(["th", "td"])
+            if not cells:
+                continue
+            row = [_norm(c.get_text(" ", strip=True)) for c in cells]
+            if any(x for x in row):
+                rows.append(row)
+        if len(rows) < 2:
+            continue
+
+        col_lens = [len(r) for r in rows]
+        median_cols = sorted(col_lens)[len(col_lens) // 2]
+        score = median_cols * len(rows)
+
+        if score > best_score:
+            best_score = score
+            best = rows
+
+    return best
+
+
+def _split_header_body(rows: List[List[str]]) -> Tuple[List[str], List[List[str]]]:
+    if not rows:
+        return [], []
+    return rows[0], rows[1:]
+
+
+def _pick_rows_by_keyword(body: List[List[str]], keyword: str) -> List[List[str]]:
+    if not keyword:
+        return []
+    out: List[List[str]] = []
+    for r in body:
+        if keyword in " ".join(r):
+            out.append(r)
+    return out
+
+
+def _aligned_text(header: List[str], rows: List[List[str]], max_rows: int = 40) -> str:
+    if not header:
+        return ""
+    cols = len(header)
+    norm_rows: List[List[str]] = []
+    for r in rows[:max_rows]:
+        rr = (r + [""] * cols)[:cols]
+        norm_rows.append(rr)
+
+    widths = [len(h) for h in header]
+    for r in norm_rows:
+        for i, v in enumerate(r):
+            widths[i] = max(widths[i], len(v))
+
+    def fmt_row(r: List[str]) -> str:
+        return " | ".join((v or "").ljust(widths[i]) for i, v in enumerate(r))
+
+    sep = "-+-".join("-" * w for w in widths)
+    out = [fmt_row(header), sep]
+    out += [fmt_row(r) for r in norm_rows]
+    return "\n".join(out)
+
+
+def _csv_bytes(header: List[str], rows: List[List[str]]) -> bytes:
+    sio = io.StringIO()
+    w = csv.writer(sio, lineterminator="\n")
+    if header:
+        w.writerow(header)
+    cols = len(header) if header else None
+    for r in rows:
+        rr = (r + [""] * cols)[:cols] if cols else r
+        w.writerow(rr)
+    return ("\ufeff" + sio.getvalue()).encode("utf-8")  # BOM付き
+
+
+def fetch_guidance_one(kind: str, url: str, station_keyword: str) -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
+    """
+    returns: (excerpt_text_for_codeblock, csv_bytes, error_message)
+    """
+    try:
+        r = http_get_text(url, timeout=60)
+        if r.status_code != 200:
+            return None, None, f"GUIDE({kind}): HTTP{r.status_code}"
+        r.encoding = r.apparent_encoding or r.encoding
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        rows = _find_best_table_rows(soup)
+        if not rows:
+            return None, None, f"GUIDE({kind}): table not found"
+
+        header, body = _split_header_body(rows)
+        picked = _pick_rows_by_keyword(body, station_keyword)
+
+        if not picked:
+            # 構造変化検知用に先頭数行
+            picked = body[:10]
+
+        txt = f"{kind.upper()} / 抜粋キーワード: {station_keyword}\nURL: {url}\n\n"
+        txt += _aligned_text(header, picked, max_rows=40)
+
+        csvb = _csv_bytes(header, picked)
+        return txt, csvb, None
+
+    except Exception as e:
+        return None, None, f"GUIDE({kind}): {type(e).__name__}: {e}"
+
+
+def build_guidance_payloads(station_keyword: str) -> Tuple[Dict[str, str], Dict[str, bytes], List[str]]:
+    """
+    returns:
+      - excerpts: kind -> codeblock text
+      - csvs:     kind -> csv bytes
+      - errors:   list
+    """
+    excerpts: Dict[str, str] = {}
+    csvs: Dict[str, bytes] = {}
+    errors: List[str] = []
+
+    for kind, url in GUIDE_URLS.items():
+        txt, csvb, err = fetch_guidance_one(kind, url, station_keyword)
+        if err:
+            errors.append(err)
+            continue
+        if txt:
+            excerpts[kind] = txt
+        if csvb:
+            csvs[kind] = csvb
+
+    return excerpts, csvs, errors
+
+
 # =============================================================================
 # main
 # =============================================================================
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
 
-    mode = env_str("DELIVERY_MODE", "notion").lower()  # notion only
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
+    r2_prefix = env_str("R2_PREFIX", "adv-tgv").strip().strip("/")
 
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
     print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
-    print(f"[DEBUG] DELIVERY_MODE={mode} (notion-only)")
     print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
     print(f"[DEBUG] R2_ENABLE={os.getenv('R2_ENABLE','')} NOTION_ENABLE={os.getenv('NOTION_ENABLE','')}")
+    print(f"[DEBUG] R2_PREFIX={r2_prefix}")
+    print(f"[DEBUG] GUIDE_ENABLE={GUIDE_ENABLE} GUIDE_STATION={GUIDE_STATION}")
 
     groups = load_model_groups()
 
     # --- DB row create (Notion) ---
-    page_id = None
-    run_prefix = None
-    first_cover_url = ""
+    page_id: Optional[str] = None
+    run_prefix: Optional[str] = None
+    first_cover_url: str = ""
 
-    try:
-        init_dt_for_title = find_working_init_dt("GSM", groups["GSM"], max_back_hours=search_hours)
-        rjtd_for_title = fmt_rjtd(init_dt_for_title, groups["GSM"].rjtd_minute)
+    # ページの基準（タイトル/プロパティ用）は GSM の init から取る（従来踏襲）
+    init_dt_for_title = find_working_init_dt("GSM", groups["GSM"], max_back_hours=search_hours)
+    rjtd_for_title = fmt_rjtd(init_dt_for_title, groups["GSM"].rjtd_minute)
 
-        # 初期時刻（JST）を Date(時刻あり) として入れる
-        jst = timezone(timedelta(hours=9))
-        init_jst_iso = init_dt_for_title.astimezone(jst).isoformat()
+    jst = timezone(timedelta(hours=9))
+    init_jst_iso = init_dt_for_title.astimezone(jst).isoformat()
 
-        run_prefix = f"adv-tgv/{init_dt_for_title.strftime('%Y%m%d')}/RJTD_{rjtd_for_title}"
+    day = init_dt_for_title.strftime("%Y%m%d")
+    run_prefix = f"{r2_prefix}/{day}/RJTD_{rjtd_for_title}"
 
-        title = f"ADV TGV / {init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
-        page_id = create_db_row(
-            title=title,
-            category="ADV TGV",
-            init_jst_iso=init_jst_iso,
-            memo="",
-            rjtd=rjtd_for_title,
-            prefix=run_prefix,
-            r2_url="",
-            autogen=True,
-        )
+    title = f"ADV TGV / {init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
+    page_id = create_db_row(
+        title=title,
+        category="ADV TGV",
+        init_jst_iso=init_jst_iso,
+        memo="",
+        rjtd=rjtd_for_title,
+        prefix=run_prefix,
+        r2_url="",
+        autogen=True,
+    )
+    print(f"[OK] Notion DB row created: {page_id}")
 
-
-        print(f"[OK] Notion DB row created: {page_id}")
-    except Exception as e:
-        import traceback
-        print("[WARN] Notion DB row create skipped (full):")
-        traceback.print_exc()
-
-        # NotionのHTTPエラーなら本文を出す（400の詳細がここに入る）
-        try:
-            import requests
-            if isinstance(e, requests.HTTPError) and e.response is not None:
-                print("[WARN] Notion response status:", e.response.status_code)
-                print("[WARN] Notion response body:", e.response.text[:2000])
-        except Exception:
-            pass
-
+    # =============================================================================
+    # 1) GSM/MSM/LFM（トグル）
+    # =============================================================================
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
         print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
@@ -427,75 +590,85 @@ def main() -> None:
         try:
             init_dt = find_working_init_dt(model_name, cfg, max_back_hours=search_hours)
         except Exception as e:
-            msg = f"❌ ADV TGV {model_name}: INIT not found / auth error\n{type(e).__name__}: {e}"
-            print(msg)
-            slack_notify(msg)
+            print(f"[NG] {model_name}: INIT not found / auth error {type(e).__name__}: {e}")
             continue
 
-        model_total = 0
-        model_auth_failed = False
-
+        model_toggle_id: Optional[str] = None
         if page_id:
-            try:
-                append_heading(page_id, f"{model_name}", level=2)
-            except Exception as e:
-                print(f"[WARN] notion append heading failed: {e}")
+            # モデル単位トグル
+            model_toggle_id = append_toggle(page_id, f"{model_name}")
+            if not model_toggle_id:
+                # 保険：トグルが作れない場合は見出し
+                append_heading(page_id, model_name, level=2)
 
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
             if auth_failed:
-                model_auth_failed = True
-                msg = f"❌ ADV TGV {model_name} {item.label}: auth error (401/403 or HTTP200-HTML)"
-                print(msg)
-                slack_notify(msg)
+                print(f"[NG] {model_name} {item.label}: auth error")
                 break
 
             if not atts:
                 print(f"[WARN] {model_name} {item.label}: no images")
                 continue
 
-            model_total += len(atts)
-
-            # --- R2 -> Notion(toggle) ---
             if page_id and run_prefix and r2_enabled():
-                try:
-                    urls = upload_item_images_to_r2(
-                        run_prefix=run_prefix,
-                        model_name=model_name,
-                        item_label=item.label,
-                        atts=atts,
-                    )
+                urls = upload_item_images_to_r2(
+                    run_prefix=run_prefix,
+                    model_name=model_name,
+                    item_label=item.label,
+                    atts=atts,
+                )
 
-                    # 初回だけ代表画像をカバーにする（最初のURL）
-                    if (not first_cover_url) and urls:
-                        first_cover_url = urls[0]
-                        set_page_cover(page_id, first_cover_url)
+                # cover：初回のみ
+                if (not first_cover_url) and urls:
+                    first_cover_url = urls[0]
+                    set_page_cover(page_id, first_cover_url)
 
-                    # toggleの中に画像展開
-                    t_title = f"{model_name} / {item.label}  ({len(urls)} images)"
-                    toggle_id = append_toggle(page_id, t_title)  # returns block_id
+                # item トグル（モデルトグルの下）
+                parent = model_toggle_id or page_id
+                item_title = f"{item.label}  ({len(urls)} images)"
+                item_toggle_id = append_toggle(parent, item_title)
 
-                    if toggle_id:
-                        append_images(toggle_id, urls, chunk=30)
-                    else:
-                        # 保険：トグル作れないなら直下に貼る
-                        append_images(page_id, urls, chunk=30)
+                if item_toggle_id:
+                    append_images(item_toggle_id, urls, chunk=30)
+                else:
+                    append_images(parent, urls, chunk=30)
 
-                    print(f"[OK] R2+Notion(toggle): {model_name} {item.label} urls={len(urls)}")
+                print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
 
-                except Exception as e:
-                    msg = f"❌ R2/Notion FAILED {model_name} {item.label}\n{type(e).__name__}: {e}"
-                    print(msg)
-                    slack_notify(msg)
+    # =============================================================================
+    # 2) ガイダンス（トグル）— 秋田だけ抜粋 + CSV添付
+    # =============================================================================
+    if page_id and run_prefix and GUIDE_ENABLE:
+        g_toggle = append_toggle(page_id, f"ガイダンス（{GUIDE_STATION} 抜粋）")
+        g_parent = g_toggle or page_id
 
-        if (not model_auth_failed) and (model_total == 0):
-            msg = (
-                f"❌ ADV TGV {model_name}: no images fetched (model total=0)\n"
-                f"RJTD={fmt_rjtd(init_dt, cfg.rjtd_minute)}"
-            )
-            print(msg)
-            slack_notify(msg)
+        excerpts, csvs, g_errors = build_guidance_payloads(GUIDE_STATION)
+
+        # 抜粋（code block）
+        if excerpts:
+            for kind in ("guid", "wind", "cold"):
+                if kind in excerpts:
+                    append_heading(g_parent, kind.upper(), level=3)
+                    append_code_block(g_parent, excerpts[kind], language="plain text")
+
+        # CSV（R2→Notion file）
+        file_blocks: List[dict] = []
+        for kind, csvb in csvs.items():
+            fname = f"{kind}_{GUIDE_STATION}.csv".replace(" ", "_")
+            url = upload_bytes_to_r2(run_prefix, fname, csvb, content_type="text/csv")
+            if url:
+                file_blocks.append({"url": url, "name": fname})
+
+        if file_blocks:
+            append_heading(g_parent, "CSV（添付）", level=3)
+            append_files(g_parent, file_blocks)
+
+        # エラーはガイダンス内に残す（Notionに可視化）
+        if g_errors:
+            append_heading(g_parent, "取得エラー", level=3)
+            append_code_block(g_parent, "\n".join(g_errors), language="plain text")
 
     print("\n=== Done ADV JMA TGV ===")
 
