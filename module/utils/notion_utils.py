@@ -262,6 +262,35 @@ def append_images(page_or_block_id: str, urls: List[str], *, chunk: int = 50) ->
         r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
         r.raise_for_status()
 
+
+def append_bookmark(page_or_block_id: str, url: str, *, caption: str = "") -> None:
+    """
+    ブックマーク（カード）を追加
+    """
+    if not notion_enabled():
+        return
+    if not url:
+        return
+
+    block = {
+        "object": "block",
+        "type": "bookmark",
+        "bookmark": {
+            "url": url,
+        },
+    }
+
+    # caption は任意（表示したい時だけ）
+    if caption:
+        block["bookmark"]["caption"] = [
+            {"type": "text", "text": {"content": caption}}
+        ]
+
+    payload = {"children": [block]}
+    r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
+    r.raise_for_status()
+
+
 def append_text(page_or_block_id: str, text: str) -> None:
     """
     段落（paragraph）ブロックとしてテキストを追加
