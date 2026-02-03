@@ -24,8 +24,6 @@ from typing import Dict, List, Tuple, Optional, Sequence
 import requests
 from PIL import Image
 
-from module.utils.mail_utils import send_mail
-from module.utils.slack_utils import send_slack_text, upload_bytes_slack
 
 from r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
@@ -100,22 +98,16 @@ def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
 
 
 # =============================================================================
-# Slack
+# Delivery (Notion/R2 only)
 # =============================================================================
+
 def slack_enabled() -> bool:
-    return bool(env_str("SLACK_BOT_TOKEN")) and bool(env_str("SLACK_CHANNEL_ID"))
+    return False
 
 
 def slack_notify(text: str) -> None:
-    if not slack_enabled():
-        return
-    ch = env_str("SLACK_CHANNEL_ID")
-    try:
-        limit = 3500
-        for i in range(0, len(text), limit):
-            send_slack_text(channel=ch, message=text[i:i + limit])
-    except Exception as e:
-        print(f"[WARN] Slack notify failed: {e}")
+    # Slack is fully disabled in Notion-only mode
+    return
 
 
 # =============================================================================
@@ -457,58 +449,17 @@ def upload_item_images_to_r2(
 
 
 # =============================================================================
-# Mail / Slack
-# =============================================================================
-def send_item_mail(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment]) -> None:
-    prefix = env_str("MAIL_SUBJECT_PREFIX", "JMA")
-    rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
-    subject = f"{prefix} ADV TGV {model_name} {item.label} RJTD={rjtd}"
-
-    body = "\n".join([
-        "JMA 防災情報アドバイザー向け 専門天気図（tgv）",
-        f"model: {model_name}",
-        f"chart: {item.label}",
-        f"RJTD : {rjtd} (UTC)",
-        f"files: {len(atts)}",
-        "",
-        "※ 個人利用・非公開",
-        "※ GitHub Actions 実行",
-    ])
-
-    send_mail(subject=subject, body=body, attachment_blobs=atts, is_html=False, slack_mode="off")
-    print(f"[OK] mail sent: {model_name} {item.label} files={len(atts)}")
-
-
-def send_item_slack(model_name: str, item: Item, cfg: ModelCfg, init_dt: datetime, atts: List[Attachment], chunk_size: int) -> None:
-    if not slack_enabled():
-        return
-
-    channel = env_str("SLACK_CHANNEL_ID")
-    rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
-    header = f"🗺️ ADV TGV {model_name} / {item.label}  RJTD={rjtd}  files={len(atts)}"
-
-    pairs = [(fn, blob) for (fn, blob, _mime) in atts]
-    for i in range(0, len(pairs), chunk_size):
-        chunk = pairs[i:i + chunk_size]
-        comment = header if i == 0 else f"🗺️ ADV TGV {model_name} / {item.label}（続き {i//chunk_size + 1}）"
-        upload_bytes_slack(channel=channel, files=chunk, initial_comment=comment)
-
-    posts = (len(pairs) + chunk_size - 1) // chunk_size
-    print(f"[OK] slack sent: {model_name} {item.label} posts={posts}")
-
-
-# =============================================================================
 # main
 # =============================================================================
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
 
-    mode = env_str("DELIVERY_MODE", "both").lower()
+    mode = env_str("DELIVERY_MODE", "notion").lower()  # notion only
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
 
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
     print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
-    print(f"[DEBUG] DELIVERY_MODE={mode} slack_enabled={slack_enabled()}")
+    print(f"[DEBUG] DELIVERY_MODE={mode} (notion-only)")
     print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
     print(f"[DEBUG] R2_ENABLE={os.getenv('R2_ENABLE','')} NOTION_ENABLE={os.getenv('NOTION_ENABLE','')}")
 
@@ -527,21 +478,20 @@ def main() -> None:
         jst = timezone(timedelta(hours=9))
         init_jst_iso = init_dt_for_title.astimezone(jst).isoformat()
 
-        title = f"ADV TGV RJTD={rjtd_for_title} (UTC) / {init_dt_for_title.strftime('%Y-%m-%d %H:%M')}Z"
+        run_prefix = f"adv-tgv/{init_dt_for_title.strftime('%Y%m%d')}/RJTD_{rjtd_for_title}"
+
+        title = f"ADV TGV / {init_dt_for_title.astimezone(jst).strftime('%Y-%m-%d %H:%M')} JST"
         page_id = create_db_row(
             title=title,
             category="ADV",
             init_jst_iso=init_jst_iso,
             memo="",
+            rjtd=rjtd_for_title,
+            prefix=run_prefix,
             r2_url="",
             autogen=True,
         )
 
-        run_prefix = f"adv-tgv/{init_dt_for_title.strftime('%Y%m%d')}/RJTD_{rjtd_for_title}"
-
-        if page_id:
-            append_heading(page_id, f"RJTD={rjtd_for_title} (UTC)", level=2)
-            append_heading(page_id, f"prefix: {run_prefix}", level=3)
 
         print(f"[OK] Notion DB row created: {page_id}")
     except Exception as e:
@@ -613,22 +563,6 @@ def main() -> None:
 
                 except Exception as e:
                     msg = f"❌ R2/Notion FAILED {model_name} {item.label}\n{type(e).__name__}: {e}"
-                    print(msg)
-                    slack_notify(msg)
-
-            if mode in ("email", "both"):
-                try:
-                    send_item_mail(model_name, item, cfg, init_dt, atts)
-                except Exception as e:
-                    msg = f"❌ ADV TGV {model_name} {item.label}: MAIL FAILED\n{type(e).__name__}: {e}"
-                    print(msg)
-                    slack_notify(msg)
-
-            if mode in ("slack", "both"):
-                try:
-                    send_item_slack(model_name, item, cfg, init_dt, atts, chunk_size=cfg.slack_chunk)
-                except Exception as e:
-                    msg = f"❌ ADV TGV {model_name} {item.label}: SLACK FAILED\n{type(e).__name__}: {e}"
                     print(msg)
                     slack_notify(msg)
 
