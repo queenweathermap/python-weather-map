@@ -439,12 +439,11 @@ def main() -> None:
             print(f"[NG] {model_name}: INIT not found / auth error {type(e).__name__}: {e}")
             continue
 
-        # ✅ 見出し（タイトル）を作って、その下にぶら下げたい
-        # notion_utils.append_heading が block_id を返す実装ならそれを使う
+        # ✅ モデルは見出し（ページ直下）
+        #    ※ heading ブロックを親にして子ブロック追加すると 400 になることがあるため、
+        #      ネストは作らず、見た目として「見出し→続くブロック」を同階層に並べる。
+        append_heading(page_id, model_name, level=2)
         model_parent: str = page_id
-        hid = append_heading(page_id, model_name, level=2)
-        if hid:
-            model_parent = hid
 
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
