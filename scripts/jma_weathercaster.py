@@ -7,7 +7,6 @@
 # - Slack / Mail 完全撤去
 #
 # DELIVERY_MODE=notion 前提
-#
 # =============================================================================
 
 from __future__ import annotations
@@ -15,8 +14,9 @@ from __future__ import annotations
 import io
 import os
 import shutil
-from datetime import datetime, timezone
-from typing import List, Tuple, Optional, Dict, Any
+from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
+from typing import List, Tuple, Optional
 
 import requests
 from pdf2image import convert_from_bytes
@@ -26,11 +26,10 @@ from r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
     notion_enabled,
     create_db_row,
-    update_page_cover,
+    set_page_cover,
     append_heading,
-    append_image,
-    create_toggle_block,
-    append_images_to_block,
+    append_toggle,
+    append_images,
 )
 
 # --------- 設定 ---------
@@ -53,7 +52,6 @@ JPEG_DPI = int(os.environ.get("JPEG_DPI", "200"))
 JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
-NOTION_DB_ID = os.environ.get("NOTION_DATABASE_ID", "").strip()
 
 # --- Notion property names ---
 PROP_TITLE = os.environ.get("NOTION_PROP_TITLE", "名前")
@@ -61,39 +59,56 @@ PROP_CATEGORY = os.environ.get("NOTION_PROP_CATEGORY", "区分")
 PROP_INITJST = os.environ.get("NOTION_PROP_INIT_JST", "発行基準時刻")
 PROP_MEMO = os.environ.get("NOTION_PROP_MEMO", "メモ")
 
-PROP_R2URL = os.environ.get("NOTION_PROP_R2URL", "R2 URL")
 PROP_AUTOGEN = os.environ.get("NOTION_PROP_AUTOGEN", "自動生成")
 PROP_RJTD = os.environ.get("NOTION_PROP_RJTD", "RJTD")
 PROP_PREFIX = os.environ.get("NOTION_PROP_PREFIX", "prefix")
+PROP_R2URL = os.environ.get("NOTION_PROP_R2URL", "R2 URL")  # 任意。使わなければ空でOK
 
-Attachment = Tuple[str, bytes, str]
+Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
 
 
 # ------------------------------------------------------------------
 
+def jst_tz():
+    return timezone(timedelta(hours=9))
+
+
 def _now_jst_iso() -> str:
-    jst = timezone(offset=datetime.strptime("+0900", "%z").tzinfo.utcoffset(datetime.now()))
-    return datetime.now(timezone.utc).astimezone(jst).isoformat()
+    return datetime.now(timezone.utc).astimezone(jst_tz()).isoformat()
 
 
-def fetch_pdf_content(name: str) -> Optional[bytes]:
+def _httpdate_to_jst_iso(http_date: str) -> Optional[str]:
+    """
+    Last-Modified などの HTTP-date を JST ISO へ。
+    例: 'Tue, 03 Feb 2026 00:10:00 GMT'
+    """
+    try:
+        dt = parsedate_to_datetime(http_date)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(jst_tz()).isoformat()
+    except Exception:
+        return None
+
+
+def fetch_pdf_content(name: str) -> Tuple[Optional[bytes], Optional[str], Optional[int]]:
+    """
+    returns: (content, last_modified_header, http_status)
+    """
     url = f"{BASE_URL}/{name}"
     try:
         r = requests.get(url, auth=(USER, PASS), timeout=60)
+        lm = r.headers.get("Last-Modified")
         if r.status_code == 200:
-            return r.content
+            return r.content, lm, r.status_code
         print(f"[NG] {name} HTTP {r.status_code}")
+        return None, lm, r.status_code
     except Exception as e:
         print(f"[ERR] {name}: {e}")
-    return None
+        return None, None, None
 
 
-def pdf_bytes_to_jpgs(
-    pdf_bytes: bytes,
-    base_filename: str,
-    force_all: bool = False,
-) -> List[Attachment]:
-
+def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, force_all: bool = False) -> List[Attachment]:
     images = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
     if not images:
         return []
@@ -107,24 +122,32 @@ def pdf_bytes_to_jpgs(
             out.append((f"{base_filename}_p{idx:02d}.jpg", buf.getvalue(), "image/jpeg"))
         return out
 
+    # 代表は1枚目のみ
     buf = io.BytesIO()
     images[0].save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
     out.append((f"{base_filename}.jpg", buf.getvalue(), "image/jpeg"))
     return out
 
 
-def build_outputs(today: str) -> Tuple[List[Attachment], List[str]]:
-
+def build_outputs(today: str) -> Tuple[List[Attachment], List[str], Optional[str]]:
+    """
+    returns: (images, errors, issued_jst_iso_guess)
+    issued_jst_iso_guess は、最初に取れた Last-Modified を優先して JST に変換した値（なければ None）
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     images: List[Attachment] = []
     errors: List[str] = []
+    issued_jst_iso: Optional[str] = None
 
     for name in PDF_FILES:
-        pdf = fetch_pdf_content(name)
+        pdf, last_mod, st = fetch_pdf_content(name)
+        if last_mod and not issued_jst_iso:
+            issued_jst_iso = _httpdate_to_jst_iso(last_mod)
+
         if not pdf:
-            errors.append(f"{name}: download failed")
+            errors.append(f"{name}: download failed (HTTP={st})")
             continue
 
         base = f"{today}_{name.replace('.pdf', '')}"
@@ -142,18 +165,19 @@ def build_outputs(today: str) -> Tuple[List[Attachment], List[str]]:
 
         images.extend(atts)
 
-    return images, errors
+    return images, errors, issued_jst_iso
 
 
-def upload_to_r2(today: str, atts: List[Attachment]) -> Tuple[List[str], Optional[str]]:
-
+def upload_to_r2(today: str, atts: List[Attachment]) -> Tuple[List[str], Optional[str], str]:
+    """
+    returns: (all_urls, rep_url, run_prefix)
+    """
+    run_prefix = f"weathercaster/{today}"
     if not R2_ENABLE:
-        return [], None
+        return [], None, run_prefix
 
     urls: List[str] = []
     rep: Optional[str] = None
-
-    run_prefix = f"weathercaster/{today}"
 
     for fname, blob, mime in atts:
         key = f"{run_prefix}/{fname}"
@@ -163,59 +187,52 @@ def upload_to_r2(today: str, atts: List[Attachment]) -> Tuple[List[str], Optiona
         if not rep:
             rep = url
 
-    return urls, rep
+    return urls, rep, run_prefix
 
 
-def notion_write_db(
-    today: str,
-    rep_url: Optional[str],
-    all_urls: List[str],
-    errors: List[str],
-) -> Optional[str]:
-
-    if not notion_enabled() or not NOTION_DB_ID:
+def notion_write_db(today: str, rep_url: Optional[str], all_urls: List[str], errors: List[str], issued_jst_iso: Optional[str], run_prefix: str) -> Optional[str]:
+    if not notion_enabled():
         return None
 
-    title = f"Weathercaster 天気図 {today}"
+    title = f"Weathercaster 天気図 / {today}"
 
-    init_jst = _now_jst_iso()
+    # 発行基準時刻（推定）
+    init_jst_iso = issued_jst_iso or _now_jst_iso()
 
-    props: Dict[str, Any] = {
-        PROP_TITLE: {"title": [{"type": "text", "text": {"content": title}}]},
-        PROP_CATEGORY: {"select": {"name": "Weathercaster"}},
-        PROP_INITJST: {"date": {"start": init_jst}},
-        PROP_AUTOGEN: {"checkbox": True},
-    }
-
-    if all_urls:
-        props[PROP_R2URL] = {"url": all_urls[0]}
-
+    memo_lines: List[str] = []
     if errors:
-        memo = "ERROR:\n" + "\n".join(f"- {e}" for e in errors)
-        props[PROP_MEMO] = {"rich_text": [{"type": "text", "text": {"content": memo[:1900]}}]}
+        memo_lines.append("ERROR:")
+        memo_lines += [f"- {e}" for e in errors]
+    if issued_jst_iso:
+        memo_lines.append(f"issued_guess={issued_jst_iso}")
+    memo = "\n".join(memo_lines)
 
+    # create_db_row は ADV と同じ「引数型」で統一して使う
     page_id = create_db_row(
-        database_id=NOTION_DB_ID,
-        properties=props,
-        rjtd="",
-        prefix="",
-        icon_emoji="🗺️",
+        title=title,
+        category="Weathercaster",
+        init_jst_iso=init_jst_iso,
+        memo=memo,
+        rjtd="",                 # Weathercasterは空でOK
+        prefix=run_prefix,       # 追跡用（任意）
+        r2_url="",               # 不要なら空でOK
+        autogen=True,
     )
 
     if not page_id:
         return None
 
     if rep_url:
-        update_page_cover(page_id, rep_url)
+        set_page_cover(page_id, rep_url)
 
     append_heading(page_id, "代表画像", level=3)
     if rep_url:
-        append_image(page_id, rep_url)
+        append_images(page_id, [rep_url], chunk=30)
 
     append_heading(page_id, "全文画像", level=3)
-    toggle_id = create_toggle_block(page_id, "▼ 全文画像を開く")
+    toggle_id = append_toggle(page_id, "▼ 全文画像を開く")
     if toggle_id:
-        append_images_to_block(toggle_id, all_urls, chunk=30)
+        append_images(toggle_id, all_urls, chunk=30)
 
     return page_id
 
@@ -223,20 +240,20 @@ def notion_write_db(
 # ------------------------------------------------------------------
 
 def main():
-
     today = datetime.utcnow().strftime("%Y%m%d")
 
     try:
-        images, errors = build_outputs(today)
+        images, errors, issued_jst_iso = build_outputs(today)
 
         all_urls: List[str] = []
         rep_url: Optional[str] = None
+        run_prefix = f"weathercaster/{today}"
 
         if images:
-            all_urls, rep_url = upload_to_r2(today, images)
+            all_urls, rep_url, run_prefix = upload_to_r2(today, images)
 
         if all_urls:
-            notion_write_db(today, rep_url, all_urls, errors)
+            notion_write_db(today, rep_url, all_urls, errors, issued_jst_iso, run_prefix)
 
     finally:
         shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
