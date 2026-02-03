@@ -2,3 +2,5 @@ boto3
 requests
 pdf2image
 pillow
+beautifulsoup4
+lxml
