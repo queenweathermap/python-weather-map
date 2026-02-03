@@ -64,6 +64,8 @@ def load_model_groups() -> Dict[str, ModelCfg]:
         Item("700hPa",   MSM_WIDE, "700",  "700000", 2, "MSM_700"),
         Item("8502",     MSM_NAR,  "8502", "860000", 2, "MSM_8502"),
         Item("050",      MSM_NAR,  "050",  "050200", 2, "MSM_050"),
+        Item("sfc",      MSM_NAR, "sfc",  "000200", 2, "MSM_sfc"),
+        Item("sfc-2",    MSM_NAR, "sfc2", "010200", 2, "MSM_sfc2"),
         # ★増やすならここに追加
     ]
 
