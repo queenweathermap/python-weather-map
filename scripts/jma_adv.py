@@ -392,7 +392,7 @@ def main() -> None:
 
         run_prefix = f"adv-tgv/{init_dt_for_title.strftime('%Y%m%d')}/RJTD_{rjtd_for_title}"
 
-        title = f"ADV TGV / {init_dt_for_title.astimezone(jst).strftime('%Y-%m-%d %H:%M')} JST"
+        title = f"ADV TGV / {init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
         page_id = create_db_row(
             title=title,
             category="ADV",
