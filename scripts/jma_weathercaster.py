@@ -4,7 +4,7 @@
 #
 # Weathercaster PDF → JPG → R2 → Notion DB（wx 天気図 DB）
 # - カバー画像：代表1枚（必須）
-# - 本文：PDF画像一式（代表画像の重複なし）
+# - 本文：画像一式を並べる（代表画像の重複なし）
 # - Slack / Mail 完全撤去
 #
 # 要件:
@@ -15,9 +15,9 @@
 # 追加（エマグラム）:
 # - 外部GIFを取得し、同じ Notion ページ本文へ追加（coverはPDF代表を維持）
 #
-# 追加（秋田アメダス）:
-# - 「抽出せず」リンクだけを Notion 本文へ必ず追加
-#   https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html
+# 追加（アメダス）:
+# - “取得はしない”
+# - Notion本文に「ブックマーク（リンクカード）」で fuken.html を追加する
 #
 # DELIVERY_MODE=notion 前提
 # =============================================================================
@@ -42,8 +42,7 @@ from module.utils.notion_utils import (
     set_page_cover,
     append_images,
     append_heading,
-    append_text,
-    append_bookmark,   # ← 追加
+    append_bookmark,
 )
 
 # --------- 設定 ---------
@@ -66,7 +65,6 @@ JPEG_DPI = int(os.environ.get("JPEG_DPI", "200"))
 JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
-# ADV と揃えるため、R2_PREFIX を尊重（workflow で "weathercaster" を入れている想定）
 R2_PREFIX = os.environ.get("R2_PREFIX", "weathercaster").strip().strip("/")
 
 # ---- エマグラム ----
@@ -74,11 +72,10 @@ EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", 
 EMAGRAM_URL = os.environ.get("EMAGRAM_URL", "https://bk-pro.jp/images/ema/ema_aki_00.gif").strip()
 EMAGRAM_FILENAME = os.environ.get("EMAGRAM_FILENAME", "ema_aki_00.gif").strip()
 
-# ---- AMeDASリンク（リンクだけ運用）----
-AMEDAS_LINK_ENABLE = os.environ.get("AMEDAS_LINK_ENABLE", "1").lower() in ("1", "true", "yes", "on")
-AMEDAS_FUKEN_URL = os.environ.get(
-    "AMEDAS_FUKEN_URL",
-    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html",
+# ---- アメダス（リンクのみ）----
+AMEDAS_LINK = os.environ.get(
+    "AMEDAS_LINK",
+    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html"
 ).strip()
 
 # --- Notion property names ---
@@ -187,7 +184,7 @@ def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, force_all: bool = Fa
 def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     """
     returns:
-      - images: 変換済み JPG + 追加画像（エマグラム）
+      - images: 変換済み JPG + エマグラム（GIF）
       - errors: 失敗一覧
       - issued_dt_utc_guess: Last-Modified の最小値（推定）を UTC で返す（取れなければ None）
     """
@@ -218,20 +215,15 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
             errors.append(f"{name}: conversion failed")
             continue
 
-        # デバッグ用途の保存（任意）
         for fname, blob, _ in atts:
-            try:
-                with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
-                    f.write(blob)
-            except Exception:
-                pass
+            with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                f.write(blob)
 
         images.extend(atts)
 
     # --- Emagram GIF ---
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
-
         if last_mod:
             dt = _httpdate_to_utc_dt(last_mod)
             if dt:
@@ -240,7 +232,6 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
         if blob:
             mimetype = ct if ct else "image/gif"
             fname = EMAGRAM_FILENAME or "ema_aki_00.gif"
-            # cover rep_url を変えないため、末尾へ
             images.append((fname, blob, mimetype))
             try:
                 with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
@@ -287,10 +278,7 @@ def _create_db_row_compat(
 ) -> Optional[str]:
     """
     notion_utils.create_db_row の実装差を吸収する互換ラッパー。
-    - (A) 引数型: create_db_row(title=..., category=..., init_jst_iso=..., memo=..., rjtd=..., prefix=..., r2_url=..., autogen=..., icon_emoji=...)
-    - (B) properties型: create_db_row(database_id=..., properties=..., rjtd=..., prefix=..., icon_emoji=...)
     """
-    # A: 引数型
     try:
         return create_db_row(
             title=title,
@@ -306,7 +294,6 @@ def _create_db_row_compat(
     except TypeError:
         pass
 
-    # B: properties型
     try:
         db = os.environ.get("NOTION_DATABASE_ID", "").strip()
         if not db:
@@ -343,7 +330,7 @@ def notion_write_db(
     rjtd: str,
     run_prefix: str,
     rep_url: Optional[str],
-    all_image_urls: List[str],
+    all_urls: List[str],
     errors: List[str],
 ) -> Optional[str]:
     if not notion_enabled():
@@ -372,29 +359,26 @@ def notion_write_db(
     if not page_id:
         return None
 
-    # cover は代表のみ（本文に代表を重複させない）
+    # cover は代表のみ
     if rep_url:
         set_page_cover(page_id, rep_url)
 
-    # --- AMeDAS: リンクだけ必ず出す ---
-    if AMEDAS_LINK_ENABLE and AMEDAS_FUKEN_URL:
+    # アメダス（リンク）を“ブックマーク”で
+    if AMEDAS_LINK:
         append_heading(page_id, "アメダス（リンク）", level=2)
-        append_bookmark(page_id, AMEDAS_FUKEN_URL, caption="秋田 AMeDAS（府県別）")
+        append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
 
     # 本文：画像一式（PDF由来＋エマグラム）
-    if all_image_urls:
-        append_images(page_id, all_image_urls, chunk=30)
+    if all_urls:
+        append_images(page_id, all_urls, chunk=30)
 
     return page_id
 
-
-# ------------------------------------------------------------------
 
 def main() -> None:
     try:
         images, errors, issued_guess_utc = build_outputs()
 
-        # 発行基準：Last-Modified の最小値があればそれ、なければ現在UTC
         base_utc_src = issued_guess_utc or _now_utc()
         issue_base_utc = _floor_to_6h(base_utc_src)
 
@@ -402,21 +386,19 @@ def main() -> None:
         day = issue_base_utc.strftime("%Y%m%d")        # YYYYMMDD
         run_prefix = f"{R2_PREFIX}/{day}/RJTD_{rjtd}"  # ADV と同型
 
-        all_image_urls: List[str] = []
+        all_urls: List[str] = []
         rep_url: Optional[str] = None
 
-        # 画像をR2へ
         if images:
-            all_image_urls, rep_url = upload_to_r2(run_prefix, images)
+            all_urls, rep_url = upload_to_r2(run_prefix, images)
 
-        # Notionへ（画像が無くてもリンクだけ出したい場合があるので、条件はゆるく）
-        if notion_enabled():
+        if all_urls or AMEDAS_LINK:
             notion_write_db(
                 issue_base_utc=issue_base_utc,
                 rjtd=rjtd,
                 run_prefix=run_prefix,
                 rep_url=rep_url,
-                all_image_urls=all_image_urls,
+                all_urls=all_urls,
                 errors=errors,
             )
 
