@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import io
 import os
+import csv   # ← 追加
 import re
 import shutil
 from datetime import datetime, timezone, timedelta
