@@ -289,7 +289,7 @@ def notion_write_db(
     day = issue_base_utc.strftime("%Y%m%d")
 
     # タイトル（必要なら好みで微調整OK）
-    title = f"Weathercaster 天気図 / {day} {issue_base_jst.strftime('%H:%M')} JST"
+    title = f"Weathercaster / {day} {issue_base_jst.strftime('%H:%M')} JST"
 
     memo_lines: List[str] = []
     if errors:
