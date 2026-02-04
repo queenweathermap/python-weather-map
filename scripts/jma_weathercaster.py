@@ -5,12 +5,6 @@
 # Weathercaster PDF → JPG → R2 → Notion DB（wx 天気図 DB）
 # - カバー画像：代表1枚（必須）
 # - 本文：画像一式を並べる（代表画像の重複なし）
-# - Slack / Mail 完全撤去
-#
-# 要件:
-# - Weathercaster も RJTD を入れる（ddHHMM / UTC基準）
-# - prefix の整理ルールを ADV と揃える
-#   => {R2_PREFIX}/{YYYYMMDD}/RJTD_{ddHHMM}
 #
 # 追加（エマグラム）:
 # - 外部GIFを取得し、同じ Notion ページ本文へ追加（coverはPDF代表を維持）
@@ -19,7 +13,8 @@
 # - “取得はしない”
 # - Notion本文に「ブックマーク（リンクカード）」で fuken.html を追加する
 #
-# DELIVERY_MODE=notion 前提
+# 追加（Slack通知）:
+# - Notion配信完了したら #wx-python に静かに通知（Webhook優先）
 # =============================================================================
 
 from __future__ import annotations
@@ -44,6 +39,9 @@ from module.utils.notion_utils import (
     append_heading,
     append_bookmark,
 )
+
+from module.utils.slack_utils import notify_weather_delivery
+
 
 # --------- 設定 ---------
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
@@ -376,30 +374,42 @@ def notion_write_db(
 
 
 def main() -> None:
+    page_id: Optional[str] = None
+    all_urls: List[str] = []
+    errors: List[str] = []
+
     try:
         images, errors, issued_guess_utc = build_outputs()
 
-        base_utc_src = issued_guess_utc or _now_utc()
+        base_utc_src = issued_guess_utc or datetime.now(timezone.utc)
         issue_base_utc = _floor_to_6h(base_utc_src)
 
         rjtd = issue_base_utc.strftime("%d%H%M")       # ddHHMM
         day = issue_base_utc.strftime("%Y%m%d")        # YYYYMMDD
         run_prefix = f"{R2_PREFIX}/{day}/RJTD_{rjtd}"  # ADV と同型
 
-        all_urls: List[str] = []
         rep_url: Optional[str] = None
 
         if images:
             all_urls, rep_url = upload_to_r2(run_prefix, images)
 
         if all_urls or AMEDAS_LINK:
-            notion_write_db(
+            page_id = notion_write_db(
                 issue_base_utc=issue_base_utc,
                 rjtd=rjtd,
                 run_prefix=run_prefix,
                 rep_url=rep_url,
                 all_urls=all_urls,
                 errors=errors,
+            )
+
+        # ---- Slack notify（Notion配信完了の合図）----
+        if page_id:
+            notify_weather_delivery(
+                category="Weathercaster",
+                page_id=page_id,
+                errors=errors,
+                attach_count=len(all_urls),
             )
 
     finally:
