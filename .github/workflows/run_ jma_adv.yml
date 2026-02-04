@@ -2,11 +2,11 @@ name: Run JMA ADV TGV
 
 on:
   schedule:
-    # 01:30 / 07:30 / 13:30 / 19:30 JST
-    - cron: "30 16 * * *"
-    - cron: "30 22 * * *"
-    - cron: "30 4  * * *"
-    - cron: "30 10 * * *"
+    # 02:00 / 08:00 / 14:00 / 20:00 JST
+    - cron: "0 17 * * *"   # 02:00 JST
+    - cron: "0 23 * * *"   # 08:00 JST
+    - cron: "0 5  * * *"   # 14:00 JST
+    - cron: "0 11 * * *"   # 20:00 JST
   workflow_dispatch: {}
 
 concurrency:
@@ -22,37 +22,27 @@ jobs:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: ${{ github.workspace }}
 
-      # =====================
-      # Slack（通知）
-      # =====================
+      # Slack
       SLACK_ENABLE: "1"
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
-      # =====================
       # 配信モード
-      # =====================
       DELIVERY_MODE: "notion"
 
-      # =====================
       # JMA ADV 認証
-      # =====================
       TGV_USE_AUTH: "1"
       JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
       JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
       JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
 
-      # =====================
       # 画像処理
-      # =====================
       JPG_QUALITY: "85"
       INIT_SEARCH_HOURS: "72"
       JOIN_TRIPLE: "1"
 
-      # =====================
-      # R2（Cloudflare）
-      # =====================
+      # R2
       R2_ENABLE: "1"
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -61,14 +51,11 @@ jobs:
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
       R2_PREFIX: "adv-tgv"
 
-      # =====================
       # Notion
-      # =====================
       NOTION_ENABLE: "1"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
 
-      # Notion プロパティ名
       NOTION_PROP_TITLE: "名前"
       NOTION_PROP_CATEGORY: "区分"
       NOTION_PROP_MODEL: "区分"
@@ -80,8 +67,7 @@ jobs:
       NOTION_PROP_MEMO: "メモ"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
