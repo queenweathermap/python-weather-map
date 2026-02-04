@@ -1,13 +1,12 @@
-# .github/workflows/run_adv.yml
-name: Run JMA ADV
+name: Run JMA ADV TGV
 
 on:
   schedule:
-    - cron: "30 16 * * *"  # 01:30 JST
-    - cron: "30 22 * * *"  # 07:30 JST
-    - cron: "30 4  * * *"  # 13:30 JST
-    - cron: "30 10 * * *"  # 19:30 JST
-
+    # 01:30 / 07:30 / 13:30 / 19:30 JST
+    - cron: "30 16 * * *"
+    - cron: "30 22 * * *"
+    - cron: "30 4  * * *"
+    - cron: "30 10 * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -15,12 +14,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  run_adv:
+  run-adv:
     runs-on: ubuntu-latest
 
     env:
       TZ: Asia/Tokyo
       PYTHONUNBUFFERED: "1"
+      PYTHONPATH: ${{ github.workspace }}
+
+      # =====================
+      # Slack（通知）
+      # =====================
+      SLACK_ENABLE: "1"
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+
+      # =====================
+      # 配信モード
+      # =====================
+      DELIVERY_MODE: "notion"
 
       # =====================
       # JMA ADV 認証
@@ -31,19 +44,10 @@ jobs:
       JMA_AUTH_BASIC: ${{ secrets.JMA_AUTH_BASIC }}
 
       # =====================
-      # 配信
-      # =====================
-      DELIVERY_MODE: "notion"  # notion only
-
-      # =====================
-      # script tuning
+      # 画像処理
       # =====================
       JPG_QUALITY: "85"
       INIT_SEARCH_HOURS: "72"
-
-      # =====================
-      # 画像結合（横3：基本ON）
-      # =====================
       JOIN_TRIPLE: "1"
 
       # =====================
@@ -55,7 +59,7 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
-      R2_PREFIX: "adv-tgv"  # 任意：オブジェクトキーの先頭
+      R2_PREFIX: "adv-tgv"
 
       # =====================
       # Notion
@@ -64,10 +68,10 @@ jobs:
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
 
-      # DBプロパティ名（必要なら上書き）
+      # Notion プロパティ名
       NOTION_PROP_TITLE: "名前"
       NOTION_PROP_CATEGORY: "区分"
-      NOTION_PROP_MODEL: "区分"      # Weathercaster互換
+      NOTION_PROP_MODEL: "区分"
       NOTION_PROP_INIT_JST: "発行基準時刻"
       NOTION_PROP_RJTD: "RJTD"
       NOTION_PROP_PREFIX: "prefix"
@@ -76,48 +80,8 @@ jobs:
       NOTION_PROP_MEMO: "メモ"
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Debug Notion DB properties
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - << 'PY'
-          import os, requests, json
-          db = os.environ["NOTION_DATABASE_ID"]
-          token = os.environ["NOTION_TOKEN"]
-          r = requests.get(
-              f"https://api.notion.com/v1/databases/{db}",
-              headers={
-                  "Authorization": f"Bearer {token}",
-                  "Notion-Version": "2022-06-28",
-              },
-              timeout=30,
-          )
-          r.raise_for_status()
-          props = r.json().get("properties", {})
-          print("=== Notion DB properties (name -> type) ===")
-          for k, v in props.items():
-              print(f"- {k} : {v.get('type')}")
-          PY
-
-      - name: Debug env (presence only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          for v in \
-            TGV_USE_AUTH JMA_ADV_USER JMA_ADV_PASS \
-            SLACK_CHANNEL_ID SLACK_BOT_TOKEN \
-            R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET ASSET_BASE_URL \
-            NOTION_TOKEN NOTION_DATABASE_ID
-          do
-            if [ -n "${!v:-}" ]; then
-              echo "$v=OK"
-            else
-              echo "$v=MISSING"
-            fi
-          done
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -125,38 +89,10 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies
-        shell: bash
+      - name: Install Python dependencies
         run: |
-          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements-adv.txt
 
-      - name: Debug Notion DB title (safe)
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - << 'PY'
-          import os, requests
-          db = os.environ["NOTION_DATABASE_ID"]
-          token = os.environ["NOTION_TOKEN"]
-          r = requests.get(
-              f"https://api.notion.com/v1/databases/{db}",
-              headers={
-                  "Authorization": f"Bearer {token}",
-                  "Notion-Version": "2022-06-28",
-              },
-              timeout=30,
-          )
-          print("status =", r.status_code)
-          if r.status_code != 200:
-              print(r.text[:500])
-              raise SystemExit(1)
-          title = "".join([t.get("plain_text","") for t in (r.json().get("title") or [])])
-          print("NOTION DB TITLE =", title)
-          PY
-
-
-      - name: Run JMA ADV
-        run: |
-          python scripts/jma_adv.py
+      - name: Run JMA ADV TGV
+        run: python scripts/jma_adv.py
