@@ -14,7 +14,7 @@
 # - Notion本文に「リンクカード（bookmark）」で3URLを追加
 #
 # ✅ Slack通知（配信完了の合図）
-# - SLACK_WEBHOOK_URL（推奨） / なくても token方式にフォールバック
+# - module/utils/slack_utils.py の notify_weather_delivery を使用
 # - @here しない
 # =============================================================================
 
@@ -29,7 +29,7 @@ import os
 import io
 import base64
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Tuple, Optional, Sequence
+from typing import List, Tuple, Optional, Sequence
 
 import requests
 from PIL import Image
@@ -43,10 +43,8 @@ from module.utils.notion_utils import (
     append_images,
     append_bookmark,
 )
-
 from module.utils.slack_utils import notify_weather_delivery
-from module.adv_tgv.models import load_model_groups
-
+from module.adv_tgv.models import load_model_groups, ModelCfg, Item
 
 Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
 
@@ -213,15 +211,13 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
             i += 2
             continue
 
-        if len(group) == 1:
-            (fn1, b1, _) = group[0]
-            white1 = make_white_jpg(base_w, base_h, quality=quality)
-            white2 = make_white_jpg(base_w, base_h, quality=quality)
-            merged = concat_jpgs_horiz([b1, white1, white2], quality=quality)
-            out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
-            joined.append((out_name, merged, "image/jpeg"))
-            i += 1
-            continue
+        (fn1, b1, _) = group[0]
+        white1 = make_white_jpg(base_w, base_h, quality=quality)
+        white2 = make_white_jpg(base_w, base_h, quality=quality)
+        merged = concat_jpgs_horiz([b1, white1, white2], quality=quality)
+        out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
+        joined.append((out_name, merged, "image/jpeg"))
+        i += 1
 
     return joined
 
@@ -255,24 +251,24 @@ def r2_enabled() -> bool:
     return env_bool("R2_ENABLE", "1")
 
 
-def fetch_item_images(model_name: str, cfg, init_dt: datetime, item) -> Tuple[List[Attachment], bool]:
+def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: Item) -> Tuple[List[Attachment], bool]:
     """
     returns: (attachments, auth_failed)
     """
     quality = env_int("JPG_QUALITY", 85)
     timeout = env_int("HTTP_TIMEOUT", 60)
 
-    base = cfg.base_url
+    base = item.base
     layer = item.layer
     view_base = item.view_base
-    digits = item.digits
+    digits = item.view_digits
     minute = cfg.rjtd_minute
 
     atts: List[Attachment] = []
     auth_failed = False
 
-    # FT list
-    for ft in item.ft_list:
+    # FT list（Itemではなく ModelCfg の ft_list を使う）
+    for ft in cfg.ft_list:
         view_code = view_for_ft(view_base, ft, digits)
         rjtd = fmt_rjtd(init_dt, minute)
         url = build_png_url(base, layer, view_code, rjtd)
@@ -286,7 +282,7 @@ def fetch_item_images(model_name: str, cfg, init_dt: datetime, item) -> Tuple[Li
                 continue
 
             jpg = png_bytes_to_jpg_bytes(r.content, quality=quality)
-            fn = f"{view_code}_RJTD_{rjtd}.jpg"
+            fn = f"{item.jpg_prefix}_VIEW{view_code}_RJTD_{rjtd}.jpg"
             atts.append((fn, jpg, "image/jpeg"))
         except Exception:
             continue
@@ -312,26 +308,30 @@ def upload_item_images_to_r2(
     return urls
 
 
-def find_working_init_dt(model_name: str, cfg, max_back_hours: int) -> datetime:
+def find_working_init_dt(model_name: str, cfg: ModelCfg, max_back_hours: int) -> datetime:
     """
     ざっくり：6時間刻みで過去へ遡り、どれか1枚取れた時点を採用する
+    ※ models.py の設計通り、init_probe_item + cfg.ft_list でプローブする
     """
     timeout = env_int("HTTP_TIMEOUT", 30)
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
-    step_hours = 6
+    step_hours = 6  # 「探し方」は6時間刻みでOK（運用安定）
     minute = cfg.rjtd_minute
+
+    probe = cfg.init_probe_item
+    if not cfg.ft_list:
+        raise RuntimeError(f"{model_name}: cfg.ft_list is empty")
+
+    ft0 = cfg.ft_list[0]
 
     for back in range(0, max_back_hours + 1, step_hours):
         init_dt = now - timedelta(hours=back)
         init_dt = floor_to_step(init_dt, step_hours=step_hours, minute=minute)
 
-        # 代表として最初の item の最初の ft を試す
-        it0 = cfg.items[0]
-        ft0 = it0.ft_list[0]
-        view_code = view_for_ft(it0.view_base, ft0, it0.digits)
+        view_code = view_for_ft(probe.view_base, ft0, probe.view_digits)
         rjtd = fmt_rjtd(init_dt, minute)
-        url = build_png_url(cfg.base_url, it0.layer, view_code, rjtd)
+        url = build_png_url(probe.base, probe.layer, view_code, rjtd)
 
         r = http_get(url, referer=cfg.referer, timeout=timeout)
         if r.status_code == 200:
@@ -408,7 +408,7 @@ def main() -> None:
 
     # 1) GSM / MSM / LFM
     for model_name in ("GSM", "MSM", "LFM"):
-        cfg = groups[model_name]
+        cfg: ModelCfg = groups[model_name]
         print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
 
         try:
