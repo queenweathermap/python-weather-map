@@ -3,7 +3,7 @@
 # scripts/jma_adv.py
 #
 # ADV TGV: 取得 → JPG化(3up) → R2 → Notion(DB)
-# - Notion / R2 のみ（Slack/Mail完全撤去）
+# - Notion / R2 が主（配信完了の合図として Slack に静かに通知）
 #
 # ✅ 構成（希望どおり）
 # - GSM / MSM / LFM は「見出し（タイトル）」で並べる（トグルではない）
@@ -11,18 +11,11 @@
 #
 # ✅ ガイダンス（安定運用）
 # - HTML表は取得しない（HTTP401/構造変化対策）
-# - Notion本文に「リンクカード（bookmark）」で3URLを追加（トグルOK）
+# - Notion本文に「リンクカード（bookmark）」で3URLを追加
 #
-# 環境変数（主なもの）
-# - JMA_AUTH_BASIC or (JMA_ADV_USER/JMA_ADV_PASS)
-# - TGV_USE_AUTH=1
-# - JOIN_TRIPLE=1（3up結合する）
-# - R2_ENABLE=1
-# - R2_PREFIX=adv-tgv（推奨）
-# - NOTION_ENABLE=1 / NOTION_TOKEN / NOTION_DATABASE_ID
-#
-# ガイダンス（リンクだけ）
-# - GUIDE_ENABLE=1
+# ✅ Slack通知（配信完了の合図）
+# - SLACK_WEBHOOK_URL（推奨） / なくても token方式にフォールバック
+# - @here しない
 # =============================================================================
 
 import sys
@@ -51,7 +44,8 @@ from module.utils.notion_utils import (
     append_bookmark,
 )
 
-from module.adv_tgv.models import load_model_groups, Item, ModelCfg
+from module.utils.slack_utils import notify_weather_delivery
+from module.adv_tgv.models import load_model_groups
 
 
 Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
@@ -128,7 +122,6 @@ def headers_for(referer: str) -> dict:
         "Pragma": "no-cache",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
-    # requests.get(auth=...) を使わない運用（JMA_AUTH_BASICのみ）にも対応
     if use_auth_enabled() and (get_requests_auth_tuple() is None):
         h["Authorization"] = get_auth_basic_header()
     return h
@@ -256,100 +249,50 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 
 
 # =============================================================================
-# INIT auto-detect
+# INIT auto-detect / fetch
 # =============================================================================
-def probe_init(url: str, referer: str) -> Tuple[int, str, bytes]:
-    r = http_get(url, referer=referer, timeout=25)
-    ctype = (r.headers.get("Content-Type") or "").lower()
-    head = r.content[:200]
-    return r.status_code, ctype, head
+def r2_enabled() -> bool:
+    return env_bool("R2_ENABLE", "1")
 
 
-def find_working_init_dt(model_name: str, cfg: ModelCfg, *, max_back_hours: int = 72) -> datetime:
-    step = cfg.init_step_hours
-    now = datetime.now(timezone.utc)
-    start = floor_to_step(now, step, cfg.rjtd_minute)
-
-    it0 = cfg.init_probe_item
-    first_ft = cfg.ft_list[0]
-    view0 = view_for_ft(it0.view_base, first_ft, it0.view_digits)
-
-    for back in range(0, max_back_hours + 1, step):
-        init_dt = start - timedelta(hours=back)
-        rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
-        url = build_png_url(it0.base, it0.layer, view0, rjtd)
-
-        st, ctype, head = probe_init(url, cfg.referer)
-
-        if st in (401, 403):
-            raise RuntimeError(f"{model_name} auth error HTTP{st} url={url}")
-
-        if st == 200:
-            if ("text/html" in ctype) or head.lower().startswith(b"<!doctype html") or head.lower().startswith(b"<html"):
-                raise RuntimeError(f"{model_name} got HTML with HTTP200 (auth?) url={url}")
-            print(f"[OK] {model_name} init found: {init_dt.isoformat()} RJTD_{rjtd} url={url}")
-            return init_dt
-
-    raise RuntimeError(f"{model_name}: init not found within back={max_back_hours}h")
-
-
-# =============================================================================
-# Fetch per item
-# =============================================================================
-def fetch_png(url: str, referer: str) -> Tuple[int, bytes, str]:
-    r = http_get(url, referer=referer, timeout=40)
-    ctype = (r.headers.get("Content-Type") or "").lower()
-    return r.status_code, r.content, ctype
-
-
-def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: Item) -> Tuple[List[Attachment], bool]:
+def fetch_item_images(model_name: str, cfg, init_dt: datetime, item) -> Tuple[List[Attachment], bool]:
     """
     returns: (attachments, auth_failed)
     """
-    jpg_quality = env_int("JPG_QUALITY", 85)
-    rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
+    quality = env_int("JPG_QUALITY", 85)
+    timeout = env_int("HTTP_TIMEOUT", 60)
 
-    raw_atts: List[Attachment] = []
+    base = cfg.base_url
+    layer = item.layer
+    view_base = item.view_base
+    digits = item.digits
+    minute = cfg.rjtd_minute
+
+    atts: List[Attachment] = []
     auth_failed = False
 
-    for ft in cfg.ft_list:
-        view_code = view_for_ft(item.view_base, ft, item.view_digits)
-        url = build_png_url(item.base, item.layer, view_code, rjtd)
+    # FT list
+    for ft in item.ft_list:
+        view_code = view_for_ft(view_base, ft, digits)
+        rjtd = fmt_rjtd(init_dt, minute)
+        url = build_png_url(base, layer, view_code, rjtd)
 
-        status, content, ctype = fetch_png(url, cfg.referer)
-
-        if status == 200:
-            # 200でもHTMLが返る（認証失敗など）
-            if ("text/html" in ctype) or content[:20].lower().startswith(b"<!doctype html") or content[:10].lower().startswith(b"<html"):
+        try:
+            r = http_get(url, referer=cfg.referer, timeout=timeout)
+            if r.status_code in (401, 403):
                 auth_failed = True
-                print(f"[NG] {model_name} {item.label} ft={ft}: got HTML with HTTP200 (auth?) url={url}")
                 break
+            if r.status_code != 200:
+                continue
 
-            jpg = png_bytes_to_jpg_bytes(content, quality=jpg_quality)
-            fname = f"{item.jpg_prefix}_ft{ft:03d}.jpg"
-            raw_atts.append((fname, jpg, "image/jpeg"))
-            print(f"[OK] {model_name} {item.label} ft={ft} url={url}")
+            jpg = png_bytes_to_jpg_bytes(r.content, quality=quality)
+            fn = f"{view_code}_RJTD_{rjtd}.jpg"
+            atts.append((fn, jpg, "image/jpeg"))
+        except Exception:
             continue
 
-        if status in (401, 403):
-            auth_failed = True
-            print(f"[NG] {model_name} {item.label} ft={ft}: HTTP{status} auth url={url}")
-            break
-
-        if status == 404:
-            # 欠けは許容
-            continue
-
-    atts = maybe_triple_join_attachments(raw_atts, quality=jpg_quality)
+    atts = maybe_triple_join_attachments(atts, quality=quality)
     return atts, auth_failed
-
-
-# =============================================================================
-# R2
-# =============================================================================
-def r2_enabled() -> bool:
-    v = env_str("R2_ENABLE", "1").lower()
-    return v in ("1", "true", "yes", "on")
 
 
 def upload_item_images_to_r2(
@@ -369,6 +312,37 @@ def upload_item_images_to_r2(
     return urls
 
 
+def find_working_init_dt(model_name: str, cfg, max_back_hours: int) -> datetime:
+    """
+    ざっくり：6時間刻みで過去へ遡り、どれか1枚取れた時点を採用する
+    """
+    timeout = env_int("HTTP_TIMEOUT", 30)
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+    step_hours = 6
+    minute = cfg.rjtd_minute
+
+    for back in range(0, max_back_hours + 1, step_hours):
+        init_dt = now - timedelta(hours=back)
+        init_dt = floor_to_step(init_dt, step_hours=step_hours, minute=minute)
+
+        # 代表として最初の item の最初の ft を試す
+        it0 = cfg.items[0]
+        ft0 = it0.ft_list[0]
+        view_code = view_for_ft(it0.view_base, ft0, it0.digits)
+        rjtd = fmt_rjtd(init_dt, minute)
+        url = build_png_url(cfg.base_url, it0.layer, view_code, rjtd)
+
+        r = http_get(url, referer=cfg.referer, timeout=timeout)
+        if r.status_code == 200:
+            return init_dt
+
+        if r.status_code in (401, 403):
+            raise RuntimeError(f"auth failed HTTP={r.status_code}")
+
+    raise RuntimeError("INIT not found")
+
+
 # =============================================================================
 # Guidance links (bookmark only)
 # =============================================================================
@@ -386,6 +360,9 @@ GUIDE_LINKS: List[Tuple[str, str]] = [
 # =============================================================================
 def main() -> None:
     print("=== Start ADV JMA TGV ===")
+
+    errors: List[str] = []
+    total_images = 0
 
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
     r2_prefix = env_str("R2_PREFIX", "adv-tgv").strip().strip("/")
@@ -421,22 +398,15 @@ def main() -> None:
         autogen=True,
     )
     print(f"[OK] Notion DB row created: {page_id}")
-    
-    # ===== ここから追加 =====
+
     if GUIDE_ENABLE:
         append_heading(page_id, "ガイダンス（リンク）", level=2)
         for caption, url in GUIDE_LINKS:
             append_bookmark(page_id, url, caption=caption)
-    # ===== ここまで =====
-
 
     first_cover_url: Optional[str] = None
 
-    # =============================================================================
     # 1) GSM / MSM / LFM
-    #    - モデルは「見出し」
-    #    - アイテムは「トグル」
-    # =============================================================================
     for model_name in ("GSM", "MSM", "LFM"):
         cfg = groups[model_name]
         print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
@@ -444,12 +414,11 @@ def main() -> None:
         try:
             init_dt = find_working_init_dt(model_name, cfg, max_back_hours=search_hours)
         except Exception as e:
-            print(f"[NG] {model_name}: INIT not found / auth error {type(e).__name__}: {e}")
+            msg = f"{model_name}: INIT/auth failed ({type(e).__name__})"
+            print(f"[NG] {msg}: {e}")
+            errors.append(msg)
             continue
 
-        # ✅ モデルは見出し（ページ直下）
-        #    ※ heading ブロックを親にして子ブロック追加すると 400 になることがあるため、
-        #      ネストは作らず、見た目として「見出し→続くブロック」を同階層に並べる。
         append_heading(page_id, model_name, level=2)
         model_parent: str = page_id
 
@@ -457,7 +426,9 @@ def main() -> None:
             atts, auth_failed = fetch_item_images(model_name, cfg, init_dt, item)
 
             if auth_failed:
-                print(f"[NG] {model_name} {item.label}: auth error")
+                msg = f"{model_name}: auth error while fetching {item.label}"
+                print(f"[NG] {msg}")
+                errors.append(msg)
                 break
 
             if not atts:
@@ -473,12 +444,12 @@ def main() -> None:
             if not urls:
                 continue
 
-            # cover：初回のみ
+            total_images += len(urls)
+
             if (first_cover_url is None) and urls:
                 first_cover_url = urls[0]
                 set_page_cover(page_id, first_cover_url)
 
-            # アイテムはトグル
             item_title = f"{item.label}  ({len(urls)} images)"
             item_toggle_id = append_toggle(model_parent, item_title)
 
@@ -489,8 +460,13 @@ def main() -> None:
 
             print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
 
-
-
+    # ---- Slack notify（Notion配信完了の合図）----
+    notify_weather_delivery(
+        category="ADV TGV",
+        page_id=page_id,
+        errors=errors,
+        attach_count=total_images,
+    )
 
     print("\n=== Done ADV JMA TGV ===")
 
