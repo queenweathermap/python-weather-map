@@ -2,11 +2,11 @@ name: Run JMA Weathercaster
 
 on:
   schedule:
-    # 02:00 / 08:00 / 14:00 / 20:00 JST
-    - cron: "00 17 * * *"
-    - cron: "00 23 * * *"
-    - cron: "00 5  * * *"
-    - cron: "00 11 * * *"
+    # 05:00 / 11:00 / 17:00 / 23:00 JST
+    - cron: "0 20 * * *"   # 05:00 JST
+    - cron: "0 2  * * *"   # 11:00 JST
+    - cron: "0 8  * * *"   # 17:00 JST
+    - cron: "0 14 * * *"   # 23:00 JST
   workflow_dispatch: {}
 
 concurrency:
@@ -22,28 +22,20 @@ jobs:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: ${{ github.workspace }}
 
-      # =====================
-      # Slack（通知）
-      # =====================
+      # Slack
       SLACK_ENABLE: "1"
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
-      # =====================
       # 配信モード
-      # =====================
       DELIVERY_MODE: "notion"
 
-      # =====================
       # Weathercaster 認証
-      # =====================
       WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
       WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
 
-      # =====================
-      # R2（Cloudflare）
-      # =====================
+      # R2
       R2_ENABLE: "1"
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -52,14 +44,11 @@ jobs:
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
       R2_PREFIX: "weathercaster"
 
-      # =====================
       # Notion
-      # =====================
       NOTION_ENABLE: "1"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
 
-      # Notion プロパティ名
       NOTION_PROP_TITLE: "名前"
       NOTION_PROP_CATEGORY: "区分"
       NOTION_PROP_MODEL: "区分"
@@ -71,8 +60,7 @@ jobs:
       NOTION_PROP_MEMO: "メモ"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
