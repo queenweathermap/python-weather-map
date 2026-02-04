@@ -5,14 +5,14 @@
 # できること：
 #  - テキスト通知（chat.postMessage）
 #  - ファイルアップロード（外部アップロード3ステップ方式）
+#  - “天気図配信” の静かな通知（Incoming Webhook 優先 / Bot token フォールバック）
 #
-# 重要：
-#  - files.getUploadURLExternal は「form送信」が最も安定（JSONだと missing 扱いになる事がある）
-#  - completeUploadExternal も form送信に寄せて事故を減らす
-#
-# 必要な環境変数：
+# 必要な環境変数（Bot token方式）：
 #  - SLACK_BOT_TOKEN
 #  - SLACK_CHANNEL_ID（例: C0123...）
+#
+# 必要な環境変数（Webhook方式）：
+#  - SLACK_WEBHOOK_URL（チャンネル #wx-python はWebhook側設定で固定）
 # ===============================================================
 
 import os
@@ -33,7 +33,6 @@ def sanitize_filename(filename: str) -> str:
     （半角英数字・アンダースコア・ピリオド・ハイフン以外は "_" に置換）
     """
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", filename)
-    # 念のため空文字回避
     return safe if safe else "file.bin"
 
 
@@ -41,8 +40,11 @@ def get_slack_token() -> Optional[str]:
     return os.environ.get("SLACK_BOT_TOKEN")
 
 
+def get_default_channel_id() -> Optional[str]:
+    return os.environ.get("SLACK_CHANNEL_ID")
+
+
 def _auth_headers(token: str) -> dict:
-    # Slack Web API は charset 付きが無難
     return {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
@@ -50,9 +52,6 @@ def _auth_headers(token: str) -> dict:
 
 
 def _print_slack_error(prefix: str, resp_json: dict) -> None:
-    """
-    Slackのエラーを見やすく出す（ログで原因特定しやすくする）
-    """
     err = resp_json.get("error")
     warn = resp_json.get("warning")
     meta = resp_json.get("response_metadata") or {}
@@ -61,7 +60,7 @@ def _print_slack_error(prefix: str, resp_json: dict) -> None:
 
 
 # ---------------------------------------------------------------
-# Text message
+# Text message (Bot token)
 # ---------------------------------------------------------------
 def send_slack_text(channel: str, message: str) -> None:
     """
@@ -86,6 +85,17 @@ def send_slack_text(channel: str, message: str) -> None:
         _print_slack_error("chat.postMessage failed", j)
     else:
         print(f"[Slack] message sent: {message[:40]}...")
+
+
+def send_slack_text_default(message: str) -> None:
+    """
+    SLACK_CHANNEL_ID 宛に送る簡易ラッパー（Bot token方式）
+    """
+    ch = get_default_channel_id()
+    if not ch:
+        print("[Slack] SLACK_CHANNEL_ID not set -> skip")
+        return
+    send_slack_text(ch, message)
 
 
 # ---------------------------------------------------------------
@@ -113,9 +123,7 @@ def upload_files_slack(
     headers = _auth_headers(token)
     files_meta: list[dict] = []  # [{"id": file_id, "title": "..."}]
 
-    # ---------------------------
     # Step1: getUploadURLExternal
-    # ---------------------------
     for idx, p in enumerate(filepaths):
         if not os.path.exists(p):
             print(f"[WARN] file not found: {p}")
@@ -128,14 +136,10 @@ def upload_files_slack(
             print(f"[WARN] skip zero size: {p}")
             continue
 
-        # ★最重要：ここは form 送信が安定
         r1 = requests.post(
             "https://slack.com/api/files.getUploadURLExternal",
             headers=headers,
-            data={
-                "filename": filename,
-                "length": str(length),
-            },
+            data={"filename": filename, "length": str(length)},
             timeout=60,
         )
         j1 = r1.json()
@@ -146,9 +150,7 @@ def upload_files_slack(
         upload_url = j1["upload_url"]
         file_id = j1["file_id"]
 
-        # ---------------------------
         # Step2: PUT file body
-        # ---------------------------
         with open(p, "rb") as f:
             r2 = requests.put(
                 upload_url,
@@ -158,10 +160,11 @@ def upload_files_slack(
             )
 
         if r2.status_code != 200:
-            print(f"[ERROR] PUT failed: status={r2.status_code} file={filename} body={(r2.text or '')[:200]}")
+            print(
+                f"[ERROR] PUT failed: status={r2.status_code} file={filename} body={(r2.text or '')[:200]}"
+            )
             continue
 
-        # 表示タイトル（省略なら filename）
         title = titles[idx] if titles and idx < len(titles) else filename
         files_meta.append({"id": file_id, "title": title})
 
@@ -169,10 +172,7 @@ def upload_files_slack(
         print("[WARN] no files to complete")
         return
 
-    # ---------------------------
     # Step3: completeUploadExternal
-    # ---------------------------
-    # ここも form に寄せる（files は JSON文字列として渡す）
     r3 = requests.post(
         "https://slack.com/api/files.completeUploadExternal",
         headers=headers,
@@ -199,15 +199,12 @@ def upload_bytes_slack(
 ) -> None:
     """
     (filename, bytes) を受け取り、一時ファイルに書いて upload_files_slack() で送る。
-    scripts/jma_adv.py の「生成したJPG」を直接Slackへ投げるための橋渡し。
     """
     tmp_paths: list[str] = []
     try:
         for i, (name, blob) in enumerate(files):
             safe = sanitize_filename(name)
             suffix = os.path.splitext(safe)[1] or ".bin"
-
-            # suffix だけだと区別がつかないので prefix も少し入れる
             with tempfile.NamedTemporaryFile(delete=False, prefix="slk_", suffix=suffix) as tf:
                 tf.write(blob)
                 tmp_paths.append(tf.name)
@@ -234,6 +231,77 @@ def upload_file_slack(
 ) -> None:
     """
     単発アップロードは upload_files_slack() のラッパーに統一
-    （二重実装による修正漏れ事故を防ぐ）
     """
     upload_files_slack(channel, [filepath], titles=[title], initial_comment=initial_comment)
+
+
+# ---------------------------------------------------------------
+# Webhook notify (quiet)
+# ---------------------------------------------------------------
+def post_slack_webhook(message: str) -> bool:
+    """
+    Incoming Webhook に投稿。
+    成功なら True。Webhook未設定なら False（=フォールバック可能）。
+    """
+    url = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
+    if not url:
+        return False
+
+    try:
+        r = requests.post(url, json={"text": message}, timeout=20)
+        if r.status_code >= 400:
+            print(f"[Slack] webhook failed: HTTP{r.status_code} {(r.text or '')[:200]}")
+            return False
+        print("[Slack] webhook notified")
+        return True
+    except Exception as e:
+        print(f"[Slack] webhook exception: {type(e).__name__}: {e}")
+        return False
+
+
+def _notion_page_url(page_id: Optional[str]) -> str:
+    if not page_id:
+        return ""
+    return f"https://www.notion.so/{page_id.replace('-', '')}"
+
+
+def notify_weather_delivery(
+    *,
+    category: str,
+    page_id: Optional[str],
+    errors: Optional[Sequence[str]] = None,
+    attach_count: Optional[int] = None,
+) -> None:
+    """
+    メール通知相当の粒度で「配信完了」を通知する。
+
+    表示例:
+    天気図配信
+    区分: Weathercaster
+    エラー: 0件
+    Notion: https://www.notion.so/xxxx
+    添付: 13件
+    """
+    errs = list(errors) if errors else []
+    err_count = len(errs)
+
+    lines = [
+        "天気図配信",
+        f"区分: {category}",
+        f"エラー: {err_count}件" + (f" / {errs[0]}" if err_count else ""),
+    ]
+
+    if page_id:
+        lines.append(f"Notion: {_notion_page_url(page_id)}")
+
+    if attach_count is not None:
+        lines.append(f"添付: {attach_count}件")
+
+    msg = "\n".join(lines)
+
+    # Webhook優先（チャンネルはWebhook側で #wx-python 固定）
+    if post_slack_webhook(msg):
+        return
+
+    # Webhookが無い場合は Bot token でフォールバック
+    send_slack_text_default(msg)
