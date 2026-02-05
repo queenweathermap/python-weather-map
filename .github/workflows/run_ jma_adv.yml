@@ -7,11 +7,13 @@ on:
     - cron: "0 0  * * *"   # 09:00 JST
     - cron: "0 6  * * *"   # 15:00 JST
     - cron: "0 12 * * *"   # 21:00 JST
-  workflow_dispatch: {}
-
-concurrency:
-  group: run-adv-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_dispatch:
+    inputs:
+      join_triple:
+        description: "画像を3枚結合（3up）するか（普段はfalse推奨）"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   run-adv:
@@ -40,7 +42,8 @@ jobs:
       # 画像処理
       JPG_QUALITY: "85"
       INIT_SEARCH_HOURS: "72"
-      JOIN_TRIPLE: "1"
+      # スケジュール実行では inputs が無いので、デフォルトは 0（結合しない）
+      JOIN_TRIPLE: ${{ github.event_name == 'workflow_dispatch' && (inputs.join_triple && '1' || '0') || '0' }}
 
       # R2
       R2_ENABLE: "1"
