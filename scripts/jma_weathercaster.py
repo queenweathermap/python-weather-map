@@ -9,12 +9,14 @@
 # 追加（エマグラム）:
 # - 外部GIFを取得し、同じ Notion ページ本文へ追加（coverはPDF代表を維持）
 #
-# 追加（アメダス）:
-# - “取得はしない”
-# - Notion本文に「ブックマーク（リンクカード）」で fuken.html を追加する
+# 追加（リンクカード増量）:
+# - 取得はしない（HTTP401/構造変化対策）
+# - Notion本文の先頭に「ブックマーク（リンクカード）」で複数URLを追加する
+#   - GSMガイダンス / MSMガイダンス / 週間ガイダンス / 分布予報（市町村一覧）
+# - アメダスも同様にリンクカードで追加
 #
 # 追加（Slack通知）:
-# - Notion配信完了したら #wx-python に静かに通知（Webhook優先）
+# - Notion配信完了したら #wx-python に通知（Webhook優先）
 # =============================================================================
 
 from __future__ import annotations
@@ -75,6 +77,18 @@ AMEDAS_LINK = os.environ.get(
     "AMEDAS_LINK",
     "https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html"
 ).strip()
+
+# ---- ガイダンス・関連リンク（リンクのみ）----
+GUIDANCE_LINKS = [
+    ("GSMガイダンス",
+     "https://www.weathercaster.jp/web/member_only/weather-data/guidance/gui_ken_hour.html"),
+    ("MSMガイダンス",
+     "https://www.weathercaster.jp/web/member_only/weather-data/msm_guidance/gui_ken_hour.html"),
+    ("週間ガイダンス",
+     "https://www.weathercaster.jp/web/member_only/weather-data/week_guidance/gui_all_daily.html"),
+    ("気象庁 分布予報（市町村一覧）",
+     "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/bunpu_office_2.cgi#05"),
+]
 
 # --- Notion property names ---
 PROP_TITLE = os.environ.get("NOTION_PROP_TITLE", "名前")
@@ -219,18 +233,21 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
 
         images.extend(atts)
 
-    # --- Emagram GIF ---
+    # --- Emagram GIF（本文画像の先頭に配置） ---
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
         if last_mod:
             dt = _httpdate_to_utc_dt(last_mod)
             if dt:
                 lm_dts.append(dt)
-
+    
         if blob:
             mimetype = ct if ct else "image/gif"
             fname = EMAGRAM_FILENAME or "ema_aki_00.gif"
-            images.append((fname, blob, mimetype))
+    
+            # ★ ここがポイント：先頭に入れる
+            images.insert(0, (fname, blob, mimetype))
+    
             try:
                 with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
                     f.write(blob)
@@ -238,6 +255,7 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
                 pass
         else:
             errors.append(f"EMAGRAM: download failed (HTTP={st})")
+
 
     issued_dt_utc_guess = min(lm_dts) if lm_dts else None
     return images, errors, issued_dt_utc_guess
@@ -361,7 +379,13 @@ def notion_write_db(
     if rep_url:
         set_page_cover(page_id, rep_url)
 
-    # アメダス（リンク）を“ブックマーク”で
+    # --- 本文先頭：ガイダンス/関連リンク（リンクカード） ---
+    if GUIDANCE_LINKS:
+        append_heading(page_id, "ガイダンス・関連リンク", level=2)
+        for cap, url in GUIDANCE_LINKS:
+            append_bookmark(page_id, url, caption=cap)
+
+    # --- アメダス（リンクカード） ---
     if AMEDAS_LINK:
         append_heading(page_id, "アメダス（リンク）", level=2)
         append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
@@ -393,7 +417,8 @@ def main() -> None:
         if images:
             all_urls, rep_url = upload_to_r2(run_prefix, images)
 
-        if all_urls or AMEDAS_LINK:
+        # ページは「画像がある」or「リンクがある」なら作る
+        if all_urls or AMEDAS_LINK or GUIDANCE_LINKS:
             page_id = notion_write_db(
                 issue_base_utc=issue_base_utc,
                 rjtd=rjtd,
