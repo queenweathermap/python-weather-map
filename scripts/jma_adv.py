@@ -282,7 +282,11 @@ def fetch_item_images(model_name: str, cfg: ModelCfg, init_dt: datetime, item: I
                 continue
 
             jpg = png_bytes_to_jpg_bytes(r.content, quality=quality)
-            fn = f"{item.jpg_prefix}_VIEW{view_code}_RJTD_{rjtd}.jpg"
+
+            # ★変更点：FTをファイル名に埋め込む（Notion/R2上での整列を強化）
+            # 例）xxx_FT003_VIEW....jpg  → 文字列ソートでもFT順が崩れにくい
+            fn = f"{item.jpg_prefix}_FT{ft:03d}_VIEW{view_code}_RJTD_{rjtd}.jpg"
+
             atts.append((fn, jpg, "image/jpeg"))
         except Exception:
             continue
