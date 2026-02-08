@@ -35,7 +35,7 @@ class ModelCfg:
 
 
 def ft_list_gsm() -> List[int]:
-    return [0] + list(range(3, 73, 3))  # 0,3,6,9,...,72
+    return [0] + list(range(6, 73, 3))  # 0,3,6,9,...,72
 
 def ft_list_msm() -> List[int]:
     return list(range(6, 73))  # 1..72
