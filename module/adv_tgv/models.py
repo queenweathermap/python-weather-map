@@ -41,7 +41,7 @@ def ft_list_msm() -> List[int]:
     return list(range(6, 73))  # 1..72
 
 def ft_list_lfm() -> List[int]:
-    return list(range(4, 19))  # 4..18
+    return list(range(4, 48))  # 4..18
 
 
 
