@@ -17,6 +17,10 @@
 #
 # 追加（Slack通知）:
 # - Notion配信完了したら #wx-python に通知（Webhook優先）
+#
+# ★運用方針（重要）
+# - 「発行基準時刻（init）」は JST の 03/09/15/21 に揃える
+# - issued_guess（推定）は PDF の Last-Modified を優先（エマグラムLMに引っ張られない）
 # =============================================================================
 
 from __future__ import annotations
@@ -54,6 +58,10 @@ PDF_FILES = [
     "FXJP854.pdf", "FXXN519.pdf", "FZCX50.pdf",
     "TKAISETU.pdf", "SKAISETU.pdf", "FEFE19.pdf",
 ]
+
+# issued_guess（発行推定）に使う “基準PDF” を限定したい場合（推奨）
+# 例: WEATHERCASTER_ISSUE_PROBE_PDFS="COMP12.pdf,COMP36.pdf,COMP72.pdf"
+PROBE_PDFS_ENV = os.environ.get("WEATHERCASTER_ISSUE_PROBE_PDFS", "").strip()
 
 USER = os.environ.get("WEATHERCASTER_USER", "").strip()
 PASS = os.environ.get("WEATHERCASTER_PASS", "").strip()
@@ -122,17 +130,37 @@ def _httpdate_to_utc_dt(http_date: str) -> Optional[datetime]:
         return None
 
 
-def _floor_to_6h(dt_utc: datetime) -> datetime:
-    """UTC 時刻を 6時間単位（00/06/12/18Z）に切り捨て。"""
+def _parse_probe_pdfs() -> List[str]:
+    """
+    発行推定に使う “基準PDF” のリスト。
+    指定があればそれを使用。なければ COMP系を優先、なければ全PDF。
+    """
+    if PROBE_PDFS_ENV:
+        parts = [p.strip() for p in PROBE_PDFS_ENV.split(",") if p.strip()]
+        return parts
+
+    # デフォルトは COMP 系を優先（更新の筋が良いことが多い）
+    comp = [p for p in PDF_FILES if p.startswith("COMP")]
+    return comp if comp else PDF_FILES[:]
+
+
+def _floor_to_6h_jst_03_09_15_21(dt_utc: datetime) -> datetime:
+    """
+    JSTで 03/09/15/21 の6時間境界に切り捨ててから UTC に戻す。
+    例) 12:51JST → 09:00JST, 16:51JST → 15:00JST
+    """
+    jst = jst_tz()
     if dt_utc.tzinfo is None:
         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-    dt_utc = dt_utc.astimezone(timezone.utc)
-    h = (dt_utc.hour // 6) * 6
-    return dt_utc.replace(hour=h, minute=0, second=0, microsecond=0)
 
+    dt_jst = dt_utc.astimezone(jst)
 
-def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    # 3時間オフセットして 6h丸め → 3時間戻す
+    dt_shift = dt_jst - timedelta(hours=3)
+    h = (dt_shift.hour // 6) * 6
+    dt_floor = dt_shift.replace(hour=h, minute=0, second=0, microsecond=0) + timedelta(hours=3)
+
+    return dt_floor.astimezone(timezone.utc)
 
 
 def fetch_pdf_content(name: str) -> Tuple[Optional[bytes], Optional[str], Optional[int]]:
@@ -207,8 +235,10 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     images: List[Attachment] = []
     errors: List[str] = []
 
-    lm_dts_pdf: List[datetime] = []
-    lm_dts_other: List[datetime] = []
+    # PDFの LM を「全部」と「プローブ対象」に分けて持つ（遅延PDF対策）
+    lm_dts_pdf_all: List[datetime] = []
+    lm_dts_pdf_probe: List[datetime] = []
+    probe_set = set(_parse_probe_pdfs())
 
     # --- PDFs ---
     for name in PDF_FILES:
@@ -216,7 +246,9 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
         if last_mod:
             dt = _httpdate_to_utc_dt(last_mod)
             if dt:
-                lm_dts_pdf.append(dt)
+                lm_dts_pdf_all.append(dt)
+                if name in probe_set:
+                    lm_dts_pdf_probe.append(dt)
 
         if not pdf:
             errors.append(f"{name}: download failed (HTTP={st})")
@@ -231,8 +263,11 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
             continue
 
         for fname, blob, _ in atts:
-            with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
-                f.write(blob)
+            try:
+                with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                    f.write(blob)
+            except Exception:
+                pass
 
         images.extend(atts)
 
@@ -242,15 +277,11 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
 
         # ★重要：エマグラムの Last-Modified は “基準時刻” 判定に使わない
         # （LMが古い/固定/欠落で、09:00 側に引っ張られることがある）
-        if last_mod:
-            dt = _httpdate_to_utc_dt(last_mod)
-            if dt:
-                lm_dts_other.append(dt)
-
         if blob:
             mimetype = ct if ct else "image/gif"
             fname = EMAGRAM_FILENAME or "ema_aki_00.gif"
 
+            # ★先頭に入れる
             images.insert(0, (fname, blob, mimetype))
 
             try:
@@ -261,15 +292,14 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
         else:
             errors.append(f"EMAGRAM: download failed (HTTP={st})")
 
-    # ★基準時刻は「PDFの最新更新」を採用（PDFが無い場合のみ other）
+    # ★基準時刻は「プローブPDFの最新更新」を最優先（無ければ全PDFの最新）
     issued_dt_utc_guess: Optional[datetime] = None
-    if lm_dts_pdf:
-        issued_dt_utc_guess = max(lm_dts_pdf)
-    elif lm_dts_other:
-        issued_dt_utc_guess = max(lm_dts_other)
+    if lm_dts_pdf_probe:
+        issued_dt_utc_guess = max(lm_dts_pdf_probe)
+    elif lm_dts_pdf_all:
+        issued_dt_utc_guess = max(lm_dts_pdf_all)
 
     return images, errors, issued_dt_utc_guess
-
 
 
 def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Optional[str]]:
@@ -408,22 +438,6 @@ def notion_write_db(
     return page_id
 
 
-def _floor_to_6h_jst(dt_utc: datetime) -> datetime:
-    """JSTで 03/09/15/21 の6時間境界に切り捨ててから UTC に戻す"""
-    jst = jst_tz()
-    if dt_utc.tzinfo is None:
-        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-    dt_jst = dt_utc.astimezone(jst)
-
-    # 3時間オフセットして 6h丸め → 3時間戻す
-    dt_shift = dt_jst - timedelta(hours=3)
-    h = (dt_shift.hour // 6) * 6
-    dt_floor = dt_shift.replace(hour=h, minute=0, second=0, microsecond=0) + timedelta(hours=3)
-
-    return dt_floor.astimezone(timezone.utc)
-
-
-
 def main() -> None:
     page_id: Optional[str] = None
     all_urls: List[str] = []
@@ -432,8 +446,11 @@ def main() -> None:
     try:
         images, errors, issued_guess_utc = build_outputs()
 
+        # 1) issued_guess（PDF優先）をベースに
         base_utc_src = issued_guess_utc or datetime.now(timezone.utc)
-        issue_base_utc = _floor_to_6h_jst(base_utc_src)
+
+        # 2) “イニシャル”は JST 03/09/15/21 に揃える
+        issue_base_utc = _floor_to_6h_jst_03_09_15_21(base_utc_src)
 
         rjtd = issue_base_utc.strftime("%d%H%M")       # ddHHMM
         day = issue_base_utc.strftime("%Y%m%d")        # YYYYMMDD
