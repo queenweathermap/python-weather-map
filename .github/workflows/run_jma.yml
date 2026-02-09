@@ -35,6 +35,9 @@ jobs:
       WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
       WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
 
+      # ★堅牢化：発行推定に使うプローブPDF（遅延PDFに引っ張られない）
+      WEATHERCASTER_ISSUE_PROBE_PDFS: "COMP12.pdf,COMP36.pdf,COMP72.pdf"
+
       # R2
       R2_ENABLE: "1"
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
