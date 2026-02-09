@@ -12,15 +12,15 @@
 # 追加（リンクカード増量）:
 # - 取得はしない（HTTP401/構造変化対策）
 # - Notion本文の先頭に「ブックマーク（リンクカード）」で複数URLを追加する
-#   - GSMガイダンス / MSMガイダンス / 週間ガイダンス / 分布予報（市町村一覧）
-# - アメダスも同様にリンクカードで追加
 #
 # 追加（Slack通知）:
 # - Notion配信完了したら #wx-python に通知（Webhook優先）
 #
-# ★運用方針（重要）
-# - 「発行基準時刻（init）」は JST の 03/09/15/21 に揃える
-# - issued_guess（推定）は PDF の Last-Modified を優先（エマグラムLMに引っ張られない）
+# ★堅牢化（重要）
+# - issued_guess（発行推定）は PDF の Last-Modified を優先（エマグラムLMには引っ張られない）
+# - 遅延PDFでズレないよう「プローブPDF集合」を env で指定可能:
+#     WEATHERCASTER_ISSUE_PROBE_PDFS="COMP12.pdf,COMP36.pdf,COMP72.pdf"
+# - init（発行基準時刻）は JST の 03/09/15/21 に揃える
 # =============================================================================
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ import requests
 from pdf2image import convert_from_bytes
 
 from r2_utils import put_bytes, make_url
-
 from module.utils.notion_utils import (
     notion_enabled,
     create_db_row,
@@ -45,7 +44,6 @@ from module.utils.notion_utils import (
     append_heading,
     append_bookmark,
 )
-
 from module.utils.slack_utils import notify_weather_delivery
 
 
@@ -139,7 +137,6 @@ def _parse_probe_pdfs() -> List[str]:
         parts = [p.strip() for p in PROBE_PDFS_ENV.split(",") if p.strip()]
         return parts
 
-    # デフォルトは COMP 系を優先（更新の筋が良いことが多い）
     comp = [p for p in PDF_FILES if p.startswith("COMP")]
     return comp if comp else PDF_FILES[:]
 
@@ -243,6 +240,7 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     # --- PDFs ---
     for name in PDF_FILES:
         pdf, last_mod, st = fetch_pdf_content(name)
+
         if last_mod:
             dt = _httpdate_to_utc_dt(last_mod)
             if dt:
@@ -281,7 +279,6 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
             mimetype = ct if ct else "image/gif"
             fname = EMAGRAM_FILENAME or "ema_aki_00.gif"
 
-            # ★先頭に入れる
             images.insert(0, (fname, blob, mimetype))
 
             try:
@@ -416,22 +413,18 @@ def notion_write_db(
     if not page_id:
         return None
 
-    # cover は代表のみ
     if rep_url:
         set_page_cover(page_id, rep_url)
 
-    # --- 本文先頭：ガイダンス/関連リンク（リンクカード） ---
     if GUIDANCE_LINKS:
         append_heading(page_id, "ガイダンス・関連リンク", level=2)
         for cap, url in GUIDANCE_LINKS:
             append_bookmark(page_id, url, caption=cap)
 
-    # --- アメダス（リンクカード） ---
     if AMEDAS_LINK:
         append_heading(page_id, "アメダス（リンク）", level=2)
         append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
 
-    # 本文：画像一式（PDF由来＋エマグラム）
     if all_urls:
         append_images(page_id, all_urls, chunk=30)
 
@@ -446,10 +439,9 @@ def main() -> None:
     try:
         images, errors, issued_guess_utc = build_outputs()
 
-        # 1) issued_guess（PDF優先）をベースに
         base_utc_src = issued_guess_utc or datetime.now(timezone.utc)
 
-        # 2) “イニシャル”は JST 03/09/15/21 に揃える
+        # “イニシャル”は JST 03/09/15/21 に揃える
         issue_base_utc = _floor_to_6h_jst_03_09_15_21(base_utc_src)
 
         rjtd = issue_base_utc.strftime("%d%H%M")       # ddHHMM
@@ -461,7 +453,6 @@ def main() -> None:
         if images:
             all_urls, rep_url = upload_to_r2(run_prefix, images)
 
-        # ページは「画像がある」or「リンクがある」なら作る
         if all_urls or AMEDAS_LINK or GUIDANCE_LINKS:
             page_id = notion_write_db(
                 issue_base_utc=issue_base_utc,
@@ -472,7 +463,6 @@ def main() -> None:
                 errors=errors,
             )
 
-        # ---- Slack notify（Notion配信完了の合図）----
         if page_id:
             notify_weather_delivery(
                 category="Weathercaster",
