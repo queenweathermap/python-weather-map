@@ -406,7 +406,7 @@ def main() -> None:
         images, errors, issued_guess_utc = build_outputs()
 
         base_utc_src = issued_guess_utc or datetime.now(timezone.utc)
-        issue_base_utc = _floor_to_6h(base_utc_src)
+        issue_base_utc = base_utc_src.replace(second=0, microsecond=0)
 
         rjtd = issue_base_utc.strftime("%d%H%M")       # ddHHMM
         day = issue_base_utc.strftime("%Y%m%d")        # YYYYMMDD
