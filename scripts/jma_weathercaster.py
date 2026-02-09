@@ -408,6 +408,22 @@ def notion_write_db(
     return page_id
 
 
+def _floor_to_6h_jst(dt_utc: datetime) -> datetime:
+    """JSTで 03/09/15/21 の6時間境界に切り捨ててから UTC に戻す"""
+    jst = jst_tz()
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    dt_jst = dt_utc.astimezone(jst)
+
+    # 3時間オフセットして 6h丸め → 3時間戻す
+    dt_shift = dt_jst - timedelta(hours=3)
+    h = (dt_shift.hour // 6) * 6
+    dt_floor = dt_shift.replace(hour=h, minute=0, second=0, microsecond=0) + timedelta(hours=3)
+
+    return dt_floor.astimezone(timezone.utc)
+
+
+
 def main() -> None:
     page_id: Optional[str] = None
     all_urls: List[str] = []
@@ -417,7 +433,7 @@ def main() -> None:
         images, errors, issued_guess_utc = build_outputs()
 
         base_utc_src = issued_guess_utc or datetime.now(timezone.utc)
-        issue_base_utc = base_utc_src.replace(second=0, microsecond=0)
+        issue_base_utc = _floor_to_6h_jst(base_utc_src)
 
         rjtd = issue_base_utc.strftime("%d%H%M")       # ddHHMM
         day = issue_base_utc.strftime("%Y%m%d")        # YYYYMMDD
