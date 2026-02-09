@@ -198,14 +198,17 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     returns:
       - images: 変換済み JPG + エマグラム（GIF）
       - errors: 失敗一覧
-      - issued_dt_utc_guess: Last-Modified の最小値（推定）を UTC で返す（取れなければ None）
+      - issued_dt_utc_guess: 発行基準時刻の推定（UTC）
+        ※ PDFの更新時刻を優先し、エマグラムのLMには引っ張られない
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     images: List[Attachment] = []
     errors: List[str] = []
-    lm_dts: List[datetime] = []
+
+    lm_dts_pdf: List[datetime] = []
+    lm_dts_other: List[datetime] = []
 
     # --- PDFs ---
     for name in PDF_FILES:
@@ -213,7 +216,7 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
         if last_mod:
             dt = _httpdate_to_utc_dt(last_mod)
             if dt:
-                lm_dts.append(dt)
+                lm_dts_pdf.append(dt)
 
         if not pdf:
             errors.append(f"{name}: download failed (HTTP={st})")
@@ -236,18 +239,20 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     # --- Emagram GIF（本文画像の先頭に配置） ---
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
+
+        # ★重要：エマグラムの Last-Modified は “基準時刻” 判定に使わない
+        # （LMが古い/固定/欠落で、09:00 側に引っ張られることがある）
         if last_mod:
             dt = _httpdate_to_utc_dt(last_mod)
             if dt:
-                lm_dts.append(dt)
-    
+                lm_dts_other.append(dt)
+
         if blob:
             mimetype = ct if ct else "image/gif"
             fname = EMAGRAM_FILENAME or "ema_aki_00.gif"
-    
-            # ★ ここがポイント：先頭に入れる
+
             images.insert(0, (fname, blob, mimetype))
-    
+
             try:
                 with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
                     f.write(blob)
@@ -256,9 +261,15 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
         else:
             errors.append(f"EMAGRAM: download failed (HTTP={st})")
 
+    # ★基準時刻は「PDFの最新更新」を採用（PDFが無い場合のみ other）
+    issued_dt_utc_guess: Optional[datetime] = None
+    if lm_dts_pdf:
+        issued_dt_utc_guess = max(lm_dts_pdf)
+    elif lm_dts_other:
+        issued_dt_utc_guess = max(lm_dts_other)
 
-    issued_dt_utc_guess = min(lm_dts) if lm_dts else None
     return images, errors, issued_dt_utc_guess
+
 
 
 def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Optional[str]]:
