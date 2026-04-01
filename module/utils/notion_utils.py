@@ -32,6 +32,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import List, Optional, Dict, Any
 
 import requests
@@ -102,13 +103,135 @@ def _prop_prefix() -> str:
 
 
 # -----------------------------------------------------------------------------
+# Internal helpers
+# -----------------------------------------------------------------------------
+def _safe_preview_text(s: str, limit: int = 180) -> str:
+    s = (s or "").replace("\n", " ")
+    return s[:limit] + ("..." if len(s) > limit else "")
+
+
+def _post_children_once(page_or_block_id: str, children: List[dict], *, timeout: int = 60) -> requests.Response:
+    payload = {"children": children}
+    return requests.patch(
+        f"{API_BASE}/blocks/{page_or_block_id}/children",
+        headers=_headers(),
+        json=payload,
+        timeout=timeout,
+    )
+
+
+def _append_children_with_retry(
+    page_or_block_id: str,
+    children: List[dict],
+    *,
+    label: str = "children",
+    max_retries: int = 3,
+    sleep_seconds: float = 1.2,
+) -> None:
+    """
+    Notion blocks/{id}/children 追加の堅牢版
+    - 429 / 5xx はリトライ
+    - 400 などで children が複数なら半分に分割して再試行
+    - 1件でも失敗する場合は詳細ログを出して raise
+    """
+    if not children:
+        return
+
+    attempt = 0
+    last_exc: Optional[Exception] = None
+
+    while attempt < max_retries:
+        attempt += 1
+        try:
+            r = _post_children_once(page_or_block_id, children)
+            r.raise_for_status()
+            if attempt > 1:
+                print(f"[NOTION][OK] {label}: recovered on retry {attempt}/{max_retries} size={len(children)}")
+            return
+        except requests.HTTPError as e:
+            last_exc = e
+            resp = e.response
+            status = resp.status_code if resp is not None else None
+            body = ""
+            try:
+                body = _safe_preview_text(resp.text if resp is not None else "")
+            except Exception:
+                body = ""
+
+            print(
+                f"[NOTION][WARN] append failed "
+                f"label={label} block={page_or_block_id} size={len(children)} "
+                f"attempt={attempt}/{max_retries} status={status} body={body}"
+            )
+
+            # 429 / 5xx は待ってリトライ
+            if status == 429:
+                retry_after = 0
+                try:
+                    retry_after = int(resp.headers.get("Retry-After", "0"))
+                except Exception:
+                    retry_after = 0
+                wait = retry_after if retry_after > 0 else sleep_seconds * attempt
+                time.sleep(wait)
+                continue
+
+            if status is not None and 500 <= status <= 599:
+                time.sleep(sleep_seconds * attempt)
+                continue
+
+            # 400系などで複数件なら分割して再帰的に投入
+            if len(children) > 1:
+                mid = max(1, len(children) // 2)
+                left = children[:mid]
+                right = children[mid:]
+                print(
+                    f"[NOTION][INFO] split retry "
+                    f"label={label} block={page_or_block_id} "
+                    f"{len(children)} -> {len(left)} + {len(right)}"
+                )
+                _append_children_with_retry(
+                    page_or_block_id,
+                    left,
+                    label=f"{label}/L",
+                    max_retries=max_retries,
+                    sleep_seconds=sleep_seconds,
+                )
+                _append_children_with_retry(
+                    page_or_block_id,
+                    right,
+                    label=f"{label}/R",
+                    max_retries=max_retries,
+                    sleep_seconds=sleep_seconds,
+                )
+                return
+
+            # 1件で落ちたときは内容を少し出す
+            bad = children[0]
+            print(f"[NOTION][ERROR] single child rejected label={label} child={bad}")
+            raise
+
+        except requests.RequestException as e:
+            last_exc = e
+            print(
+                f"[NOTION][WARN] network/request error "
+                f"label={label} block={page_or_block_id} size={len(children)} "
+                f"attempt={attempt}/{max_retries} error={e}"
+            )
+            time.sleep(sleep_seconds * attempt)
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"Notion append failed: {label}")
+
+
+# -----------------------------------------------------------------------------
 # DB row create
 # -----------------------------------------------------------------------------
 def create_db_row(
     *,
     title: str,
-    category: str,                 # "ADV" or "Weathercaster"
-    init_jst_iso: str,             # ISO8601 with timezone, e.g. "2026-02-03T09:00:00+09:00"
+    category: str,
+    init_jst_iso: str,
     memo: str = "",
     rjtd: str = "",
     prefix: str = "",
@@ -116,9 +239,6 @@ def create_db_row(
     autogen: bool = True,
     icon_emoji: str = "🗺️",
 ) -> Optional[str]:
-    """
-    指定DBへ1行（=ページ）を作成して page_id を返す。
-    """
     if not notion_enabled():
         return None
 
@@ -155,9 +275,6 @@ def create_db_row(
 
 
 def set_page_cover(page_id: str, image_url: str) -> None:
-    """
-    ページのカバー画像を外部URLで設定（代表画像用）
-    """
     if not notion_enabled():
         return
     if not image_url:
@@ -172,9 +289,6 @@ def set_page_cover(page_id: str, image_url: str) -> None:
 # Blocks append
 # -----------------------------------------------------------------------------
 def append_heading(page_or_block_id: str, text: str, *, level: int = 2) -> Optional[str]:
-    """
-    見出しブロック（heading_2 / heading_3）を追加し、その block_id を返す
-    """
     if not notion_enabled():
         return None
 
@@ -202,11 +316,7 @@ def append_heading(page_or_block_id: str, text: str, *, level: int = 2) -> Optio
     return results[0]["id"]
 
 
-
 def append_toggle(page_or_block_id: str, title: str) -> Optional[str]:
-    """
-    toggleブロックを追加し、その block_id を返す
-    """
     if not notion_enabled():
         return None
     if not title:
@@ -234,9 +344,11 @@ def append_toggle(page_or_block_id: str, title: str) -> Optional[str]:
     return results[0]["id"]
 
 
-def append_images(page_or_block_id: str, urls: List[str], *, chunk: int = 50) -> None:
+def append_images(page_or_block_id: str, urls: List[str], *, chunk: int = 10) -> None:
     """
     外部URL画像を Notion に埋め込みで追加（ページでもトグルでもOK）
+    - chunk を小さめに
+    - 失敗時は自動分割・リトライ
     """
     if not notion_enabled():
         return
@@ -256,15 +368,14 @@ def append_images(page_or_block_id: str, urls: List[str], *, chunk: int = 50) ->
             for u in part
         ]
 
-        payload = {"children": children}
-        r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
-        r.raise_for_status()
+        _append_children_with_retry(
+            page_or_block_id,
+            children,
+            label=f"images[{i}:{i + len(part)}]",
+        )
 
 
 def append_text(page_or_block_id: str, text: str, *, chunk_chars: int = 1800) -> None:
-    """
-    段落（paragraph）ブロックとしてテキストを追加
-    """
     if not notion_enabled():
         return
 
@@ -288,9 +399,6 @@ def append_text(page_or_block_id: str, text: str, *, chunk_chars: int = 1800) ->
 
 
 def append_code_block(page_or_block_id: str, text: str, *, language: str = "plain text", chunk_chars: int = 1800) -> None:
-    """
-    codeブロックとして追加（表の貼り付けやログ用途）
-    """
     if not notion_enabled():
         return
 
@@ -298,7 +406,6 @@ def append_code_block(page_or_block_id: str, text: str, *, language: str = "plai
     if not text:
         return
 
-    # code も長いと落ちるので分割
     for i in range(0, len(text), chunk_chars):
         part = text[i:i + chunk_chars]
         payload = {
@@ -318,10 +425,6 @@ def append_code_block(page_or_block_id: str, text: str, *, language: str = "plai
 
 
 def append_files(page_or_block_id: str, files: List[dict], *, chunk: int = 20) -> None:
-    """
-    外部URLファイルを Notion に添付（fileブロック）
-    files: [{"url": "...", "name": "xxx.csv"}, ...]
-    """
     if not notion_enabled():
         return
 
@@ -346,15 +449,14 @@ def append_files(page_or_block_id: str, files: List[dict], *, chunk: int = 20) -
 
             children.append(file_obj)
 
-        payload = {"children": children}
-        r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
-        r.raise_for_status()
+        _append_children_with_retry(
+            page_or_block_id,
+            children,
+            label=f"files[{i}:{i + len(part)}]",
+        )
 
 
 def append_bookmark(page_or_block_id: str, url: str, *, caption: str = "") -> None:
-    """
-    ブックマーク（リンクカード）を追加
-    """
     if not notion_enabled():
         return
 
@@ -371,6 +473,8 @@ def append_bookmark(page_or_block_id: str, url: str, *, caption: str = "") -> No
     if caption:
         block["bookmark"]["caption"] = [{"type": "text", "text": {"content": caption}}]
 
-    payload = {"children": [block]}
-    r = requests.patch(f"{API_BASE}/blocks/{page_or_block_id}/children", headers=_headers(), json=payload, timeout=60)
-    r.raise_for_status()
+    _append_children_with_retry(
+        page_or_block_id,
+        [block],
+        label="bookmark",
+    )
