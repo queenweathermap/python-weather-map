@@ -15,6 +15,11 @@
 #   - 画像はR2 URLをembed表示
 #   - 1投稿最大10画像
 #   - 最後にNotion URL付き完了通知を投稿
+#
+# エマグラム設計:
+#   - 本文にはGIFをそのまま表示
+#   - Notionカバー用にGIFの1フレーム目をJPG化
+#   - カバーはJPGにすることでNotion 400エラーを避ける
 # =============================================================================
 
 from __future__ import annotations
@@ -31,10 +36,11 @@ import os
 import shutil
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional
 
 import requests
 from pdf2image import convert_from_bytes
+from PIL import Image
 
 from r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
@@ -107,6 +113,9 @@ def discord_weathercaster_enabled() -> bool:
 
 
 def notion_page_url(page_id: str) -> str:
+    """
+    Notionのpage_idからブラウザURLを作る。
+    """
     clean = (page_id or "").replace("-", "")
     return f"https://www.notion.so/{clean}" if clean else ""
 
@@ -147,20 +156,6 @@ GUIDANCE_LINKS = [
 ]
 
 
-# =============================================================================
-# Notion property names
-# =============================================================================
-PROP_TITLE = os.environ.get("NOTION_PROP_TITLE", "名前")
-PROP_CATEGORY = os.environ.get("NOTION_PROP_CATEGORY", "区分")
-PROP_MODEL = os.environ.get("NOTION_PROP_MODEL", "").strip()
-PROP_INITJST = os.environ.get("NOTION_PROP_INIT_JST", "発行基準時刻")
-PROP_MEMO = os.environ.get("NOTION_PROP_MEMO", "メモ")
-
-PROP_AUTOGEN = os.environ.get("NOTION_PROP_AUTOGEN", "自動生成")
-PROP_RJTD = os.environ.get("NOTION_PROP_RJTD", "RJTD")
-PROP_PREFIX = os.environ.get("NOTION_PROP_PREFIX", "prefix")
-PROP_R2URL = os.environ.get("NOTION_PROP_R2URL", "R2 URL")
-
 Attachment = Tuple[str, bytes, str]
 
 
@@ -172,6 +167,9 @@ def jst_tz() -> timezone:
 
 
 def _httpdate_to_utc_dt(http_date: str) -> Optional[datetime]:
+    """
+    Last-ModifiedなどのHTTP-dateをUTC datetimeへ変換する。
+    """
     try:
         dt = parsedate_to_datetime(http_date)
         if dt.tzinfo is None:
@@ -182,6 +180,10 @@ def _httpdate_to_utc_dt(http_date: str) -> Optional[datetime]:
 
 
 def _parse_probe_pdfs() -> List[str]:
+    """
+    発行基準時刻の推定に使うPDFを選ぶ。
+    指定があればそれを使い、なければCOMP系を優先する。
+    """
     if PROBE_PDFS_ENV:
         return [p.strip() for p in PROBE_PDFS_ENV.split(",") if p.strip()]
 
@@ -190,6 +192,9 @@ def _parse_probe_pdfs() -> List[str]:
 
 
 def _floor_to_6h_jst_03_09_15_21(dt_utc: datetime) -> datetime:
+    """
+    JSTの03/09/15/21時に丸める。
+    """
     jst = jst_tz()
 
     if dt_utc.tzinfo is None:
@@ -208,6 +213,9 @@ def _floor_to_6h_jst_03_09_15_21(dt_utc: datetime) -> datetime:
 # 取得
 # =============================================================================
 def fetch_pdf_content(name: str) -> Tuple[Optional[bytes], Optional[str], Optional[int]]:
+    """
+    WeathercasterのPDFを取得する。
+    """
     url = f"{BASE_URL}/{name}"
 
     try:
@@ -226,6 +234,10 @@ def fetch_pdf_content(name: str) -> Tuple[Optional[bytes], Optional[str], Option
 
 
 def fetch_image_content(url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int], Optional[str]]:
+    """
+    外部画像を取得する。
+    エマグラムGIF取得に使う。
+    """
     try:
         headers = {"User-Agent": "weathercaster-jma-bot/1.0"}
         r = requests.get(url, headers=headers, timeout=30)
@@ -245,13 +257,22 @@ def fetch_image_content(url: str) -> Tuple[Optional[bytes], Optional[str], Optio
 
 
 # =============================================================================
-# PDF → JPG
+# 画像変換
 # =============================================================================
 def pdf_bytes_to_jpgs(
     pdf_bytes: bytes,
     base_filename: str,
     force_all: bool = False,
 ) -> List[Attachment]:
+    """
+    PDFをJPGへ変換する。
+
+    通常:
+      1ページ目のみ
+
+    TKAISETU / SKAISETU:
+      複数ページを全部JPG化
+    """
     images = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
 
     if not images:
@@ -273,10 +294,43 @@ def pdf_bytes_to_jpgs(
     return out
 
 
+def gif_to_jpg_bytes(gif_bytes: bytes, quality: int = 85) -> bytes:
+    """
+    GIFの1フレーム目をJPGに変換する。
+
+    用途:
+      Notionカバー用。
+
+    理由:
+      Notionカバーに外部GIFを指定すると400エラーになることがあるため。
+      本文にはGIFをそのまま表示し、カバーだけJPGにする。
+    """
+    with Image.open(io.BytesIO(gif_bytes)) as im:
+        im.seek(0)
+        im = im.convert("RGB")
+
+        out = io.BytesIO()
+        im.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue()
+
+
 # =============================================================================
 # 出力構築
 # =============================================================================
 def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
+    """
+    PDF群とエマグラムを取得し、R2へアップロードするための画像配列を作る。
+
+    戻り値:
+      images:
+        R2へ上げる画像一覧
+
+      errors:
+        取得・変換エラー一覧
+
+      issued_dt_utc_guess:
+        発行基準時刻の推定
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -287,6 +341,9 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     lm_dts_pdf_probe: List[datetime] = []
     probe_set = set(_parse_probe_pdfs())
 
+    # -------------------------------------------------------------------------
+    # PDF取得
+    # -------------------------------------------------------------------------
     for name in PDF_FILES:
         pdf, last_mod, st = fetch_pdf_content(name)
 
@@ -319,23 +376,65 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
 
         images.extend(atts)
 
+    # -------------------------------------------------------------------------
+    # エマグラム取得
+    #
+    # ここが今回の重要ポイント:
+    #   1. 本文用GIFを残す
+    #   2. カバー用JPGも生成する
+    #
+    # 順番:
+    #   先頭: エマグラムJPG（Notionカバー候補）
+    #   次:   エマグラムGIF（本文表示用）
+    # -------------------------------------------------------------------------
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
 
         if blob:
-            mimetype = ct if ct else "image/gif"
-            fname = EMAGRAM_FILENAME or "ema_aki_00.gif"
+            gif_name = EMAGRAM_FILENAME or "ema_aki_00.gif"
 
-            images.insert(0, (fname, blob, mimetype))
+            # 本文用GIF
+            gif_mime = ct if ct else "image/gif"
+            gif_attachment: Attachment = (gif_name, blob, gif_mime)
 
+            # カバー用JPG
             try:
-                with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
-                    f.write(blob)
-            except Exception:
-                pass
+                jpg_blob = gif_to_jpg_bytes(blob, quality=JPEG_QUALITY)
+
+                if gif_name.lower().endswith(".gif"):
+                    jpg_name = gif_name[:-4] + "_cover.jpg"
+                else:
+                    jpg_name = gif_name + "_cover.jpg"
+
+                jpg_attachment: Attachment = (jpg_name, jpg_blob, "image/jpeg")
+
+                # カバー用JPGを最優先にする
+                images.insert(0, gif_attachment)
+                images.insert(0, jpg_attachment)
+
+                try:
+                    with open(os.path.join(OUTPUT_DIR, jpg_name), "wb") as f:
+                        f.write(jpg_blob)
+                    with open(os.path.join(OUTPUT_DIR, gif_name), "wb") as f:
+                        f.write(blob)
+                except Exception:
+                    pass
+
+            except Exception as e:
+                # JPG変換に失敗した場合でも、本文用GIFは残す
+                print(f"[WARN] emagram gif->jpg failed: {e}")
+                images.insert(0, gif_attachment)
+
+                try:
+                    with open(os.path.join(OUTPUT_DIR, gif_name), "wb") as f:
+                        f.write(blob)
+                except Exception:
+                    pass
+
         else:
             errors.append(f"EMAGRAM: download failed (HTTP={st})")
 
+    # 発行基準時刻はPDFのLast-Modifiedから推定
     issued_dt_utc_guess: Optional[datetime] = None
 
     if lm_dts_pdf_probe:
@@ -353,11 +452,28 @@ def upload_to_r2(
     run_prefix: str,
     atts: List[Attachment],
 ) -> Tuple[List[str], Optional[str]]:
+    """
+    R2へアップロードする。
+
+    戻り値:
+      all_urls:
+        Notion本文・Discord表示に使う全URL
+
+      rep_url:
+        Notionカバーに使う代表URL
+
+    代表URLの選び方:
+      1. *_cover.jpg を最優先
+      2. なければ最初のimage/jpeg
+      3. それもなければ最初のURL
+    """
     if not R2_ENABLE:
         return [], None
 
     urls: List[str] = []
-    rep: Optional[str] = None
+    rep_url: Optional[str] = None
+    first_url: Optional[str] = None
+    first_jpeg_url: Optional[str] = None
 
     for fname, blob, mime in atts:
         key = f"{run_prefix}/{fname}"
@@ -366,10 +482,19 @@ def upload_to_r2(
         url = make_url(key)
         urls.append(url)
 
-        if not rep:
-            rep = url
+        if first_url is None:
+            first_url = url
 
-    return urls, rep
+        if first_jpeg_url is None and mime == "image/jpeg":
+            first_jpeg_url = url
+
+        if rep_url is None and fname.lower().endswith("_cover.jpg"):
+            rep_url = url
+
+    if rep_url is None:
+        rep_url = first_jpeg_url or first_url
+
+    return urls, rep_url
 
 
 # =============================================================================
@@ -386,9 +511,8 @@ def notion_write_db(
     """
     Notion DBへ1ページ作成する。
 
-    module/utils/notion_utils.py に完全準拠
+    module/utils/notion_utils.py の create_db_row() に合わせる。
     """
-
     if not notion_enabled():
         return None
 
@@ -397,9 +521,6 @@ def notion_write_db(
 
     title = f"Weathercaster / {day} {issue_base_jst.strftime('%H:%M')} JST"
 
-    # -----------------------------
-    # メモ生成（エラー含む）
-    # -----------------------------
     memo_lines: List[str] = []
     if errors:
         memo_lines.append("ERROR:")
@@ -407,9 +528,6 @@ def notion_write_db(
 
     memo = "\n".join(memo_lines)
 
-    # -----------------------------
-    # ★ここが最重要（直接create_db_rowを使う）
-    # -----------------------------
     page_id = create_db_row(
         title=title,
         category="Weathercaster",
@@ -425,30 +543,28 @@ def notion_write_db(
     if not page_id:
         return None
 
-    # -----------------------------
+    # -------------------------------------------------------------------------
     # カバー画像
-    # -----------------------------
+    #
+    # カバー用JPGを使う想定。
+    # ただし、Notion側で外部URLを拒否する場合もあるため、
+    # 失敗しても全体を止めない。
+    # -------------------------------------------------------------------------
     if rep_url:
-        set_page_cover(page_id, rep_url)
+        try:
+            set_page_cover(page_id, rep_url)
+        except Exception as e:
+            print(f"[WARN] set_page_cover failed: {e}")
 
-    # -----------------------------
-    # ガイダンスリンク
-    # -----------------------------
     if GUIDANCE_LINKS:
         append_heading(page_id, "ガイダンス・関連リンク", level=2)
         for cap, url in GUIDANCE_LINKS:
             append_bookmark(page_id, url, caption=cap)
 
-    # -----------------------------
-    # アメダスリンク
-    # -----------------------------
     if AMEDAS_LINK:
         append_heading(page_id, "アメダス（リンク）", level=2)
         append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
 
-    # -----------------------------
-    # 画像
-    # -----------------------------
     if all_urls:
         append_images(page_id, all_urls, chunk=30)
 
@@ -467,7 +583,7 @@ def notify_discord_weathercaster_images(
     """
     Weathercaster画像投稿。
 
-    Notion URLはここには出さない。
+    Notion URLはここでは出さない。
     最後の完了通知だけに出す。
     """
     if not discord_weathercaster_enabled():
@@ -495,7 +611,6 @@ def notify_discord_weathercaster_complete(
     """
     Weathercaster完了通知。
 
-    すべての画像をR2・Notionに入れ終わった後、
     最後にNotion URLを表示する。
     """
     if not discord_weathercaster_enabled():
