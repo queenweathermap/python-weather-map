@@ -390,60 +390,37 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     # -------------------------------------------------------------------------
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
-
+    
         if blob:
-            gif_name = EMAGRAM_FILENAME or "ema_aki_00.gif"
-
-            # 本文用GIF
-            gif_mime = ct if ct else "image/gif"
-            gif_attachment: Attachment = (gif_name, blob, gif_mime)
-
-            # カバー用JPG
             try:
+                # GIF → JPG変換
                 jpg_blob = gif_to_jpg_bytes(blob, quality=JPEG_QUALITY)
-
-                if gif_name.lower().endswith(".gif"):
-                    jpg_name = gif_name[:-4] + "_cover.jpg"
-                else:
-                    jpg_name = gif_name + "_cover.jpg"
-
-                jpg_attachment: Attachment = (jpg_name, jpg_blob, "image/jpeg")
-
-                # カバー用JPGを最優先にする
-                images.insert(0, gif_attachment)
-                images.insert(0, jpg_attachment)
-
+    
+                jpg_name = EMAGRAM_FILENAME.replace(".gif", ".jpg")
+    
+                # ★ JPGのみ追加（GIFは捨てる）
+                images.insert(0, (jpg_name, jpg_blob, "image/jpeg"))
+    
                 try:
                     with open(os.path.join(OUTPUT_DIR, jpg_name), "wb") as f:
                         f.write(jpg_blob)
-                    with open(os.path.join(OUTPUT_DIR, gif_name), "wb") as f:
-                        f.write(blob)
                 except Exception:
                     pass
-
+    
             except Exception as e:
-                # JPG変換に失敗した場合でも、本文用GIFは残す
-                print(f"[WARN] emagram gif->jpg failed: {e}")
-                images.insert(0, gif_attachment)
-
-                try:
-                    with open(os.path.join(OUTPUT_DIR, gif_name), "wb") as f:
-                        f.write(blob)
-                except Exception:
-                    pass
-
+                print(f"[WARN] emagram convert failed: {e}")
         else:
             errors.append(f"EMAGRAM: download failed (HTTP={st})")
-
-    # 発行基準時刻はPDFのLast-Modifiedから推定
-    issued_dt_utc_guess: Optional[datetime] = None
-
-    if lm_dts_pdf_probe:
-        issued_dt_utc_guess = max(lm_dts_pdf_probe)
-    elif lm_dts_pdf_all:
-        issued_dt_utc_guess = max(lm_dts_pdf_all)
-
-    return images, errors, issued_dt_utc_guess
+    
+        # 発行基準時刻はPDFのLast-Modifiedから推定
+        issued_dt_utc_guess: Optional[datetime] = None
+    
+        if lm_dts_pdf_probe:
+            issued_dt_utc_guess = max(lm_dts_pdf_probe)
+        elif lm_dts_pdf_all:
+            issued_dt_utc_guess = max(lm_dts_pdf_all)
+    
+        return images, errors, issued_dt_utc_guess
 
 
 # =============================================================================
