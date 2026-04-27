@@ -69,6 +69,10 @@ jobs:
       NOTION_PROP_AUTOGEN: "自動生成"
       NOTION_PROP_MEMO: "メモ"
 
+      # --- Discord（画像ビューア用・任意） ---
+      DISCORD_ENABLE: "1"
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
     steps:
       - uses: actions/checkout@v4
 
