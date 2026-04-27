@@ -2,18 +2,20 @@
 # =============================================================================
 # scripts/jma_adv.py
 #
-# ADV TGV: 取得 → JPG化(3up) → R2 → Notion(DB) → Discord
+# ADV TGV:
+#   取得 → JPG化(3up) → R2 → Notion(DB) → Discord
 #
-# 設計思想:
+# 役割分担:
 #   - Notion / R2 が正本
 #   - Discord は画像ビューア
-#   - Discord投稿に失敗しても、ADV処理全体は止めない
+#   - Slack は使わない
 #
-# Discord投稿:
-#   - itemごとに投稿
-#   - JOIN_TRIPLE済み画像のR2 URLを投稿
-#   - 1投稿最大10画像
-#   - Notion URLは後で追加できるように引数だけ用意
+# Discord設計:
+#   - ADV専用チャンネルへ投稿
+#   - itemごとに画像投稿
+#   - 画像はR2 URLをembed表示
+#   - 最後に完了通知を投稿
+#   - 完了通知にNotion URLを表示
 # =============================================================================
 
 import sys
@@ -41,15 +43,15 @@ from module.utils.notion_utils import (
     append_images,
     append_bookmark,
 )
-from module.utils.slack_utils import notify_weather_delivery
 from module.utils.discord_utils import (
-    discord_enabled,
     post_discord_item_image_urls,
+    post_discord_complete,
 )
+
 from module.adv_tgv.models import load_model_groups, ModelCfg, Item
 
 
-Attachment = Tuple[str, bytes, str]  # (filename, blob, mimetype)
+Attachment = Tuple[str, bytes, str]
 
 
 # =============================================================================
@@ -80,6 +82,47 @@ def env_str(name: str, default: str = "") -> str:
 def env_bool(name: str, default: str = "0") -> bool:
     v = os.getenv(name, default).strip().lower()
     return v in ("1", "true", "yes", "on")
+
+
+def discord_adv_webhook_url() -> str:
+    """
+    ADV専用DiscordチャンネルのWebhook URL。
+
+    優先:
+      DISCORD_ADV_WEBHOOK_URL
+
+    互換:
+      DISCORD_WEBHOOK_URL
+
+    互換を残す理由:
+      以前の単一Webhook構成から移行しやすくするため。
+    """
+    return (
+        os.getenv("DISCORD_ADV_WEBHOOK_URL", "").strip()
+        or os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+    )
+
+
+def discord_adv_enabled() -> bool:
+    """
+    ADVのDiscord投稿ON/OFF。
+
+    DISCORD_ENABLE=1
+    かつ
+    DISCORD_ADV_WEBHOOK_URL がある時だけ投稿する。
+    """
+    return env_bool("DISCORD_ENABLE", "0") and bool(discord_adv_webhook_url())
+
+
+def notion_page_url(page_id: str) -> str:
+    """
+    Notionのpage_idからブラウザで開けるURLを作る。
+
+    Notion APIのpage_idはハイフン付きUUIDで返ることがある。
+    ブラウザURLではハイフンなしでも開ける。
+    """
+    clean = (page_id or "").replace("-", "")
+    return f"https://www.notion.so/{clean}" if clean else ""
 
 
 # =============================================================================
@@ -192,11 +235,7 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
     """
     3枚を横3upで結合する。
 
-    JOIN_TRIPLE=1 の時:
-      - 3枚ずつ横結合
-      - 余りが出たら白画像で埋める
-
-    Discordにも、このJOIN_TRIPLE済み画像を流す。
+    Discordにもこの3up済み画像を流す。
     """
     if not env_bool("JOIN_TRIPLE", "1"):
         return atts
@@ -222,9 +261,7 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
             _, b3, _ = group[2]
 
             merged = concat_jpgs_horiz([b1, b2, b3], quality=quality)
-            out_name = fn1.replace(".jpg", "") + "_3up.jpg"
-
-            joined.append((out_name, merged, "image/jpeg"))
+            joined.append((fn1.replace(".jpg", "") + "_3up.jpg", merged, "image/jpeg"))
             i += 3
             continue
 
@@ -234,21 +271,16 @@ def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> Li
 
             white = make_white_jpg(base_w, base_h, quality=quality)
             merged = concat_jpgs_horiz([b1, b2, white], quality=quality)
-            out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
-
-            joined.append((out_name, merged, "image/jpeg"))
+            joined.append((fn1.replace(".jpg", "") + "_3up_pad.jpg", merged, "image/jpeg"))
             i += 2
             continue
 
         fn1, b1, _ = group[0]
-
         white1 = make_white_jpg(base_w, base_h, quality=quality)
         white2 = make_white_jpg(base_w, base_h, quality=quality)
 
         merged = concat_jpgs_horiz([b1, white1, white2], quality=quality)
-        out_name = fn1.replace(".jpg", "") + "_3up_pad.jpg"
-
-        joined.append((out_name, merged, "image/jpeg"))
+        joined.append((fn1.replace(".jpg", "") + "_3up_pad.jpg", merged, "image/jpeg"))
         i += 1
 
     return joined
@@ -293,17 +325,6 @@ def fetch_item_images(
     init_dt: datetime,
     item: Item,
 ) -> Tuple[List[Attachment], bool]:
-    """
-    item単位でJMA画像を取得する。
-
-    returns:
-        attachments:
-            JPG化済み画像。
-            JOIN_TRIPLE=1の場合は3up済み画像。
-
-        auth_failed:
-            401/403 が出た場合 True。
-    """
     quality = env_int("JPG_QUALITY", 85)
     timeout = env_int("HTTP_TIMEOUT", 60)
 
@@ -326,7 +347,6 @@ def fetch_item_images(
                 continue
 
             jpg = png_bytes_to_jpg_bytes(r.content, quality=quality)
-
             fn = f"{item.jpg_prefix}_FT{ft:03d}_VIEW{view_code}_RJTD_{rjtd}.jpg"
 
             atts.append((fn, jpg, "image/jpeg"))
@@ -347,9 +367,6 @@ def upload_item_images_to_r2(
     item_label: str,
     atts: List[Attachment],
 ) -> List[str]:
-    """
-    item単位でR2にアップロードし、公開URL一覧を返す。
-    """
     if not r2_enabled():
         return []
 
@@ -368,15 +385,11 @@ def find_working_init_dt(
     cfg: ModelCfg,
     max_back_hours: int,
 ) -> datetime:
-    """
-    6時間刻みで過去へ遡り、取得できる初期時刻を探す。
-    """
     timeout = env_int("HTTP_TIMEOUT", 30)
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
     step_hours = 6
     minute = cfg.rjtd_minute
-
     probe = cfg.init_probe_item
 
     if not cfg.ft_list:
@@ -416,7 +429,7 @@ GUIDE_LINKS: List[Tuple[str, str]] = [
 
 
 # =============================================================================
-# Discord helper
+# Discord
 # =============================================================================
 def notify_discord_adv_item(
     *,
@@ -425,31 +438,52 @@ def notify_discord_adv_item(
     urls: List[str],
     init_dt: datetime,
     rjtd: str,
-    notion_url: str = "",
 ) -> None:
     """
     ADV item単位のDiscord投稿。
 
-    ここを jma_adv.py 側の薄いラッパーにしておくことで、
-    将来、
-      - Notion URLを入れる
-      - 代表画像だけにする
-      - MSMだけ投稿する
-      - LFMは投稿しない
-    のような調整がしやすくなる。
+    Notion URLはここでは出さない。
+    理由:
+      - item投稿ごとにNotion URLを出すと多すぎる
+      - 最後の完了通知だけにNotion URLを出す方が見やすい
     """
-    if not discord_enabled():
+    if not discord_adv_enabled():
         return
 
     jst = timezone(timedelta(hours=9))
     init_jst = init_dt.astimezone(jst).strftime("%Y-%m-%d %H:%M JST")
 
     post_discord_item_image_urls(
+        webhook_url=discord_adv_webhook_url(),
         title=f"ADV TGV {model_name} / {item_label}",
         image_urls=urls,
-        notion_url=notion_url,
+        notion_url="",
         rjtd=rjtd,
         init_jst=init_jst,
+    )
+
+
+def notify_discord_adv_complete(
+    *,
+    page_id: str,
+    errors: List[str],
+    attach_count: int,
+) -> None:
+    """
+    ADV完了通知。
+
+    すべての画像をR2・Notionに入れ終わった後、
+    最後にNotion URLを表示する。
+    """
+    if not discord_adv_enabled():
+        return
+
+    post_discord_complete(
+        webhook_url=discord_adv_webhook_url(),
+        category="ADV TGV",
+        notion_url=notion_page_url(page_id),
+        attach_count=attach_count,
+        errors=errors,
     )
 
 
@@ -471,14 +505,12 @@ def main() -> None:
     print(f"[DEBUG] R2_ENABLE={os.getenv('R2_ENABLE','')}")
     print(f"[DEBUG] NOTION_ENABLE={os.getenv('NOTION_ENABLE','')}")
     print(f"[DEBUG] DISCORD_ENABLE={os.getenv('DISCORD_ENABLE','')}")
+    print(f"[DEBUG] DISCORD_ADV_WEBHOOK_URL set={bool(discord_adv_webhook_url())}")
     print(f"[DEBUG] R2_PREFIX={r2_prefix}")
     print(f"[DEBUG] GUIDE_ENABLE={GUIDE_ENABLE}")
 
     groups = load_model_groups()
 
-    # -------------------------------------------------------------------------
-    # ページの基準は GSM init を採用
-    # -------------------------------------------------------------------------
     init_dt_for_title = find_working_init_dt(
         "GSM",
         groups["GSM"],
@@ -498,9 +530,6 @@ def main() -> None:
 
     title = f"ADV TGV / {init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
 
-    # -------------------------------------------------------------------------
-    # Notion DB行を作成
-    # -------------------------------------------------------------------------
     page_id = create_db_row(
         title=title,
         category="ADV",
@@ -513,14 +542,8 @@ def main() -> None:
     )
 
     print(f"[OK] Notion DB row created: {page_id}")
+    print(f"[OK] Notion URL: {notion_page_url(page_id)}")
 
-    # 今は page_id のみ。
-    # notion_utils 側でURLを返せるようにしたら、ここに入れる。
-    notion_url = ""
-
-    # -------------------------------------------------------------------------
-    # ガイダンスリンク
-    # -------------------------------------------------------------------------
     if GUIDE_ENABLE:
         append_heading(page_id, "ガイダンス（リンク）", level=2)
 
@@ -529,9 +552,6 @@ def main() -> None:
 
     first_cover_url: Optional[str] = None
 
-    # -------------------------------------------------------------------------
-    # GSM / MSM / LFM を順番に処理
-    # -------------------------------------------------------------------------
     for model_name in ("GSM", "MSM", "LFM"):
         cfg: ModelCfg = groups[model_name]
 
@@ -555,9 +575,6 @@ def main() -> None:
         append_heading(page_id, model_name, level=2)
         model_parent: str = page_id
 
-        # ---------------------------------------------------------------------
-        # item単位処理
-        # ---------------------------------------------------------------------
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(
                 model_name,
@@ -576,9 +593,6 @@ def main() -> None:
                 print(f"[WARN] {model_name} {item.label}: no images")
                 continue
 
-            # -----------------------------------------------------------------
-            # R2へアップロード
-            # -----------------------------------------------------------------
             urls = upload_item_images_to_r2(
                 run_prefix=run_prefix,
                 model_name=model_name,
@@ -592,16 +606,10 @@ def main() -> None:
 
             total_images += len(urls)
 
-            # -----------------------------------------------------------------
-            # Notion cover
-            # -----------------------------------------------------------------
             if first_cover_url is None:
                 first_cover_url = urls[0]
                 set_page_cover(page_id, first_cover_url)
 
-            # -----------------------------------------------------------------
-            # Notion本文
-            # -----------------------------------------------------------------
             item_title = f"{item.label}  ({len(urls)} images)"
             item_toggle_id = append_toggle(model_parent, item_title)
 
@@ -612,16 +620,6 @@ def main() -> None:
 
             print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
 
-            # -----------------------------------------------------------------
-            # Discord投稿
-            #
-            # ここが今回の追加ポイント。
-            #
-            # 重要:
-            #   - Discordは正本ではない
-            #   - Discord失敗で処理全体を落とさない
-            #   - R2 URLを投稿するので、Notionと同じ画像を見ることになる
-            # -----------------------------------------------------------------
             try:
                 notify_discord_adv_item(
                     model_name=model_name,
@@ -629,24 +627,26 @@ def main() -> None:
                     urls=urls,
                     init_dt=init_dt,
                     rjtd=rjtd,
-                    notion_url=notion_url,
                 )
 
-                if discord_enabled():
-                    print(f"[OK] Discord sent: {model_name} {item.label} images={len(urls)}")
+                if discord_adv_enabled():
+                    print(f"[OK] Discord item sent: {model_name} {item.label}")
 
             except Exception as e:
-                print(f"[WARN] Discord send failed: {model_name} {item.label}: {e}")
+                print(f"[WARN] Discord item send failed: {model_name} {item.label}: {e}")
 
-    # -------------------------------------------------------------------------
-    # Slack通知
-    # -------------------------------------------------------------------------
-    notify_weather_delivery(
-        category="ADV TGV",
-        page_id=page_id,
-        errors=errors,
-        attach_count=total_images,
-    )
+    try:
+        notify_discord_adv_complete(
+            page_id=page_id,
+            errors=errors,
+            attach_count=total_images,
+        )
+
+        if discord_adv_enabled():
+            print("[OK] Discord complete sent")
+
+    except Exception as e:
+        print(f"[WARN] Discord complete send failed: {e}")
 
     print("\n=== Done ADV JMA TGV ===")
 
