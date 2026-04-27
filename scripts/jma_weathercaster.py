@@ -566,7 +566,10 @@ def notion_write_db(
         append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
 
     if all_urls:
-        append_images(page_id, all_urls, chunk=30)
+        try:
+            append_images(page_id, all_urls, chunk=30)
+        except Exception as e:
+            print(f"[WARN] append_images failed: {e}")
 
     return page_id
 
