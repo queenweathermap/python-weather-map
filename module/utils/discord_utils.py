@@ -7,21 +7,38 @@
 # 目的:
 #   - Discordを「画像ビューア」として使う
 #   - Notionを正本、Discordを一覧表示・即時確認用にする
+#   - Slack Botの代替として、完了通知もDiscordへ出す
 #
 # 設計:
 #   - Botは使わない。Webhook URLだけで投稿する
-#   - ADVは item ごとに投稿する
-#   - 画像は R2 URL を embed 表示する
+#   - ADV と Weathercaster でチャンネルを分ける
+#   - 画像は R2 URL を Discord embed で表示する
 #   - 1投稿あたり最大10画像まで
-#   - Discord投稿に失敗しても、呼び出し元で握りつぶせるようにする
+#   - 最後に「完了通知」として Notion URL を投稿する
+#
+# Webhookの考え方:
+#   ADV:
+#     DISCORD_ADV_WEBHOOK_URL を優先
+#
+#   Weathercaster:
+#     DISCORD_WEATHERCASTER_WEBHOOK_URL を優先
+#
+#   共通・予備:
+#     DISCORD_WEBHOOK_URL
 #
 # 必須環境変数:
-#   DISCORD_WEBHOOK_URL
+#   DISCORD_ENABLE=1
 #
 # 任意環境変数:
-#   DISCORD_ENABLE=1
+#   DISCORD_ADV_WEBHOOK_URL
+#   DISCORD_WEATHERCASTER_WEBHOOK_URL
+#   DISCORD_WEBHOOK_URL
 #   DISCORD_MAX_IMAGES_PER_MESSAGE=10
 #   DISCORD_SLEEP_SEC=1.0
+#
+# 重要:
+#   - Discordは正本ではない
+#   - 呼び出し元では try/except で囲み、Discord失敗で本処理を落とさない
 # =============================================================================
 
 from __future__ import annotations
@@ -33,12 +50,24 @@ from typing import List, Optional
 import requests
 
 
+# =============================================================================
+# Environment helpers
+# =============================================================================
+
 def _env(name: str, default: str = "") -> str:
+    """
+    環境変数を安全に読む小さいヘルパー。
+    None の場合は default を返す。
+    """
     v = os.environ.get(name)
     return default if v is None else v.strip()
 
 
 def _env_int(name: str, default: int) -> int:
+    """
+    int型の環境変数を読む。
+    壊れていたら default。
+    """
     v = _env(name)
     if not v:
         return default
@@ -49,6 +78,10 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _env_float(name: str, default: float) -> float:
+    """
+    float型の環境変数を読む。
+    壊れていたら default。
+    """
     v = _env(name)
     if not v:
         return default
@@ -58,36 +91,85 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def discord_enabled() -> bool:
+def discord_global_enabled() -> bool:
     """
-    Discord投稿を有効にするか判定する。
+    Discord投稿全体のON/OFF。
 
-    DISCORD_ENABLE=1
-    かつ
-    DISCORD_WEBHOOK_URL が存在する
-
-    この両方を満たす場合のみ True。
+    DISCORD_ENABLE=1 / true / yes / on の場合だけ有効。
     """
-    enabled = _env("DISCORD_ENABLE", "0").lower() in ("1", "true", "yes", "on")
-    webhook = bool(_env("DISCORD_WEBHOOK_URL"))
-    return enabled and webhook
+    return _env("DISCORD_ENABLE", "0").lower() in ("1", "true", "yes", "on")
 
 
-def _webhook_url() -> str:
-    url = _env("DISCORD_WEBHOOK_URL")
-    if not url:
-        raise RuntimeError("DISCORD_WEBHOOK_URL is missing")
-    return url
+# =============================================================================
+# Webhook helpers
+# =============================================================================
+
+def resolve_webhook_url(
+    *,
+    webhook_url: str = "",
+    webhook_env: str = "",
+) -> str:
+    """
+    Discord Webhook URLを決定する。
+
+    優先順位:
+      1. 引数 webhook_url
+      2. 引数 webhook_env に指定された環境変数
+      3. 共通 DISCORD_WEBHOOK_URL
+
+    例:
+      ADVなら webhook_env="DISCORD_ADV_WEBHOOK_URL"
+      Weathercasterなら webhook_env="DISCORD_WEATHERCASTER_WEBHOOK_URL"
+    """
+    if webhook_url:
+        return webhook_url.strip()
+
+    if webhook_env:
+        v = _env(webhook_env)
+        if v:
+            return v
+
+    return _env("DISCORD_WEBHOOK_URL")
 
 
-def _post_with_rate_limit(payload: dict, timeout: int = 60) -> requests.Response:
+def discord_enabled(
+    *,
+    webhook_url: str = "",
+    webhook_env: str = "",
+) -> bool:
+    """
+    Discord投稿が可能かを判定する。
+
+    条件:
+      - DISCORD_ENABLE が true
+      - 対象Webhook URLが存在する
+    """
+    if not discord_global_enabled():
+        return False
+
+    return bool(resolve_webhook_url(webhook_url=webhook_url, webhook_env=webhook_env))
+
+
+def _post_with_rate_limit(
+    *,
+    payload: dict,
+    webhook_url: str = "",
+    webhook_env: str = "",
+    timeout: int = 60,
+) -> requests.Response:
     """
     Discord Webhookへ投稿する内部関数。
 
     Discordは短時間に連投すると 429 Too Many Requests を返す。
     その場合は retry_after 秒待って、1回だけ再投稿する。
+
+    ここでは raise_for_status() する。
+    呼び出し元の jma_adv.py / jma_weathercaster.py 側で try/except する。
     """
-    url = _webhook_url()
+    url = resolve_webhook_url(webhook_url=webhook_url, webhook_env=webhook_env)
+
+    if not url:
+        raise RuntimeError("Discord webhook URL is missing")
 
     r = requests.post(url, json=payload, timeout=timeout)
 
@@ -106,10 +188,35 @@ def _post_with_rate_limit(payload: dict, timeout: int = 60) -> requests.Response
     return r
 
 
+# =============================================================================
+# Common helpers
+# =============================================================================
+
+def notion_page_url_from_id(page_id: Optional[str]) -> str:
+    """
+    Notion page_id からブラウザで開けるURLを作る。
+
+    Notion APIから返る page_id は
+      xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    の形式。
+
+    ブラウザURLはハイフン無しでも開ける。
+    """
+    if not page_id:
+        return ""
+
+    clean = page_id.replace("-", "").strip()
+    if not clean:
+        return ""
+
+    return f"https://www.notion.so/{clean}"
+
+
 def _chunk_list(items: List[str], size: int) -> List[List[str]]:
     """
     リストを size 件ずつ分割する。
-    Discord embed は1投稿10個までにしておく。
+
+    Discord embed は1投稿あたり最大10個までにしておく。
     """
     if size <= 0:
         size = 10
@@ -120,17 +227,39 @@ def _chunk_list(items: List[str], size: int) -> List[List[str]]:
     ]
 
 
+def _safe_content(content: str, limit: int = 1900) -> str:
+    """
+    Discord本文は最大2000文字。
+    余裕を持って1900文字で切る。
+    """
+    return (content or "").strip()[:limit]
+
+
+# =============================================================================
+# Image URL posting
+# =============================================================================
+
 def post_discord_item_image_urls(
     *,
     title: str,
     image_urls: List[str],
+    webhook_env: str = "",
+    webhook_url: str = "",
     notion_url: str = "",
     rjtd: str = "",
     init_jst: str = "",
     r2_folder_url: str = "",
 ) -> None:
     """
-    ADV item 単位で Discord に画像URLを投稿する。
+    item単位で Discord に画像URLを投稿する。
+
+    ADV:
+      - GSM / 300hPa
+      - MSM / 500hPa
+      のような item ごとの投稿に使う。
+
+    Weathercaster:
+      - 全画像をまとめて投稿する時にも使える。
 
     Parameters
     ----------
@@ -142,21 +271,24 @@ def post_discord_item_image_urls(
         R2にアップロード済みの画像URL一覧。
         JOIN_TRIPLE済み画像のURLを入れる。
 
+    webhook_env:
+        投稿先Webhookの環境変数名。
+        例: DISCORD_ADV_WEBHOOK_URL
+
     notion_url:
-        後でNotionページURLを渡せるようにしておく。
-        今は空でもOK。
+        基本は完了通知にだけ出す想定。
+        必要ならitem投稿にも表示可能。
 
     rjtd:
         RJTD文字列。
-        例: 270000
 
     init_jst:
         初期時刻JSTの表示用文字列。
 
     r2_folder_url:
-        将来的にR2側の代表URLやフォルダ相当URLを入れたい場合の余地。
+        将来的にR2側の代表URLやフォルダURLを出したい場合の余地。
     """
-    if not discord_enabled():
+    if not discord_enabled(webhook_url=webhook_url, webhook_env=webhook_env):
         return
 
     if not image_urls:
@@ -185,8 +317,6 @@ def post_discord_item_image_urls(
         if len(chunks) > 1:
             lines.append(f"分割: {idx}/{len(chunks)}")
 
-        content = "\n".join(lines)
-
         embeds = []
         for image_url in chunk:
             embeds.append(
@@ -198,14 +328,85 @@ def post_discord_item_image_urls(
             )
 
         payload = {
-            "content": content[:1900],
+            "content": _safe_content("\n".join(lines)),
             "embeds": embeds,
+            # @everyone 等の事故防止
             "allowed_mentions": {
                 "parse": []
             },
         }
 
-        _post_with_rate_limit(payload)
+        _post_with_rate_limit(
+            payload=payload,
+            webhook_url=webhook_url,
+            webhook_env=webhook_env,
+        )
 
         if idx < len(chunks):
             time.sleep(sleep_sec)
+
+
+# =============================================================================
+# Completion notification
+# =============================================================================
+
+def post_discord_delivery_complete(
+    *,
+    category: str,
+    notion_url: str,
+    attach_count: int,
+    errors: List[str],
+    webhook_env: str = "",
+    webhook_url: str = "",
+    title: str = "天気図配信",
+) -> None:
+    """
+    配信完了通知をDiscordへ投稿する。
+
+    これはSlackで行っていた
+      - 区分
+      - エラー件数
+      - Notion URL
+      - 添付枚数
+    の代替。
+
+    重要:
+      - すべての画像アップロード
+      - Notion本文への画像追加
+      が終わった後に呼ぶ。
+    """
+    if not discord_enabled(webhook_url=webhook_url, webhook_env=webhook_env):
+        return
+
+    if errors:
+        # エラーが多すぎるとDiscord本文が長くなるので先頭数件だけ表示
+        shown = errors[:5]
+        error_text = f"{len(errors)}件 / " + " / ".join(shown)
+        if len(errors) > len(shown):
+            error_text += f" / ほか{len(errors) - len(shown)}件"
+    else:
+        error_text = "0件"
+
+    lines = [
+        title,
+        f"区分: {category}",
+        f"エラー: {error_text}",
+    ]
+
+    if notion_url:
+        lines.append(f"Notion: {notion_url}")
+
+    lines.append(f"添付: {attach_count}件")
+
+    payload = {
+        "content": _safe_content("\n".join(lines)),
+        "allowed_mentions": {
+            "parse": []
+        },
+    }
+
+    _post_with_rate_limit(
+        payload=payload,
+        webhook_url=webhook_url,
+        webhook_env=webhook_env,
+    )
