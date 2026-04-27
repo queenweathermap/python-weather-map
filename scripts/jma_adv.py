@@ -465,6 +465,22 @@ def main() -> None:
 
             print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
 
+
+            # --- Discord 画像ビューア投稿 ---
+            # Notionが正本、Discordは一覧ビュー用。
+            # ADVは枚数が多いため、model/item単位で投稿する。
+            if discord_enabled():
+                try:
+                    post_discord_item_images(
+                        title=f"ADV TGV {model_name} / {item.label}",
+                        attachments=atts,
+                        rjtd=fmt_rjtd(init_dt, cfg.rjtd_minute),
+                        notion_url="",  # NotionページURLを取得できるようにしたらここへ
+                    )
+                    print(f"[OK] Discord sent: {model_name} {item.label} files={len(atts)}")
+                except Exception as e:
+                    print(f"[WARN] Discord send failed: {model_name} {item.label}: {e}")
+
     # ---- Slack notify（Notion配信完了の合図）----
     notify_weather_delivery(
         category="ADV TGV",
