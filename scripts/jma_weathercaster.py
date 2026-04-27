@@ -550,29 +550,37 @@ def notion_write_db(
     # ただし、Notion側で外部URLを拒否する場合もあるため、
     # 失敗しても全体を止めない。
     # -------------------------------------------------------------------------
-    if rep_url:
-        try:
-            set_page_cover(page_id, rep_url)
-        except Exception as e:
-            print(f"[WARN] set_page_cover failed: {e}")
+    # -----------------------------
+    # ガイダンスリンク
+    # -----------------------------
+    try:
+        if GUIDANCE_LINKS:
+            append_heading(page_id, "ガイダンス・関連リンク", level=2)
+            for cap, url in GUIDANCE_LINKS:
+                append_bookmark(page_id, url, caption=cap)
+    except Exception as e:
+        print(f"[WARN] append guidance links failed: {e}")
 
-    if GUIDANCE_LINKS:
-        append_heading(page_id, "ガイダンス・関連リンク", level=2)
-        for cap, url in GUIDANCE_LINKS:
-            append_bookmark(page_id, url, caption=cap)
+    # -----------------------------
+    # アメダスリンク
+    # -----------------------------
+    try:
+        if AMEDAS_LINK:
+            append_heading(page_id, "アメダス（リンク）", level=2)
+            append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
+    except Exception as e:
+        print(f"[WARN] append amedas link failed: {e}")
 
-    if AMEDAS_LINK:
-        append_heading(page_id, "アメダス（リンク）", level=2)
-        append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
-
-    if all_urls:
-        try:
+    # -----------------------------
+    # 画像本文
+    # -----------------------------
+    try:
+        if all_urls:
             append_images(page_id, all_urls, chunk=30)
-        except Exception as e:
-            print(f"[WARN] append_images failed: {e}")
+    except Exception as e:
+        print(f"[WARN] append_images failed: {e}")
 
     return page_id
-
 
 # =============================================================================
 # Discord
