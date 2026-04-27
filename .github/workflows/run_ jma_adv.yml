@@ -72,8 +72,8 @@ jobs:
       # --- Discord（画像ビューア用・任意） ---
       DISCORD_ENABLE: "1"
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      DISCORD_ENABLE: "1"
-      JOIN_TRIPLE: "1"
+      DISCORD_MAX_FILES_PER_MESSAGE: "10"
+      DISCORD_SLEEP_SEC: "1.0"
 
     steps:
       - uses: actions/checkout@v4
