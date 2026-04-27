@@ -375,78 +375,6 @@ def upload_to_r2(
 # =============================================================================
 # Notion
 # =============================================================================
-def _create_db_row_compat(
-    title: str,
-    category: str,
-    init_jst_iso: str,
-    memo: str,
-    rjtd: str,
-    prefix: str,
-    autogen: bool,
-) -> Optional[str]:
-    try:
-        return create_db_row(
-            title=title,
-            category=category,
-            init_jst_iso=init_jst_iso,
-            memo=memo,
-            rjtd=rjtd,
-            prefix=prefix,
-            r2_url="",
-            autogen=autogen,
-            icon_emoji="🗺️",
-        )
-    except TypeError:
-        pass
-
-    try:
-        db = os.environ.get("NOTION_DATABASE_ID", "").strip()
-        if not db:
-            return None
-
-        props: Dict[str, Any] = {
-            PROP_TITLE: {"title": [{"type": "text", "text": {"content": title}}]},
-            PROP_CATEGORY: {"select": {"name": category}},
-            PROP_INITJST: {"date": {"start": init_jst_iso}},
-            PROP_AUTOGEN: {"checkbox": bool(autogen)},
-        }
-
-        if PROP_MODEL:
-            props[PROP_MODEL] = {"select": {"name": category}}
-
-        if memo:
-            props[PROP_MEMO] = {
-                "rich_text": [
-                    {"type": "text", "text": {"content": memo[:1900]}}
-                ]
-            }
-
-        if rjtd:
-            props[PROP_RJTD] = {
-                "rich_text": [
-                    {"type": "text", "text": {"content": rjtd}}
-                ]
-            }
-
-        if prefix:
-            props[PROP_PREFIX] = {
-                "rich_text": [
-                    {"type": "text", "text": {"content": prefix}}
-                ]
-            }
-
-        return create_db_row(
-            database_id=db,
-            properties=props,
-            rjtd=rjtd,
-            prefix=prefix,
-            icon_emoji="🗺️",
-        )
-
-    except Exception:
-        return None
-
-
 def notion_write_db(
     issue_base_utc: datetime,
     rjtd: str,
@@ -455,6 +383,12 @@ def notion_write_db(
     all_urls: List[str],
     errors: List[str],
 ) -> Optional[str]:
+    """
+    Notion DBへ1ページ作成する。
+
+    module/utils/notion_utils.py に完全準拠
+    """
+
     if not notion_enabled():
         return None
 
@@ -463,6 +397,9 @@ def notion_write_db(
 
     title = f"Weathercaster / {day} {issue_base_jst.strftime('%H:%M')} JST"
 
+    # -----------------------------
+    # メモ生成（エラー含む）
+    # -----------------------------
     memo_lines: List[str] = []
     if errors:
         memo_lines.append("ERROR:")
@@ -470,31 +407,48 @@ def notion_write_db(
 
     memo = "\n".join(memo_lines)
 
-    page_id = _create_db_row_compat(
+    # -----------------------------
+    # ★ここが最重要（直接create_db_rowを使う）
+    # -----------------------------
+    page_id = create_db_row(
         title=title,
         category="Weathercaster",
         init_jst_iso=issue_base_jst.isoformat(),
         memo=memo,
         rjtd=rjtd,
         prefix=run_prefix,
+        r2_url=rep_url or "",
         autogen=True,
+        icon_emoji="🗺️",
     )
 
     if not page_id:
         return None
 
+    # -----------------------------
+    # カバー画像
+    # -----------------------------
     if rep_url:
         set_page_cover(page_id, rep_url)
 
+    # -----------------------------
+    # ガイダンスリンク
+    # -----------------------------
     if GUIDANCE_LINKS:
         append_heading(page_id, "ガイダンス・関連リンク", level=2)
         for cap, url in GUIDANCE_LINKS:
             append_bookmark(page_id, url, caption=cap)
 
+    # -----------------------------
+    # アメダスリンク
+    # -----------------------------
     if AMEDAS_LINK:
         append_heading(page_id, "アメダス（リンク）", level=2)
         append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
 
+    # -----------------------------
+    # 画像
+    # -----------------------------
     if all_urls:
         append_images(page_id, all_urls, chunk=30)
 
