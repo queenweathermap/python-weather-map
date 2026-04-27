@@ -14,12 +14,11 @@
 #   - Weathercaster専用チャンネルへ投稿
 #   - 画像はR2 URLをembed表示
 #   - 1投稿最大10画像
-#   - 最後にNotion URL付き完了通知を投稿
+#   - 最後にNotion URLは出さない（ビュー専用）
 #
 # エマグラム設計:
 #   - 本文にはGIFをそのまま表示
-#   - Notionカバー用にGIFの1フレーム目をJPG化
-#   - カバーはJPGにすることでNotion 400エラーを避ける
+#   - カバーは設定失敗しても処理を止めない
 # =============================================================================
 
 from __future__ import annotations
@@ -34,6 +33,8 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import io
 import os
 import shutil
+import time  # ★追加（sleep用）
+
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from typing import List, Tuple, Optional
