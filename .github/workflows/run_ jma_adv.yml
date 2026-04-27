@@ -75,7 +75,7 @@ jobs:
       # ------------------------------------------------------------
       # 画像・取得設定
       # ------------------------------------------------------------
-      JOIN_TRIPLE: ${{ github.event_name == 'workflow_dispatch' && inputs.join_triple || 'true' }}
+      JOIN_TRIPLE: "0"
       JPG_QUALITY: "85"
       HTTP_TIMEOUT: "60"
       INIT_SEARCH_HOURS: "72"
