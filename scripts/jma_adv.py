@@ -30,7 +30,7 @@ import io
 import base64
 from datetime import datetime, timedelta, timezone
 from typing import List, Tuple, Optional, Sequence
-from module.utils.discord_utils import discord_enabled, post_discord_text, post_discord_files
+from module.utils.discord_utils import discord_enabled, post_discord_item_images
 
 import requests
 from PIL import Image
