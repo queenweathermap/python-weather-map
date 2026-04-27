@@ -620,13 +620,12 @@ def notify_discord_weathercaster_complete(
         return
 
     post_discord_complete(
-        webhook_url=discord_weathercaster_webhook_url(),
+        webhook_url=...,
         category="Weathercaster",
-        notion_url=notion_page_url(page_id or ""),
-        attach_count=attach_count,
-        errors=errors,
+        notion_url="",
+        attach_count=...,
+        errors=...,
     )
-
 
 # =============================================================================
 # main
