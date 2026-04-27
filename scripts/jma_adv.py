@@ -479,11 +479,11 @@ def notify_discord_adv_complete(
         return
 
     post_discord_complete(
-        webhook_url=discord_adv_webhook_url(),
+        webhook_url=...,
         category="ADV TGV",
-        notion_url=notion_page_url(page_id),
-        attach_count=attach_count,
-        errors=errors,
+        notion_url="",
+        attach_count=...,
+        errors=...,
     )
 
 
