@@ -543,6 +543,9 @@ def notion_write_db(
     if not page_id:
         return None
 
+    # Notion APIの反映待ち
+    time.sleep(1.0)
+
     # -------------------------------------------------------------------------
     # カバー画像
     #
