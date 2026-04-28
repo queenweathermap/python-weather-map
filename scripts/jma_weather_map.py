@@ -82,7 +82,7 @@ JPEG_DPI = int(os.environ.get("JPEG_DPI", "200"))
 JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
-R2_PREFIX = os.environ.get("R2_PREFIX", "weathercaster").strip().strip("/")
+R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
 
 
 # =============================================================================
@@ -497,7 +497,7 @@ def notion_write_db(
     issue_base_jst = issue_base_utc.astimezone(jst_tz())
     day = issue_base_utc.strftime("%Y%m%d")
 
-    title = f"Weathercaster / {day} {issue_base_jst.strftime('%H:%M')} JST"
+    title = f"JMA / {day} {issue_base_jst.strftime('%H:%M')} JST"
 
     memo_lines: List[str] = []
     if errors:
@@ -508,7 +508,7 @@ def notion_write_db(
 
     page_id = create_db_row(
         title=title,
-        category="Weathercaster",
+        category="JMA",
         init_jst_iso=issue_base_jst.isoformat(),
         memo=memo,
         rjtd=rjtd,
@@ -586,7 +586,7 @@ def notify_discord_weathercaster_images(
 
     post_discord_item_image_urls(
         webhook_url=discord_weathercaster_webhook_url(),
-        title="Weathercaster / JMA天気図",
+        title="JMA 天気図",
         image_urls=all_urls,
         notion_url="",
         rjtd=rjtd,
