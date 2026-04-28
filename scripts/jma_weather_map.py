@@ -3,16 +3,19 @@
 # scripts/jma_weather_map.py
 #
 # JMA Weather Map:
-#   JMA PDF → JPG → R2 → Notion DB → Discord
+#   JMA PDF / PNG → JPG → R2 → Notion DB → Discord
 #
 # 役割分担:
 #   - Notion / R2 が正本
 #   - Discord は画像ビューア
 #   - Slack は使わない
 #
-# エマグラム:
-#   - GIFをJPG化して先頭に追加
-#   - Notionトップ画像候補として使う
+# 配信内容:
+#   - エマグラム（GIFをJPG化）
+#   - 短期予報解説資料
+#   - 週間予報解説資料
+#   - 週間系PNG資料（JPG化）
+#   - 数値予報天気図PDF（00UTC / 12UTC）
 # =============================================================================
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional
 
 import requests
 from pdf2image import convert_from_bytes
@@ -65,52 +68,7 @@ R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
 # 例: JMA_UTC_OVERRIDE=00
 JMA_UTC_OVERRIDE = os.environ.get("JMA_UTC_OVERRIDE", "").strip()
 
-
 Attachment = Tuple[str, bytes, str]
-
-
-# =============================================================================
-# JMA PDF定義
-# =============================================================================
-JMA_FIXED_PDFS: List[Tuple[str, str, bool]] = [
-    (
-        "kaisetsu_tanki_latest",
-        "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
-        True,
-    ),
-    (
-        "kaisetsu_shukan_latest",
-        "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
-        True,
-    ),
-]
-
-JMA_UTC_PDFS: Dict[str, Dict[str, str]] = {
-    "axjp140": {
-        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp140_00.pdf",
-        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp140_12.pdf",
-    },
-    "aupa20": {
-        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/aupa20_00.pdf",
-        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/aupa20_12.pdf",
-    },
-    "axfe578": {
-        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axfe578_00.pdf",
-        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axfe578_12.pdf",
-    },
-    "fxfe5782": {
-        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5782_00.pdf",
-        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5782_12.pdf",
-    },
-    "fxfe5784": {
-        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5784_00.pdf",
-        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5784_12.pdf",
-    },
-    "fxfe577": {
-        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe577_00.pdf",
-        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe577_12.pdf",
-    },
-}
 
 
 # =============================================================================
@@ -209,11 +167,9 @@ def select_jma_utc_run() -> str:
 
     h = now_jst().hour
 
-    # 00UTC（09JST初期値）は、11:30 / 17:30 JSTで使う
     if 10 <= h < 20:
         return "00"
 
-    # 12UTC（21JST初期値）は、23:30 / 05:30 JSTで使う
     return "12"
 
 
@@ -223,9 +179,8 @@ def issue_base_utc_from_run(run_utc: str) -> datetime:
     run_utc:
       00 → 当日09:00 JST
       12 → 当日21:00 JST
-           ただし深夜〜午前実行では前日21:00 JST
+           深夜〜午前実行では前日21:00 JST
     """
-    jst = jst_tz()
     n = now_jst()
 
     if run_utc == "00":
@@ -234,27 +189,127 @@ def issue_base_utc_from_run(run_utc: str) -> datetime:
 
     base_jst = n.replace(hour=21, minute=0, second=0, microsecond=0)
 
-    # 05:30 JSTなど、日付が変わった後に前日21JST初期値を取る場合
     if n.hour < 10:
         base_jst = base_jst - timedelta(days=1)
 
     return base_jst.astimezone(timezone.utc)
 
 
-def build_jma_targets(run_utc: str) -> List[Tuple[str, str, bool]]:
+# =============================================================================
+# ダウンロード対象
+# =============================================================================
+def build_jma_targets(run_utc: str) -> List[Tuple[str, str, str, bool]]:
     """
     ダウンロード対象を作る。
 
     戻り値:
-      (保存ベース名, URL, 全ページ変換するか)
+      (保存ベース名, URL, 種別, 全ページ変換するか)
+
+    種別:
+      pdf
+      png
     """
-    targets: List[Tuple[str, str, bool]] = []
+    targets: List[Tuple[str, str, str, bool]] = []
 
-    for key, urls in JMA_UTC_PDFS.items():
-        url = urls[run_utc]
-        targets.append((f"{key}_{run_utc}", url, False))
+    # -------------------------------------------------------------------------
+    # エマグラムは別処理
+    # -------------------------------------------------------------------------
 
-    targets.extend(JMA_FIXED_PDFS)
+    # -------------------------------------------------------------------------
+    # 解説資料 PDF
+    # -------------------------------------------------------------------------
+    targets += [
+        (
+            "kaisetsu_tanki",
+            "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
+            "pdf",
+            True,
+        ),
+        (
+            "kaisetsu_shukan",
+            "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
+            "pdf",
+            True,
+        ),
+    ]
+
+    # -------------------------------------------------------------------------
+    # 週間系 PNG → JPG
+    # -------------------------------------------------------------------------
+    targets += [
+        (
+            "fefe19",
+            "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fefe19.png",
+            "png",
+            False,
+        ),
+        (
+            "fzcx50",
+            "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fzcx50.png",
+            "png",
+            False,
+        ),
+        (
+            "fxxn519",
+            "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxxn519.png",
+            "png",
+            False,
+        ),
+    ]
+
+    # -------------------------------------------------------------------------
+    # UTC依存 PDF
+    # -------------------------------------------------------------------------
+    targets += [
+        (
+            f"axjp130_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp130_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"axjp140_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp140_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"aupa20_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/aupa20_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"fxfe5782_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5782_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"fxfe5784_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5784_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"fxfe502_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe502_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"fxfe504_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe504_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"fxjp854_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxjp854_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+    ]
 
     return targets
 
@@ -262,21 +317,23 @@ def build_jma_targets(run_utc: str) -> List[Tuple[str, str, bool]]:
 # =============================================================================
 # 取得
 # =============================================================================
-def fetch_pdf_from_url(name: str, url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int]]:
+def fetch_binary(name: str, url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int], Optional[str]]:
     try:
         headers = {"User-Agent": "jma-weather-map-bot/1.0"}
         r = requests.get(url, headers=headers, timeout=60)
+
         lm = r.headers.get("Last-Modified")
+        ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
 
         if r.status_code == 200:
-            return r.content, lm, r.status_code
+            return r.content, lm, r.status_code, ct
 
         print(f"[NG] {name} HTTP {r.status_code}: {url}")
-        return None, lm, r.status_code
+        return None, lm, r.status_code, ct
 
     except Exception as e:
         print(f"[ERR] {name}: {e}")
-        return None, None, None
+        return None, None, None, None
 
 
 def fetch_image_content(url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int], Optional[str]]:
@@ -327,6 +384,19 @@ def pdf_bytes_to_jpgs(
     return out
 
 
+def png_bytes_to_jpg(
+    png_bytes: bytes,
+    base_filename: str,
+) -> Attachment:
+    with Image.open(io.BytesIO(png_bytes)) as im:
+        im = im.convert("RGB")
+
+        out = io.BytesIO()
+        im.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+
+        return (f"{base_filename}.jpg", out.getvalue(), "image/jpeg")
+
+
 def gif_to_jpg_bytes(gif_bytes: bytes, quality: int = 85) -> bytes:
     with Image.open(io.BytesIO(gif_bytes)) as im:
         im.seek(0)
@@ -346,37 +416,46 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
 
     images: List[Attachment] = []
     errors: List[str] = []
-    lm_dts_pdf_all: List[datetime] = []
+    lm_dts_all: List[datetime] = []
 
     # -------------------------------------------------------------------------
-    # JMA PDF取得
+    # JMA PDF / PNG 取得
     # -------------------------------------------------------------------------
-    for base_name, url, force_all in build_jma_targets(run_utc):
-        pdf, last_mod, st = fetch_pdf_from_url(base_name, url)
+    for base_name, url, kind, force_all in build_jma_targets(run_utc):
+        blob, last_mod, st, ct = fetch_binary(base_name, url)
 
         if last_mod:
             dt = _httpdate_to_utc_dt(last_mod)
             if dt:
-                lm_dts_pdf_all.append(dt)
+                lm_dts_all.append(dt)
 
-        if not pdf:
+        if not blob:
             errors.append(f"{base_name}: download failed (HTTP={st})")
             continue
 
-        atts = pdf_bytes_to_jpgs(pdf, base_name, force_all=force_all)
+        try:
+            if kind == "png":
+                att = png_bytes_to_jpg(blob, base_name)
+                atts = [att]
+            else:
+                atts = pdf_bytes_to_jpgs(blob, base_name, force_all=force_all)
 
-        if not atts:
-            errors.append(f"{base_name}: conversion failed")
+            if not atts:
+                errors.append(f"{base_name}: conversion failed")
+                continue
+
+            for fname, data, _ in atts:
+                try:
+                    with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                        f.write(data)
+                except Exception:
+                    pass
+
+            images.extend(atts)
+
+        except Exception as e:
+            errors.append(f"{base_name}: conversion failed ({e})")
             continue
-
-        for fname, blob, _ in atts:
-            try:
-                with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
-                    f.write(blob)
-            except Exception:
-                pass
-
-        images.extend(atts)
 
     # -------------------------------------------------------------------------
     # エマグラム取得
@@ -402,7 +481,7 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
         else:
             errors.append(f"EMAGRAM: download failed (HTTP={st})")
 
-    issued_dt_utc_guess: Optional[datetime] = max(lm_dts_pdf_all) if lm_dts_pdf_all else None
+    issued_dt_utc_guess: Optional[datetime] = max(lm_dts_all) if lm_dts_all else None
 
     return images, errors, issued_dt_utc_guess
 
@@ -545,10 +624,11 @@ def notify_discord_jma_complete(
     if not discord_jma_enabled():
         return
 
+    # Notionへのリンクはいらないため、notion_url は空欄
     post_discord_complete(
         webhook_url=discord_jma_webhook_url(),
         category="JMA",
-        notion_url=notion_page_url(page_id) if page_id else "",
+        notion_url="",
         attach_count=attach_count,
         errors=errors,
     )
