@@ -2,91 +2,115 @@
 # =============================================================================
 # scripts/jma_weather_map.py
 #
-# Weathercaster:
-#   PDF → JPG → R2 → Notion DB → Discord
+# JMA Weather Map:
+#   JMA PDF → JPG → R2 → Notion DB → Discord
 #
 # 役割分担:
 #   - Notion / R2 が正本
 #   - Discord は画像ビューア
 #   - Slack は使わない
 #
-# Discord設計:
-#   - Weathercaster専用チャンネルへ投稿
-#   - 画像はR2 URLをembed表示
-#   - 1投稿最大10画像
-#   - 最後にNotion URLは出さない（ビュー専用）
-#
-# エマグラム設計:
-#   - 本文にはGIFをそのまま表示
-#   - カバーは設定失敗しても処理を止めない
+# エマグラム:
+#   - GIFをJPG化して先頭に追加
+#   - Notionトップ画像候補として使う
 # =============================================================================
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
-
 import io
 import os
 import shutil
-import time  # ★追加（sleep用）
-
+import sys
+import time
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
-from typing import List, Tuple, Optional
+from pathlib import Path
+from typing import List, Tuple, Optional, Dict
 
 import requests
 from pdf2image import convert_from_bytes
 from PIL import Image
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
 from r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
     notion_enabled,
     create_db_row,
-    set_page_cover,
     append_images,
     append_heading,
     append_bookmark,
 )
 from module.utils.discord_utils import (
     post_discord_item_image_urls,
-    ppost_discord_complete(
-    webhook_url=discord_weathercaster_webhook_url(),
-    category="JMA",
-    notion_url=notion_page_url(page_id) if page_id else "",
-    attach_count=attach_count,
-    errors=errors,
+    post_discord_complete,
 )
+
 
 # =============================================================================
 # 基本設定
 # =============================================================================
-BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
-
-PDF_FILES = [
-    "AUPA20.pdf", "AUPN30.pdf", "AXJP140.pdf",
-    "COMP12.pdf", "COMP36.pdf", "COMP72.pdf",
-    "FXJP854.pdf", "FXXN519.pdf", "FZCX50.pdf",
-    "TKAISETU.pdf", "SKAISETU.pdf", "FEFE19.pdf",
-]
-
-PROBE_PDFS_ENV = os.environ.get("WEATHERCASTER_ISSUE_PROBE_PDFS", "").strip()
-
-USER = os.environ.get("WEATHERCASTER_USER", "").strip()
-PASS = os.environ.get("WEATHERCASTER_PASS", "").strip()
-
 DATA_DIR = "/tmp/jma_data"
-OUTPUT_DIR = "/tmp/weathercaster_jma"
+OUTPUT_DIR = "/tmp/jma_weather_map"
 
 JPEG_DPI = int(os.environ.get("JPEG_DPI", "200"))
 JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
+
+# 手動実行時だけ 00 / 12 を強制したい場合
+# 例: JMA_UTC_OVERRIDE=00
+JMA_UTC_OVERRIDE = os.environ.get("JMA_UTC_OVERRIDE", "").strip()
+
+
+Attachment = Tuple[str, bytes, str]
+
+
+# =============================================================================
+# JMA PDF定義
+# =============================================================================
+JMA_FIXED_PDFS: List[Tuple[str, str, bool]] = [
+    (
+        "kaisetsu_tanki_latest",
+        "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
+        True,
+    ),
+    (
+        "kaisetsu_shukan_latest",
+        "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
+        True,
+    ),
+]
+
+JMA_UTC_PDFS: Dict[str, Dict[str, str]] = {
+    "axjp140": {
+        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp140_00.pdf",
+        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp140_12.pdf",
+    },
+    "aupa20": {
+        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/aupa20_00.pdf",
+        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/aupa20_12.pdf",
+    },
+    "axfe578": {
+        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axfe578_00.pdf",
+        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axfe578_12.pdf",
+    },
+    "fxfe5782": {
+        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5782_00.pdf",
+        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5782_12.pdf",
+    },
+    "fxfe5784": {
+        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5784_00.pdf",
+        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5784_12.pdf",
+    },
+    "fxfe577": {
+        "00": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe577_00.pdf",
+        "12": "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe577_12.pdf",
+    },
+}
 
 
 # =============================================================================
@@ -97,30 +121,19 @@ def env_bool(name: str, default: str = "0") -> bool:
     return v in ("1", "true", "yes", "on")
 
 
-def discord_weathercaster_webhook_url() -> str:
-    """
-    Weathercaster専用DiscordチャンネルのWebhook URL。
-
-    優先:
-      DISCORD_WEATHERCASTER_WEBHOOK_URL
-
-    互換:
-      DISCORD_WEBHOOK_URL
-    """
+def discord_jma_webhook_url() -> str:
     return (
-        os.getenv("DISCORD_WEATHERCASTER_WEBHOOK_URL", "").strip()
+        os.getenv("DISCORD_JMA_WEBHOOK_URL", "").strip()
+        or os.getenv("DISCORD_WEATHERCASTER_WEBHOOK_URL", "").strip()
         or os.getenv("DISCORD_WEBHOOK_URL", "").strip()
     )
 
 
-def discord_weathercaster_enabled() -> bool:
-    return env_bool("DISCORD_ENABLE", "0") and bool(discord_weathercaster_webhook_url())
+def discord_jma_enabled() -> bool:
+    return env_bool("DISCORD_ENABLE", "0") and bool(discord_jma_webhook_url())
 
 
 def notion_page_url(page_id: str) -> str:
-    """
-    Notionのpage_idからブラウザURLを作る。
-    """
     clean = (page_id or "").replace("-", "")
     return f"https://www.notion.so/{clean}" if clean else ""
 
@@ -138,30 +151,23 @@ EMAGRAM_FILENAME = os.environ.get("EMAGRAM_FILENAME", "ema_aki_00.gif").strip()
 # =============================================================================
 AMEDAS_LINK = os.environ.get(
     "AMEDAS_LINK",
-    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/fuken.html"
+    "https://www.jma.go.jp/bosai/map.html#5/39.012/135/&elem=temp&contents=amedas",
 ).strip()
 
 GUIDANCE_LINKS = [
     (
-        "GSMガイダンス",
-        "https://www.weathercaster.jp/web/member_only/weather-data/guidance/gui_ken_hour.html",
+        "気象庁 天気図",
+        "https://www.jma.go.jp/bosai/weather_map/",
     ),
     (
-        "MSMガイダンス",
-        "https://www.weathercaster.jp/web/member_only/weather-data/msm_guidance/gui_ken_hour.html",
+        "気象庁 数値予報天気図",
+        "https://www.jma.go.jp/bosai/numericmap/",
     ),
     (
-        "週間ガイダンス",
-        "https://www.weathercaster.jp/web/member_only/weather-data/week_guidance/gui_all_daily.html",
-    ),
-    (
-        "気象庁 分布予報（市町村一覧）",
-        "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/bunpu_office_2.cgi#05",
+        "気象庁 分布予報",
+        "https://www.jma.go.jp/bosai/forecast/",
     ),
 ]
-
-
-Attachment = Tuple[str, bytes, str]
 
 
 # =============================================================================
@@ -171,10 +177,11 @@ def jst_tz() -> timezone:
     return timezone(timedelta(hours=9))
 
 
+def now_jst() -> datetime:
+    return datetime.now(timezone.utc).astimezone(jst_tz())
+
+
 def _httpdate_to_utc_dt(http_date: str) -> Optional[datetime]:
-    """
-    Last-ModifiedなどのHTTP-dateをUTC datetimeへ変換する。
-    """
     try:
         dt = parsedate_to_datetime(http_date)
         if dt.tzinfo is None:
@@ -184,53 +191,87 @@ def _httpdate_to_utc_dt(http_date: str) -> Optional[datetime]:
         return None
 
 
-def _parse_probe_pdfs() -> List[str]:
+def select_jma_utc_run() -> str:
     """
-    発行基準時刻の推定に使うPDFを選ぶ。
-    指定があればそれを使い、なければCOMP系を優先する。
+    取得するJMA初期値を 00 / 12 で判定する。
+
+    GitHub Actions想定:
+      05:30 JST → 12UTC
+      11:30 JST → 00UTC
+      17:30 JST → 00UTC
+      23:30 JST → 12UTC
+
+    手動実行時:
+      JMA_UTC_OVERRIDE=00 または 12 で上書き可能。
     """
-    if PROBE_PDFS_ENV:
-        return [p.strip() for p in PROBE_PDFS_ENV.split(",") if p.strip()]
+    if JMA_UTC_OVERRIDE in ("00", "12"):
+        return JMA_UTC_OVERRIDE
 
-    comp = [p for p in PDF_FILES if p.startswith("COMP")]
-    return comp if comp else PDF_FILES[:]
+    h = now_jst().hour
+
+    # 00UTC（09JST初期値）は、11:30 / 17:30 JSTで使う
+    if 10 <= h < 20:
+        return "00"
+
+    # 12UTC（21JST初期値）は、23:30 / 05:30 JSTで使う
+    return "12"
 
 
-def _floor_to_6h_jst_03_09_15_21(dt_utc: datetime) -> datetime:
+def issue_base_utc_from_run(run_utc: str) -> datetime:
     """
-    JSTの03/09/15/21時に丸める。
+    Notionの発行基準時刻に使うUTC datetimeを作る。
+    run_utc:
+      00 → 当日09:00 JST
+      12 → 当日21:00 JST
+           ただし深夜〜午前実行では前日21:00 JST
     """
     jst = jst_tz()
+    n = now_jst()
 
-    if dt_utc.tzinfo is None:
-        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    if run_utc == "00":
+        base_jst = n.replace(hour=9, minute=0, second=0, microsecond=0)
+        return base_jst.astimezone(timezone.utc)
 
-    dt_jst = dt_utc.astimezone(jst)
+    base_jst = n.replace(hour=21, minute=0, second=0, microsecond=0)
 
-    dt_shift = dt_jst - timedelta(hours=3)
-    h = (dt_shift.hour // 6) * 6
-    dt_floor = dt_shift.replace(hour=h, minute=0, second=0, microsecond=0) + timedelta(hours=3)
+    # 05:30 JSTなど、日付が変わった後に前日21JST初期値を取る場合
+    if n.hour < 10:
+        base_jst = base_jst - timedelta(days=1)
 
-    return dt_floor.astimezone(timezone.utc)
+    return base_jst.astimezone(timezone.utc)
+
+
+def build_jma_targets(run_utc: str) -> List[Tuple[str, str, bool]]:
+    """
+    ダウンロード対象を作る。
+
+    戻り値:
+      (保存ベース名, URL, 全ページ変換するか)
+    """
+    targets: List[Tuple[str, str, bool]] = []
+
+    for key, urls in JMA_UTC_PDFS.items():
+        url = urls[run_utc]
+        targets.append((f"{key}_{run_utc}", url, False))
+
+    targets.extend(JMA_FIXED_PDFS)
+
+    return targets
 
 
 # =============================================================================
 # 取得
 # =============================================================================
-def fetch_pdf_content(name: str) -> Tuple[Optional[bytes], Optional[str], Optional[int]]:
-    """
-    WeathercasterのPDFを取得する。
-    """
-    url = f"{BASE_URL}/{name}"
-
+def fetch_pdf_from_url(name: str, url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int]]:
     try:
-        r = requests.get(url, auth=(USER, PASS), timeout=60)
+        headers = {"User-Agent": "jma-weather-map-bot/1.0"}
+        r = requests.get(url, headers=headers, timeout=60)
         lm = r.headers.get("Last-Modified")
 
         if r.status_code == 200:
             return r.content, lm, r.status_code
 
-        print(f"[NG] {name} HTTP {r.status_code}")
+        print(f"[NG] {name} HTTP {r.status_code}: {url}")
         return None, lm, r.status_code
 
     except Exception as e:
@@ -239,12 +280,8 @@ def fetch_pdf_content(name: str) -> Tuple[Optional[bytes], Optional[str], Option
 
 
 def fetch_image_content(url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int], Optional[str]]:
-    """
-    外部画像を取得する。
-    エマグラムGIF取得に使う。
-    """
     try:
-        headers = {"User-Agent": "weathercaster-jma-bot/1.0"}
+        headers = {"User-Agent": "jma-weather-map-bot/1.0"}
         r = requests.get(url, headers=headers, timeout=30)
 
         lm = r.headers.get("Last-Modified")
@@ -269,15 +306,6 @@ def pdf_bytes_to_jpgs(
     base_filename: str,
     force_all: bool = False,
 ) -> List[Attachment]:
-    """
-    PDFをJPGへ変換する。
-
-    通常:
-      1ページ目のみ
-
-    TKAISETU / SKAISETU:
-      複数ページを全部JPG化
-    """
     images = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
 
     if not images:
@@ -300,16 +328,6 @@ def pdf_bytes_to_jpgs(
 
 
 def gif_to_jpg_bytes(gif_bytes: bytes, quality: int = 85) -> bytes:
-    """
-    GIFの1フレーム目をJPGに変換する。
-
-    用途:
-      Notionカバー用。
-
-    理由:
-      Notionカバーに外部GIFを指定すると400エラーになることがあるため。
-      本文にはGIFをそのまま表示し、カバーだけJPGにする。
-    """
     with Image.open(io.BytesIO(gif_bytes)) as im:
         im.seek(0)
         im = im.convert("RGB")
@@ -322,54 +340,33 @@ def gif_to_jpg_bytes(gif_bytes: bytes, quality: int = 85) -> bytes:
 # =============================================================================
 # 出力構築
 # =============================================================================
-def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
-    """
-    PDF群とエマグラムを取得し、R2へアップロードするための画像配列を作る。
-
-    戻り値:
-      images:
-        R2へ上げる画像一覧
-
-      errors:
-        取得・変換エラー一覧
-
-      issued_dt_utc_guess:
-        発行基準時刻の推定
-    """
+def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[datetime]]:
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     images: List[Attachment] = []
     errors: List[str] = []
-
     lm_dts_pdf_all: List[datetime] = []
-    lm_dts_pdf_probe: List[datetime] = []
-    probe_set = set(_parse_probe_pdfs())
 
     # -------------------------------------------------------------------------
-    # PDF取得
+    # JMA PDF取得
     # -------------------------------------------------------------------------
-    for name in PDF_FILES:
-        pdf, last_mod, st = fetch_pdf_content(name)
+    for base_name, url, force_all in build_jma_targets(run_utc):
+        pdf, last_mod, st = fetch_pdf_from_url(base_name, url)
 
         if last_mod:
             dt = _httpdate_to_utc_dt(last_mod)
             if dt:
                 lm_dts_pdf_all.append(dt)
-                if name in probe_set:
-                    lm_dts_pdf_probe.append(dt)
 
         if not pdf:
-            errors.append(f"{name}: download failed (HTTP={st})")
+            errors.append(f"{base_name}: download failed (HTTP={st})")
             continue
 
-        base = name.replace(".pdf", "")
-
-        force_all = name in ("SKAISETU.pdf", "TKAISETU.pdf")
-        atts = pdf_bytes_to_jpgs(pdf, base, force_all=force_all)
+        atts = pdf_bytes_to_jpgs(pdf, base_name, force_all=force_all)
 
         if not atts:
-            errors.append(f"{name}: conversion failed")
+            errors.append(f"{base_name}: conversion failed")
             continue
 
         for fname, blob, _ in atts:
@@ -383,48 +380,31 @@ def build_outputs() -> Tuple[List[Attachment], List[str], Optional[datetime]]:
 
     # -------------------------------------------------------------------------
     # エマグラム取得
-    #
-    # ここが今回の重要ポイント:
-    #   1. 本文用GIFを残す
-    #   2. カバー用JPGも生成する
-    #
-    # 順番:
-    #   先頭: エマグラムJPG（Notionカバー候補）
-    #   次:   エマグラムGIF（本文表示用）
     # -------------------------------------------------------------------------
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
-    
+
         if blob:
             try:
-                # GIF → JPG変換
                 jpg_blob = gif_to_jpg_bytes(blob, quality=JPEG_QUALITY)
-    
                 jpg_name = EMAGRAM_FILENAME.replace(".gif", ".jpg")
-    
-                # ★ JPGのみ追加（GIFは捨てる）
+
                 images.insert(0, (jpg_name, jpg_blob, "image/jpeg"))
-    
+
                 try:
                     with open(os.path.join(OUTPUT_DIR, jpg_name), "wb") as f:
                         f.write(jpg_blob)
                 except Exception:
                     pass
-    
+
             except Exception as e:
                 print(f"[WARN] emagram convert failed: {e}")
         else:
             errors.append(f"EMAGRAM: download failed (HTTP={st})")
-    
-        # 発行基準時刻はPDFのLast-Modifiedから推定
-        issued_dt_utc_guess: Optional[datetime] = None
-    
-        if lm_dts_pdf_probe:
-            issued_dt_utc_guess = max(lm_dts_pdf_probe)
-        elif lm_dts_pdf_all:
-            issued_dt_utc_guess = max(lm_dts_pdf_all)
-    
-        return images, errors, issued_dt_utc_guess
+
+    issued_dt_utc_guess: Optional[datetime] = max(lm_dts_pdf_all) if lm_dts_pdf_all else None
+
+    return images, errors, issued_dt_utc_guess
 
 
 # =============================================================================
@@ -434,21 +414,6 @@ def upload_to_r2(
     run_prefix: str,
     atts: List[Attachment],
 ) -> Tuple[List[str], Optional[str]]:
-    """
-    R2へアップロードする。
-
-    戻り値:
-      all_urls:
-        Notion本文・Discord表示に使う全URL
-
-      rep_url:
-        Notionカバーに使う代表URL
-
-    代表URLの選び方:
-      1. *_cover.jpg を最優先
-      2. なければ最初のimage/jpeg
-      3. それもなければ最初のURL
-    """
     if not R2_ENABLE:
         return [], None
 
@@ -490,11 +455,6 @@ def notion_write_db(
     all_urls: List[str],
     errors: List[str],
 ) -> Optional[str]:
-    """
-    Notion DBへ1ページ作成する。
-
-    module/utils/notion_utils.py の create_db_row() に合わせる。
-    """
     if not notion_enabled():
         return None
 
@@ -525,40 +485,23 @@ def notion_write_db(
     if not page_id:
         return None
 
-    # Notion APIの反映待ち
     time.sleep(1.0)
 
-    # -------------------------------------------------------------------------
-    # カバー画像
-    #
-    # カバー用JPGを使う想定。
-    # ただし、Notion側で外部URLを拒否する場合もあるため、
-    # 失敗しても全体を止めない。
-    # -------------------------------------------------------------------------
-    # -----------------------------
-    # ガイダンスリンク
-    # -----------------------------
     try:
         if GUIDANCE_LINKS:
-            append_heading(page_id, "ガイダンス・関連リンク", level=2)
+            append_heading(page_id, "関連リンク", level=2)
             for cap, url in GUIDANCE_LINKS:
                 append_bookmark(page_id, url, caption=cap)
     except Exception as e:
         print(f"[WARN] append guidance links failed: {e}")
 
-    # -----------------------------
-    # アメダスリンク
-    # -----------------------------
     try:
         if AMEDAS_LINK:
-            append_heading(page_id, "アメダス（リンク）", level=2)
-            append_bookmark(page_id, AMEDAS_LINK, caption="秋田 AMeDAS（府県別）")
+            append_heading(page_id, "アメダス", level=2)
+            append_bookmark(page_id, AMEDAS_LINK, caption="気象庁 アメダス")
     except Exception as e:
         print(f"[WARN] append amedas link failed: {e}")
 
-    # -----------------------------
-    # 画像本文
-    # -----------------------------
     try:
         if all_urls:
             append_images(page_id, all_urls, chunk=30)
@@ -567,29 +510,24 @@ def notion_write_db(
 
     return page_id
 
+
 # =============================================================================
 # Discord
 # =============================================================================
-def notify_discord_weathercaster_images(
+def notify_discord_jma_images(
     *,
     all_urls: List[str],
     rjtd: str,
     issue_base_utc: datetime,
 ) -> None:
-    """
-    Weathercaster画像投稿。
-
-    Notion URLはここでは出さない。
-    最後の完了通知だけに出す。
-    """
-    if not discord_weathercaster_enabled():
+    if not discord_jma_enabled():
         return
 
     issue_base_jst = issue_base_utc.astimezone(jst_tz())
     init_jst = issue_base_jst.strftime("%Y-%m-%d %H:%M JST")
 
     post_discord_item_image_urls(
-        webhook_url=discord_weathercaster_webhook_url(),
+        webhook_url=discord_jma_webhook_url(),
         title="JMA 天気図",
         image_urls=all_urls,
         notion_url="",
@@ -598,27 +536,23 @@ def notify_discord_weathercaster_images(
     )
 
 
-def notify_discord_weathercaster_complete(
+def notify_discord_jma_complete(
     *,
     page_id: Optional[str],
     errors: List[str],
     attach_count: int,
 ) -> None:
-    """
-    Weathercaster完了通知。
-
-    最後にNotion URLを表示する。
-    """
-    if not discord_weathercaster_enabled():
+    if not discord_jma_enabled():
         return
 
     post_discord_complete(
-        webhook_url=...,
+        webhook_url=discord_jma_webhook_url(),
         category="JMA",
-        notion_url="",
-        attach_count=...,
-        errors=...,
+        notion_url=notion_page_url(page_id) if page_id else "",
+        attach_count=attach_count,
+        errors=errors,
     )
+
 
 # =============================================================================
 # main
@@ -629,12 +563,15 @@ def main() -> None:
     errors: List[str] = []
 
     try:
-        print("=== Start Weathercaster JMA ===")
+        print("=== Start JMA Weather Map ===")
 
-        images, errors, issued_guess_utc = build_outputs()
+        run_utc = select_jma_utc_run()
+        print(f"[INFO] selected JMA run: {run_utc}UTC")
 
-        base_utc_src = issued_guess_utc or datetime.now(timezone.utc)
-        issue_base_utc = _floor_to_6h_jst_03_09_15_21(base_utc_src)
+        images, errors, issued_guess_utc = build_outputs(run_utc)
+
+        # JMA直取得では、Last-Modifiedよりも「初期値」を基準にする
+        issue_base_utc = issue_base_utc_from_run(run_utc)
 
         rjtd = issue_base_utc.strftime("%d%H%M")
         day = issue_base_utc.strftime("%Y%m%d")
@@ -663,28 +600,33 @@ def main() -> None:
 
         try:
             if all_urls:
-                notify_discord_weathercaster_images(
+                notify_discord_jma_images(
                     all_urls=all_urls,
                     rjtd=rjtd,
                     issue_base_utc=issue_base_utc,
                 )
 
-                if discord_weathercaster_enabled():
+                if discord_jma_enabled():
                     print(f"[OK] Discord images sent: {len(all_urls)}")
 
-            notify_discord_weathercaster_complete(
+            notify_discord_jma_complete(
                 page_id=page_id,
                 errors=errors,
                 attach_count=len(all_urls),
             )
 
-            if discord_weathercaster_enabled():
+            if discord_jma_enabled():
                 print("[OK] Discord complete sent")
 
         except Exception as e:
             print(f"[WARN] Discord send failed: {e}")
 
-        print("=== Done Weathercaster JMA ===")
+        if errors:
+            print("[WARN] completed with errors:")
+            for e in errors:
+                print(f"  - {e}")
+
+        print("=== Done JMA Weather Map ===")
 
     finally:
         shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
