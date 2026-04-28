@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-# scripts/jma_weathercaster.py
+# scripts/jma_weather_map.py
 #
 # Weathercaster:
 #   PDF → JPG → R2 → Notion DB → Discord
