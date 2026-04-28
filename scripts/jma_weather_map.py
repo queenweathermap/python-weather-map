@@ -5,16 +5,12 @@
 # JMA Weather Map:
 #   JMA PDF / PNG → JPG → R2 → Notion DB → Discord
 #
-# 役割分担:
-#   - Notion / R2 が正本
-#   - Discord は画像ビューア
-#   - Slack は使わない
-#
 # 配信内容:
 #   - エマグラム（GIFをJPG化）
 #   - 短期予報解説資料
 #   - 週間予報解説資料
 #   - 週間系PNG資料（JPG化）
+#   - 地上天気図PNG 3枚（実況 / 24時間予想 / 48時間予想）
 #   - 数値予報天気図PDF（00UTC / 12UTC）
 # =============================================================================
 
@@ -52,9 +48,6 @@ from module.utils.discord_utils import (
 )
 
 
-# =============================================================================
-# 基本設定
-# =============================================================================
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
@@ -64,9 +57,10 @@ JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
 
-# 手動実行時だけ 00 / 12 を強制したい場合
-# 例: JMA_UTC_OVERRIDE=00
 JMA_UTC_OVERRIDE = os.environ.get("JMA_UTC_OVERRIDE", "").strip()
+
+WEATHER_MAP_LIST_URL = "https://www.jma.go.jp/bosai/weather_map/data/list.json"
+WEATHER_MAP_PNG_BASE_URL = "https://www.jma.go.jp/bosai/weather_map/data/png"
 
 Attachment = Tuple[str, bytes, str]
 
@@ -113,18 +107,9 @@ AMEDAS_LINK = os.environ.get(
 ).strip()
 
 GUIDANCE_LINKS = [
-    (
-        "気象庁 天気図",
-        "https://www.jma.go.jp/bosai/weather_map/",
-    ),
-    (
-        "気象庁 数値予報天気図",
-        "https://www.jma.go.jp/bosai/numericmap/",
-    ),
-    (
-        "気象庁 分布予報",
-        "https://www.jma.go.jp/bosai/forecast/",
-    ),
+    ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
+    ("気象庁 数値予報天気図", "https://www.jma.go.jp/bosai/numericmap/"),
+    ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
 ]
 
 
@@ -151,36 +136,20 @@ def _httpdate_to_utc_dt(http_date: str) -> Optional[datetime]:
 
 def select_jma_utc_run() -> str:
     """
-    取得するJMA初期値を 00 / 12 で判定する。
-
     GitHub Actions想定:
       05:30 JST → 12UTC
       11:30 JST → 00UTC
       17:30 JST → 00UTC
       23:30 JST → 12UTC
-
-    手動実行時:
-      JMA_UTC_OVERRIDE=00 または 12 で上書き可能。
     """
     if JMA_UTC_OVERRIDE in ("00", "12"):
         return JMA_UTC_OVERRIDE
 
     h = now_jst().hour
-
-    if 10 <= h < 20:
-        return "00"
-
-    return "12"
+    return "00" if 10 <= h < 20 else "12"
 
 
 def issue_base_utc_from_run(run_utc: str) -> datetime:
-    """
-    Notionの発行基準時刻に使うUTC datetimeを作る。
-    run_utc:
-      00 → 当日09:00 JST
-      12 → 当日21:00 JST
-           深夜〜午前実行では前日21:00 JST
-    """
     n = now_jst()
 
     if run_utc == "00":
@@ -196,12 +165,59 @@ def issue_base_utc_from_run(run_utc: str) -> datetime:
 
 
 # =============================================================================
+# 地上天気図 list.json
+# =============================================================================
+def build_surface_weather_map_targets() -> List[Tuple[str, str, str, bool]]:
+    """
+    地上天気図3枚をJMA list.jsonから取得する。
+
+    - 実況天気図
+    - 24時間予想図
+    - 48時間予想図
+    """
+    try:
+        headers = {"User-Agent": "jma-weather-map-bot/1.0"}
+        r = requests.get(WEATHER_MAP_LIST_URL, headers=headers, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        near = data.get("near", {})
+
+        targets: List[Tuple[str, str, str, bool]] = []
+
+        items = [
+            ("surface_now", near.get("now") or []),
+            ("surface_fsas24", near.get("ft24") or []),
+            ("surface_fsas48", near.get("ft48") or []),
+        ]
+
+        for base_name, files in items:
+            if not files:
+                print(f"[WARN] surface weather map missing: {base_name}")
+                continue
+
+            filename = files[-1]
+            targets.append(
+                (
+                    base_name,
+                    f"{WEATHER_MAP_PNG_BASE_URL}/{filename}",
+                    "png",
+                    False,
+                )
+            )
+
+        return targets
+
+    except Exception as e:
+        print(f"[WARN] surface weather map list fetch failed: {e}")
+        return []
+
+
+# =============================================================================
 # ダウンロード対象
 # =============================================================================
 def build_jma_targets(run_utc: str) -> List[Tuple[str, str, str, bool]]:
     """
-    ダウンロード対象を作る。
-
     戻り値:
       (保存ベース名, URL, 種別, 全ページ変換するか)
 
@@ -211,13 +227,7 @@ def build_jma_targets(run_utc: str) -> List[Tuple[str, str, str, bool]]:
     """
     targets: List[Tuple[str, str, str, bool]] = []
 
-    # -------------------------------------------------------------------------
-    # エマグラムは別処理
-    # -------------------------------------------------------------------------
-
-    # -------------------------------------------------------------------------
     # 解説資料 PDF
-    # -------------------------------------------------------------------------
     targets += [
         (
             "kaisetsu_tanki",
@@ -233,9 +243,7 @@ def build_jma_targets(run_utc: str) -> List[Tuple[str, str, str, bool]]:
         ),
     ]
 
-    # -------------------------------------------------------------------------
     # 週間系 PNG → JPG
-    # -------------------------------------------------------------------------
     targets += [
         (
             "fefe19",
@@ -257,9 +265,10 @@ def build_jma_targets(run_utc: str) -> List[Tuple[str, str, str, bool]]:
         ),
     ]
 
-    # -------------------------------------------------------------------------
+    # 地上天気図 PNG → JPG
+    targets.extend(build_surface_weather_map_targets())
+
     # UTC依存 PDF
-    # -------------------------------------------------------------------------
     targets += [
         (
             f"axjp130_{run_utc}",
@@ -418,9 +427,6 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     errors: List[str] = []
     lm_dts_all: List[datetime] = []
 
-    # -------------------------------------------------------------------------
-    # JMA PDF / PNG 取得
-    # -------------------------------------------------------------------------
     for base_name, url, kind, force_all in build_jma_targets(run_utc):
         blob, last_mod, st, ct = fetch_binary(base_name, url)
 
@@ -435,8 +441,7 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
 
         try:
             if kind == "png":
-                att = png_bytes_to_jpg(blob, base_name)
-                atts = [att]
+                atts = [png_bytes_to_jpg(blob, base_name)]
             else:
                 atts = pdf_bytes_to_jpgs(blob, base_name, force_all=force_all)
 
@@ -457,9 +462,7 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
             errors.append(f"{base_name}: conversion failed ({e})")
             continue
 
-    # -------------------------------------------------------------------------
     # エマグラム取得
-    # -------------------------------------------------------------------------
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
 
@@ -624,7 +627,6 @@ def notify_discord_jma_complete(
     if not discord_jma_enabled():
         return
 
-    # Notionへのリンクはいらないため、notion_url は空欄
     post_discord_complete(
         webhook_url=discord_jma_webhook_url(),
         category="JMA",
@@ -650,7 +652,6 @@ def main() -> None:
 
         images, errors, issued_guess_utc = build_outputs(run_utc)
 
-        # JMA直取得では、Last-Modifiedよりも「初期値」を基準にする
         issue_base_utc = issue_base_utc_from_run(run_utc)
 
         rjtd = issue_base_utc.strftime("%d%H%M")
