@@ -92,6 +92,11 @@ GUIDANCE_TARGETS = [
         "寒気概要",
         "https://www.jma.go.jp/bosai/advisor/cold_table.html",
     ),
+    (
+        "guid_landslide_gpv",
+        "土砂災害リスク（あと何ミリ）",
+        "https://www.jma.go.jp/bosai/advisor/gpv.html",
+    ),
 ]
 
 
