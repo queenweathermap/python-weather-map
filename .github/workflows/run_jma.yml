@@ -1,4 +1,4 @@
-name: Run JMA Weathercaster
+name: Run JMA weather_map
 
 on:
   schedule:
@@ -99,4 +99,4 @@ jobs:
 
       - name: Run Weathercaster
         run: |
-          python scripts/jma_weathercaster.py
+          python scripts/jma_weather_map.py
