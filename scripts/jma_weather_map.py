@@ -614,7 +614,7 @@ def notify_discord_weathercaster_complete(
 
     post_discord_complete(
         webhook_url=...,
-        category="Weathercaster",
+        category="JMA",
         notion_url="",
         attach_count=...,
         errors=...,
