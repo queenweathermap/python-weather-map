@@ -1,4 +1,4 @@
-name: Run JMA weather_map
+name: Run JMA Weather Map
 
 on:
   schedule:
