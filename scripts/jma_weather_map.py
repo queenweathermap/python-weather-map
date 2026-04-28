@@ -218,32 +218,101 @@ def build_surface_weather_map_targets() -> List[Tuple[str, str, str, bool]]:
 # =============================================================================
 def build_jma_targets(run_utc: str) -> List[Tuple[str, str, str, bool]]:
     """
-    戻り値:
-      (保存ベース名, URL, 種別, 全ページ変換するか)
+    並び順 = 配信順（超重要）
 
-    種別:
-      pdf
-      png
+    構成：
+      ① エマグラム（別処理）
+      ② 実況
+      ③ 地上予想
+      ④ 数値予報（高層 → 地上）
+      ⑤ 週間
+      ⑥ 解説
     """
+
     targets: List[Tuple[str, str, str, bool]] = []
 
-    # 解説資料 PDF
+    # =========================================================
+    # ② 実況（まず現在）
+    # =========================================================
+    targets += build_surface_weather_map_targets()[:1]  # surface_now
+
+    # =========================================================
+    # ③ 地上予想（未来）
+    # =========================================================
+    surface_targets = build_surface_weather_map_targets()
+    targets += surface_targets[1:]  # 24h / 48h
+
+    # =========================================================
+    # ④ 数値予報（上空 → 地上）
+    # =========================================================
+
+    # --- 高層 ---
     targets += [
         (
-            "kaisetsu_tanki",
-            "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
+            f"aupa20_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/aupa20_{run_utc}.pdf",
             "pdf",
-            True,
+            False,
         ),
         (
-            "kaisetsu_shukan",
-            "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
+            f"axjp130_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp130_{run_utc}.pdf",
             "pdf",
-            True,
+            False,
+        ),
+        (
+            f"axjp140_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp140_{run_utc}.pdf",
+            "pdf",
+            False,
         ),
     ]
 
-    # 週間系 PNG → JPG
+    # --- 中層（渦度・トラフ） ---
+    targets += [
+        (
+            f"fxfe5782_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5782_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"fxfe5784_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5784_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+    ]
+
+    # --- 下層（温度・湿り） ---
+    targets += [
+        (
+            f"fxjp854_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxjp854_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+    ]
+
+    # --- 最終（地上・降水） ---
+    targets += [
+        (
+            f"fxfe502_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe502_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+        (
+            f"fxfe504_{run_utc}",
+            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe504_{run_utc}.pdf",
+            "pdf",
+            False,
+        ),
+    ]
+
+    # =========================================================
+    # ⑤ 週間（スケール拡張）
+    # =========================================================
     targets += [
         (
             "fefe19",
@@ -265,58 +334,21 @@ def build_jma_targets(run_utc: str) -> List[Tuple[str, str, str, bool]]:
         ),
     ]
 
-    # 地上天気図 PNG → JPG
-    targets.extend(build_surface_weather_map_targets())
-
-    # UTC依存 PDF
+    # =========================================================
+    # ⑥ 解説（最後に言語化）
+    # =========================================================
     targets += [
         (
-            f"axjp130_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp130_{run_utc}.pdf",
+            "kaisetsu_tanki",
+            "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
             "pdf",
-            False,
+            True,
         ),
         (
-            f"axjp140_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp140_{run_utc}.pdf",
+            "kaisetsu_shukan",
+            "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
             "pdf",
-            False,
-        ),
-        (
-            f"aupa20_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/aupa20_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"fxfe5782_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5782_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"fxfe5784_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5784_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"fxfe502_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe502_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"fxfe504_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe504_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"fxjp854_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxjp854_{run_utc}.pdf",
-            "pdf",
-            False,
+            True,
         ),
     ]
 
