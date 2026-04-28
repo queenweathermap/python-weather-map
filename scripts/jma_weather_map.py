@@ -54,9 +54,13 @@ from module.utils.notion_utils import (
 )
 from module.utils.discord_utils import (
     post_discord_item_image_urls,
-    post_discord_complete,
+    ppost_discord_complete(
+    webhook_url=discord_weathercaster_webhook_url(),
+    category="JMA",
+    notion_url=notion_page_url(page_id) if page_id else "",
+    attach_count=attach_count,
+    errors=errors,
 )
-
 
 # =============================================================================
 # 基本設定
