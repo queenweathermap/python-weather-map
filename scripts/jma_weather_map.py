@@ -3,15 +3,21 @@
 # scripts/jma_weather_map.py
 #
 # JMA Weather Map:
-#   JMA PDF / PNG → JPG → R2 → Notion DB → Discord
+#   JMA PDF / PNG / GIF → JPG → R2 → Notion DB → Discord
 #
-# 配信内容:
-#   - エマグラム（GIFをJPG化）
-#   - 短期予報解説資料
-#   - 週間予報解説資料
-#   - 週間系PNG資料（JPG化）
-#   - 地上天気図PNG 3枚（実況 / 24時間予想 / 48時間予想）
-#   - 数値予報天気図PDF（00UTC / 12UTC）
+# 配信順:
+#   ① エマグラム
+#   ② 地上実況
+#   ③ 高層天気図（AUPA20 + AUPN30 縦結合）
+#   ④ 断面図（AXJP130 / AXJP140）
+#   ⑤ 数値予報（上空 → 地上）
+#        - AUPQ35 + AUPQ78 縦結合
+#        - 12・24時間：FXFE5782 + FXFE502 縦結合
+#        - 36・48時間：FXFE5784 + FXFE504 縦結合
+#        - 72時間：FXFE577 + FXFE507 縦結合
+#        - FXJP854 単体
+#   ⑥ 週間
+#   ⑦ 解説
 # =============================================================================
 
 from __future__ import annotations
@@ -48,6 +54,9 @@ from module.utils.discord_utils import (
 )
 
 
+# =============================================================================
+# 基本設定
+# =============================================================================
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
@@ -57,10 +66,13 @@ JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
 
+# 手動実行時だけ 00 / 12 を強制したい場合
+# 例: JMA_UTC_OVERRIDE=00
 JMA_UTC_OVERRIDE = os.environ.get("JMA_UTC_OVERRIDE", "").strip()
 
 WEATHER_MAP_LIST_URL = "https://www.jma.go.jp/bosai/weather_map/data/list.json"
 WEATHER_MAP_PNG_BASE_URL = "https://www.jma.go.jp/bosai/weather_map/data/png"
+NWP_BASE_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap"
 
 Attachment = Tuple[str, bytes, str]
 
@@ -165,15 +177,21 @@ def issue_base_utc_from_run(run_utc: str) -> datetime:
 
 
 # =============================================================================
+# URL生成
+# =============================================================================
+def nwp_pdf_url(code: str, run_utc: str) -> str:
+    return f"{NWP_BASE_URL}/{code.lower()}_{run_utc}.pdf"
+
+
+# =============================================================================
 # 地上天気図 list.json
 # =============================================================================
-def build_surface_weather_map_targets() -> List[Tuple[str, str, str, bool]]:
+def build_surface_weather_map_targets() -> List[Tuple[str, str]]:
     """
     地上天気図3枚をJMA list.jsonから取得する。
 
-    - 実況天気図
-    - 24時間予想図
-    - 48時間予想図
+    戻り値:
+      [(保存ベース名, PNG URL), ...]
     """
     try:
         headers = {"User-Agent": "jma-weather-map-bot/1.0"}
@@ -183,7 +201,7 @@ def build_surface_weather_map_targets() -> List[Tuple[str, str, str, bool]]:
 
         near = data.get("near", {})
 
-        targets: List[Tuple[str, str, str, bool]] = []
+        result: List[Tuple[str, str]] = []
 
         items = [
             ("surface_now", near.get("now") or []),
@@ -197,162 +215,13 @@ def build_surface_weather_map_targets() -> List[Tuple[str, str, str, bool]]:
                 continue
 
             filename = files[-1]
-            targets.append(
-                (
-                    base_name,
-                    f"{WEATHER_MAP_PNG_BASE_URL}/{filename}",
-                    "png",
-                    False,
-                )
-            )
+            result.append((base_name, f"{WEATHER_MAP_PNG_BASE_URL}/{filename}"))
 
-        return targets
+        return result
 
     except Exception as e:
         print(f"[WARN] surface weather map list fetch failed: {e}")
         return []
-
-
-# =============================================================================
-# ダウンロード対象
-# =============================================================================
-def build_jma_targets(run_utc: str) -> List[Tuple[str, str, str, bool]]:
-    """
-    並び順 = 配信順（超重要）
-
-    構成：
-      ① エマグラム（別処理）
-      ② 実況
-      ③ 地上予想
-      ④ 数値予報（高層 → 地上）
-      ⑤ 週間
-      ⑥ 解説
-    """
-
-    targets: List[Tuple[str, str, str, bool]] = []
-
-    # =========================================================
-    # ② 実況（まず現在）
-    # =========================================================
-    targets += build_surface_weather_map_targets()[:1]  # surface_now
-
-    # =========================================================
-    # ③ 地上予想（未来）
-    # =========================================================
-    surface_targets = build_surface_weather_map_targets()
-    targets += surface_targets[1:]  # 24h / 48h
-
-    # =========================================================
-    # ④ 数値予報（上空 → 地上）
-    # =========================================================
-
-    # --- 高層 ---
-    targets += [
-        (
-            f"aupa20_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/aupa20_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"axjp130_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp130_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"axjp140_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/axjp140_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-    ]
-
-    # --- 中層（渦度・トラフ） ---
-    targets += [
-        (
-            f"fxfe5782_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5782_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"fxfe5784_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe5784_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-    ]
-
-    # --- 下層（温度・湿り） ---
-    targets += [
-        (
-            f"fxjp854_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxjp854_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-    ]
-
-    # --- 最終（地上・降水） ---
-    targets += [
-        (
-            f"fxfe502_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe502_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-        (
-            f"fxfe504_{run_utc}",
-            f"https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxfe504_{run_utc}.pdf",
-            "pdf",
-            False,
-        ),
-    ]
-
-    # =========================================================
-    # ⑤ 週間（スケール拡張）
-    # =========================================================
-    targets += [
-        (
-            "fefe19",
-            "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fefe19.png",
-            "png",
-            False,
-        ),
-        (
-            "fzcx50",
-            "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fzcx50.png",
-            "png",
-            False,
-        ),
-        (
-            "fxxn519",
-            "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxxn519.png",
-            "png",
-            False,
-        ),
-    ]
-
-    # =========================================================
-    # ⑥ 解説（最後に言語化）
-    # =========================================================
-    targets += [
-        (
-            "kaisetsu_tanki",
-            "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
-            "pdf",
-            True,
-        ),
-        (
-            "kaisetsu_shukan",
-            "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
-            "pdf",
-            True,
-        ),
-    ]
-
-    return targets
 
 
 # =============================================================================
@@ -399,43 +268,44 @@ def fetch_image_content(url: str) -> Tuple[Optional[bytes], Optional[str], Optio
 # =============================================================================
 # 画像変換
 # =============================================================================
+def pdf_to_pil_first_page(pdf_bytes: bytes) -> Image.Image:
+    pages = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
+    if not pages:
+        raise ValueError("PDF has no pages")
+    return pages[0].convert("RGB")
+
+
 def pdf_bytes_to_jpgs(
     pdf_bytes: bytes,
     base_filename: str,
     force_all: bool = False,
 ) -> List[Attachment]:
-    images = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
+    pages = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
 
-    if not images:
+    if not pages:
         return []
 
     out: List[Attachment] = []
 
     if force_all:
-        for idx, im in enumerate(images, start=1):
-            buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-            out.append((f"{base_filename}_p{idx:02d}.jpg", buf.getvalue(), "image/jpeg"))
+        for idx, im in enumerate(pages, start=1):
+            out.append(pil_to_attachment(im.convert("RGB"), f"{base_filename}_p{idx:02d}"))
         return out
 
-    buf = io.BytesIO()
-    images[0].save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-    out.append((f"{base_filename}.jpg", buf.getvalue(), "image/jpeg"))
-
+    out.append(pil_to_attachment(pages[0].convert("RGB"), base_filename))
     return out
+
+
+def png_bytes_to_pil(png_bytes: bytes) -> Image.Image:
+    with Image.open(io.BytesIO(png_bytes)) as im:
+        return im.convert("RGB")
 
 
 def png_bytes_to_jpg(
     png_bytes: bytes,
     base_filename: str,
 ) -> Attachment:
-    with Image.open(io.BytesIO(png_bytes)) as im:
-        im = im.convert("RGB")
-
-        out = io.BytesIO()
-        im.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-
-        return (f"{base_filename}.jpg", out.getvalue(), "image/jpeg")
+    return pil_to_attachment(png_bytes_to_pil(png_bytes), base_filename)
 
 
 def gif_to_jpg_bytes(gif_bytes: bytes, quality: int = 85) -> bytes:
@@ -446,6 +316,163 @@ def gif_to_jpg_bytes(gif_bytes: bytes, quality: int = 85) -> bytes:
         out = io.BytesIO()
         im.save(out, format="JPEG", quality=quality, optimize=True)
         return out.getvalue()
+
+
+def pil_to_attachment(img: Image.Image, base_filename: str) -> Attachment:
+    buf = io.BytesIO()
+    img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return (f"{base_filename}.jpg", buf.getvalue(), "image/jpeg")
+
+
+def combine_vertical(images: List[Image.Image], padding: int = 16) -> Image.Image:
+    """
+    複数画像を縦に結合する。
+    幅が違う場合は中央寄せ。
+    """
+    rgb_images = [im.convert("RGB") for im in images if im is not None]
+
+    if not rgb_images:
+        raise ValueError("no images to combine")
+
+    max_width = max(im.width for im in rgb_images)
+    total_height = sum(im.height for im in rgb_images) + padding * (len(rgb_images) - 1)
+
+    canvas = Image.new("RGB", (max_width, total_height), "white")
+
+    y = 0
+    for im in rgb_images:
+        x = (max_width - im.width) // 2
+        canvas.paste(im, (x, y))
+        y += im.height + padding
+
+    return canvas
+
+
+# =============================================================================
+# 出力構築ヘルパー
+# =============================================================================
+def add_png_as_jpg(
+    *,
+    images: List[Attachment],
+    errors: List[str],
+    lm_dts_all: List[datetime],
+    base_name: str,
+    url: str,
+) -> None:
+    blob, last_mod, st, ct = fetch_binary(base_name, url)
+
+    if last_mod:
+        dt = _httpdate_to_utc_dt(last_mod)
+        if dt:
+            lm_dts_all.append(dt)
+
+    if not blob:
+        errors.append(f"{base_name}: download failed (HTTP={st})")
+        return
+
+    try:
+        att = png_bytes_to_jpg(blob, base_name)
+        images.append(att)
+
+        try:
+            with open(os.path.join(OUTPUT_DIR, att[0]), "wb") as f:
+                f.write(att[1])
+        except Exception:
+            pass
+
+    except Exception as e:
+        errors.append(f"{base_name}: png conversion failed ({e})")
+
+
+def add_pdf_as_jpg(
+    *,
+    images: List[Attachment],
+    errors: List[str],
+    lm_dts_all: List[datetime],
+    base_name: str,
+    url: str,
+    force_all: bool = False,
+) -> None:
+    blob, last_mod, st, ct = fetch_binary(base_name, url)
+
+    if last_mod:
+        dt = _httpdate_to_utc_dt(last_mod)
+        if dt:
+            lm_dts_all.append(dt)
+
+    if not blob:
+        errors.append(f"{base_name}: download failed (HTTP={st})")
+        return
+
+    try:
+        atts = pdf_bytes_to_jpgs(blob, base_name, force_all=force_all)
+
+        if not atts:
+            errors.append(f"{base_name}: conversion failed")
+            return
+
+        for fname, data, _ in atts:
+            try:
+                with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                    f.write(data)
+            except Exception:
+                pass
+
+        images.extend(atts)
+
+    except Exception as e:
+        errors.append(f"{base_name}: pdf conversion failed ({e})")
+
+
+def add_vertical_pdf_combo(
+    *,
+    images: List[Attachment],
+    errors: List[str],
+    lm_dts_all: List[datetime],
+    combo_name: str,
+    items: List[Tuple[str, str]],
+) -> None:
+    """
+    PDF複数枚の1ページ目をJPG化し、縦結合して1枚にする。
+    """
+    pil_images: List[Image.Image] = []
+
+    for item_name, url in items:
+        blob, last_mod, st, ct = fetch_binary(item_name, url)
+
+        if last_mod:
+            dt = _httpdate_to_utc_dt(last_mod)
+            if dt:
+                lm_dts_all.append(dt)
+
+        if not blob:
+            errors.append(f"{item_name}: download failed (HTTP={st})")
+            continue
+
+        try:
+            pil_images.append(pdf_to_pil_first_page(blob))
+        except Exception as e:
+            errors.append(f"{item_name}: pdf conversion failed ({e})")
+
+    if not pil_images:
+        errors.append(f"{combo_name}: no images to combine")
+        return
+
+    try:
+        combined = combine_vertical(pil_images)
+        att = pil_to_attachment(combined, combo_name)
+
+        try:
+            with open(os.path.join(OUTPUT_DIR, att[0]), "wb") as f:
+                f.write(att[1])
+        except Exception:
+            pass
+
+        images.append(att)
+
+    except Exception as e:
+        errors.append(f"{combo_name}: combine failed ({e})")
 
 
 # =============================================================================
@@ -459,42 +486,178 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     errors: List[str] = []
     lm_dts_all: List[datetime] = []
 
-    for base_name, url, kind, force_all in build_jma_targets(run_utc):
-        blob, last_mod, st, ct = fetch_binary(base_name, url)
+    # -------------------------------------------------------------------------
+    # ① 地上天気図
+    # -------------------------------------------------------------------------
+    surface_targets = build_surface_weather_map_targets()
 
-        if last_mod:
-            dt = _httpdate_to_utc_dt(last_mod)
-            if dt:
-                lm_dts_all.append(dt)
+    # 実況
+    if len(surface_targets) >= 1:
+        base_name, url = surface_targets[0]
+        add_png_as_jpg(
+            images=images,
+            errors=errors,
+            lm_dts_all=lm_dts_all,
+            base_name=base_name,
+            url=url,
+        )
 
-        if not blob:
-            errors.append(f"{base_name}: download failed (HTTP={st})")
-            continue
+    # 24h / 48h
+    for base_name, url in surface_targets[1:]:
+        add_png_as_jpg(
+            images=images,
+            errors=errors,
+            lm_dts_all=lm_dts_all,
+            base_name=base_name,
+            url=url,
+        )
 
-        try:
-            if kind == "png":
-                atts = [png_bytes_to_jpg(blob, base_name)]
-            else:
-                atts = pdf_bytes_to_jpgs(blob, base_name, force_all=force_all)
+    # -------------------------------------------------------------------------
+    # ② 高層天気図：AUPA20 + AUPN30 縦結合
+    # -------------------------------------------------------------------------
+    add_vertical_pdf_combo(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        combo_name=f"upper_aupa20_aupn30_{run_utc}",
+        items=[
+            (f"aupa20_{run_utc}", nwp_pdf_url("aupa20", run_utc)),
+            (f"aupn30_{run_utc}", nwp_pdf_url("aupn30", run_utc)),
+        ],
+    )
 
-            if not atts:
-                errors.append(f"{base_name}: conversion failed")
-                continue
+    # -------------------------------------------------------------------------
+    # ③ 断面図：AXJP130 / AXJP140 は単体
+    # -------------------------------------------------------------------------
+    add_pdf_as_jpg(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        base_name=f"axjp130_{run_utc}",
+        url=nwp_pdf_url("axjp130", run_utc),
+        force_all=False,
+    )
 
-            for fname, data, _ in atts:
-                try:
-                    with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
-                        f.write(data)
-                except Exception:
-                    pass
+    add_pdf_as_jpg(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        base_name=f"axjp140_{run_utc}",
+        url=nwp_pdf_url("axjp140", run_utc),
+        force_all=False,
+    )
 
-            images.extend(atts)
+    # -------------------------------------------------------------------------
+    # ④ 数値予報：上空 → 下層
+    # AUPQ35 + AUPQ78 縦結合
+    # -------------------------------------------------------------------------
+    add_vertical_pdf_combo(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        combo_name=f"numeric_aupq35_aupq78_{run_utc}",
+        items=[
+            (f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc)),
+            (f"aupq78_{run_utc}", nwp_pdf_url("aupq78", run_utc)),
+        ],
+    )
 
-        except Exception as e:
-            errors.append(f"{base_name}: conversion failed ({e})")
-            continue
+    # -------------------------------------------------------------------------
+    # ⑤ 12・24時間：FXFE5782 + FXFE502 縦結合
+    # -------------------------------------------------------------------------
+    add_vertical_pdf_combo(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        combo_name=f"forecast_12_24_{run_utc}",
+        items=[
+            (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc)),
+            (f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc)),
+        ],
+    )
 
-    # エマグラム取得
+    # -------------------------------------------------------------------------
+    # ⑥ 36・48時間：FXFE5784 + FXFE504 縦結合
+    # -------------------------------------------------------------------------
+    add_vertical_pdf_combo(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        combo_name=f"forecast_36_48_{run_utc}",
+        items=[
+            (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc)),
+            (f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc)),
+        ],
+    )
+
+    # -------------------------------------------------------------------------
+    # ⑦ 72時間：FXFE577 + FXFE507 縦結合
+    # -------------------------------------------------------------------------
+    add_vertical_pdf_combo(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        combo_name=f"forecast_72_{run_utc}",
+        items=[
+            (f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc)),
+            (f"fxfe507_{run_utc}", nwp_pdf_url("fxfe507", run_utc)),
+        ],
+    )
+
+    # -------------------------------------------------------------------------
+    # ⑧ FXJP854 単体
+    # -------------------------------------------------------------------------
+    add_pdf_as_jpg(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        base_name=f"fxjp854_{run_utc}",
+        url=nwp_pdf_url("fxjp854", run_utc),
+        force_all=False,
+    )
+
+    # -------------------------------------------------------------------------
+    # ⑨ 週間系 PNG → JPG
+    # -------------------------------------------------------------------------
+    weekly_pngs = [
+        ("fefe19", f"{NWP_BASE_URL}/fefe19.png"),
+        ("fzcx50", f"{NWP_BASE_URL}/fzcx50.png"),
+        ("fxxn519", f"{NWP_BASE_URL}/fxxn519.png"),
+    ]
+
+    for base_name, url in weekly_pngs:
+        add_png_as_jpg(
+            images=images,
+            errors=errors,
+            lm_dts_all=lm_dts_all,
+            base_name=base_name,
+            url=url,
+        )
+
+    # -------------------------------------------------------------------------
+    # ⑩ 解説資料 PDF
+    # -------------------------------------------------------------------------
+    add_pdf_as_jpg(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        base_name="kaisetsu_tanki",
+        url="https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
+        force_all=True,
+    )
+
+    add_pdf_as_jpg(
+        images=images,
+        errors=errors,
+        lm_dts_all=lm_dts_all,
+        base_name="kaisetsu_shukan",
+        url="https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
+        force_all=True,
+    )
+
+    # -------------------------------------------------------------------------
+    # ⑪ エマグラムを先頭に追加
+    # -------------------------------------------------------------------------
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
 
