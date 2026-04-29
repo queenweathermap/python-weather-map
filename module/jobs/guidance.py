@@ -94,7 +94,12 @@ def capture():
     user = os.getenv("JMA_ADV_USER", "").strip()
     password = os.getenv("JMA_ADV_PASS", "").strip()
 
+    if not user or not password:
+        errors.append("JMA guidance auth env is missing: JMA_ADV_USER / JMA_ADV_PASS")
+        return atts, errors
+
     with sync_playwright() as p:
+
         browser = p.chromium.launch(headless=True)
 
         context_kwargs = {
