@@ -608,7 +608,7 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     # -------------------------------------------------------------------------
     # ④ 数値予報：00・12時間
     #
-    # 左列：AUPQ35 / AUPQ78（解析）
+    # 左列：AUPQ35 / AUPQ78 の左半分（00時間）
     # 右列：FXFE5782 / FXFE502 の左半分（12時間）
     # -------------------------------------------------------------------------
     add_pair_grid_pdf_combo(
@@ -618,11 +618,11 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
         combo_name=f"forecast_00_12_{run_utc}",
         rows=[
             (
-                (f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc), "full"),
+                (f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc), "left"),
                 (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left"),
             ),
             (
-                (f"aupq78_{run_utc}", nwp_pdf_url("aupq78", run_utc), "full"),
+                (f"aupq78_{run_utc}", nwp_pdf_url("aupq78", run_utc), "left"),
                 (f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "left"),
             ),
         ],
