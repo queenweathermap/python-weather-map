@@ -27,9 +27,6 @@ from typing import List, Tuple, Optional
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from module.utils.r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
