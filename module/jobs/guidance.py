@@ -51,9 +51,9 @@ JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "90"))
 R2_ENABLE = os.environ.get("R2_ENABLE", "1") in ("1", "true", "yes")
 R2_PREFIX = os.environ.get("R2_PREFIX", "guidance")
 
-VIEWPORT_WIDTH = 1200
-VIEWPORT_HEIGHT = 900
-WAIT_MS = 2500
+VIEWPORT_WIDTH = int(os.environ.get("GUIDANCE_VIEWPORT_WIDTH", "1200"))
+VIEWPORT_HEIGHT = int(os.environ.get("GUIDANCE_VIEWPORT_HEIGHT", "900"))
+WAIT_MS = int(os.environ.get("GUIDANCE_WAIT_MS", "2500"))
 
 Attachment = Tuple[str, bytes, str]
 
