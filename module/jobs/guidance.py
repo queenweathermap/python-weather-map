@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-# scripts/jma_guidance.py
+# module/jobs/guidance.py
 #
 # JMA Guidance:
 #   HTML → スクショ → JPG → R2 → Notion → Discord
