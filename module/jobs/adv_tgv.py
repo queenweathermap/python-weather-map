@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-# scripts/jma_adv.py
+# module/jobs/adv_tgv.py
 #
 # ADV TGV:
 #   取得 → JPG化(3up) → R2 → Notion(DB) → Discord
