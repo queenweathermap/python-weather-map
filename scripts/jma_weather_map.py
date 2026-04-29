@@ -10,13 +10,13 @@
 #   ② 地上実況・予想
 #   ③ 高層天気図（AUPA20 + AUPN30 縦結合）
 #   ④ 断面図（AXJP130 / AXJP140）
-#   ⑤ 数値予報
-#        - 00・12時間
-#        - 24・36時間
-#        - 48・72時間
-#        - FXJP854 単体
-#   ⑥ 週間
-#   ⑦ 解説
+#   ⑤ 数値予報 合成3枚
+#        - T=00-12
+#        - T=24-36
+#        - T=48-72
+#   ⑥ FXJP854
+#   ⑦ 週間
+#   ⑧ 解説
 # =============================================================================
 
 from __future__ import annotations
@@ -184,7 +184,6 @@ def build_surface_weather_map_targets() -> List[Tuple[str, str]]:
         data = r.json()
 
         near = data.get("near", {})
-
         result: List[Tuple[str, str]] = []
 
         items = [
@@ -309,6 +308,52 @@ def pil_to_attachment(img: Image.Image, base_filename: str) -> Attachment:
     return (f"{base_filename}.jpg", buf.getvalue(), "image/jpeg")
 
 
+def resize_to_width(img: Image.Image, width: int) -> Image.Image:
+    img = img.convert("RGB")
+    if img.width == width:
+        return img
+
+    ratio = width / img.width
+    height = int(img.height * ratio)
+    return img.resize((width, height), Image.LANCZOS)
+
+
+def crop_region(img: Image.Image, region: str) -> Image.Image:
+    """
+    PDF画像から必要な領域を切り出す。
+
+    full
+    left / right
+    top / bottom
+    left_top / left_bottom / right_top / right_bottom
+    """
+    img = img.convert("RGB")
+    w, h = img.size
+    mx = w // 2
+    my = h // 2
+
+    if region == "full":
+        return img
+    if region == "left":
+        return img.crop((0, 0, mx, h))
+    if region == "right":
+        return img.crop((mx, 0, w, h))
+    if region == "top":
+        return img.crop((0, 0, w, my))
+    if region == "bottom":
+        return img.crop((0, my, w, h))
+    if region == "left_top":
+        return img.crop((0, 0, mx, my))
+    if region == "left_bottom":
+        return img.crop((0, my, mx, h))
+    if region == "right_top":
+        return img.crop((mx, 0, w, my))
+    if region == "right_bottom":
+        return img.crop((mx, my, w, h))
+
+    raise ValueError(f"unknown crop region: {region}")
+
+
 def combine_vertical(images: List[Image.Image], padding: int = 16) -> Image.Image:
     rgb_images = [im.convert("RGB") for im in images if im is not None]
 
@@ -329,43 +374,37 @@ def combine_vertical(images: List[Image.Image], padding: int = 16) -> Image.Imag
     return canvas
 
 
-def crop_half(img: Image.Image, side: str) -> Image.Image:
-    img = img.convert("RGB")
+def combine_comp_grid(
+    rows: List[Tuple[Image.Image, Image.Image]],
+    *,
+    cell_width: int = 760,
+    padding_x: int = 24,
+    padding_y: int = 18,
+    margin: int = 16,
+) -> Image.Image:
+    """
+    COMP12 / COMP36 / COMP72 と同じ思想の2列×4段合成。
+    すべてのセルを同じ幅にそろえて配置する。
+    """
+    resized_rows: List[Tuple[Image.Image, Image.Image]] = []
 
-    if side == "full":
-        return img
+    for left, right in rows:
+        left = resize_to_width(left, cell_width)
+        right = resize_to_width(right, cell_width)
+        resized_rows.append((left, right))
 
-    w, h = img.size
-    mid = w // 2
+    row_heights = [max(left.height, right.height) for left, right in resized_rows]
 
-    if side == "left":
-        return img.crop((0, 0, mid, h))
-
-    if side == "right":
-        return img.crop((mid, 0, w, h))
-
-    raise ValueError(f"unknown side: {side}")
-
-
-def combine_two_columns(rows: List[Tuple[Image.Image, Image.Image]], padding: int = 16) -> Image.Image:
-    left_width = max(left.width for left, right in rows)
-    right_width = max(right.width for left, right in rows)
-
-    row_heights = [
-        max(left.height, right.height)
-        for left, right in rows
-    ]
-
-    total_width = left_width + padding + right_width
-    total_height = sum(row_heights) + padding * (len(rows) - 1)
+    total_width = margin * 2 + cell_width * 2 + padding_x
+    total_height = margin * 2 + sum(row_heights) + padding_y * (len(resized_rows) - 1)
 
     canvas = Image.new("RGB", (total_width, total_height), "white")
 
-    y = 0
-    for (left, right), row_h in zip(rows, row_heights):
-        canvas.paste(left, (left_width - left.width, y))
-        canvas.paste(right, (left_width + padding, y))
-        y += row_h + padding
+    y = margin
+    for (left, right), row_h in zip(resized_rows, row_heights):
+        canvas.paste(left, (margin, y))
+        canvas.paste(right, (margin + cell_width + padding_x, y))
+        y += row_h + padding_y
 
     return canvas
 
@@ -380,6 +419,33 @@ def write_attachment_to_tmp(att: Attachment) -> None:
             f.write(data)
     except Exception:
         pass
+
+
+def fetch_pdf_region(
+    *,
+    name: str,
+    url: str,
+    region: str,
+    errors: List[str],
+    lm_dts_all: List[datetime],
+) -> Optional[Image.Image]:
+    blob, last_mod, st, ct = fetch_binary(name, url)
+
+    if last_mod:
+        dt = _httpdate_to_utc_dt(last_mod)
+        if dt:
+            lm_dts_all.append(dt)
+
+    if not blob:
+        errors.append(f"{name}: download failed (HTTP={st})")
+        return None
+
+    try:
+        img = pdf_to_pil_first_page(blob)
+        return crop_region(img, region)
+    except Exception as e:
+        errors.append(f"{name}: pdf crop failed ({e})")
+        return None
 
 
 def add_png_as_jpg(
@@ -456,21 +522,15 @@ def add_vertical_pdf_combo(
     pil_images: List[Image.Image] = []
 
     for item_name, url in items:
-        blob, last_mod, st, ct = fetch_binary(item_name, url)
-
-        if last_mod:
-            dt = _httpdate_to_utc_dt(last_mod)
-            if dt:
-                lm_dts_all.append(dt)
-
-        if not blob:
-            errors.append(f"{item_name}: download failed (HTTP={st})")
-            continue
-
-        try:
-            pil_images.append(pdf_to_pil_first_page(blob))
-        except Exception as e:
-            errors.append(f"{item_name}: pdf conversion failed ({e})")
+        img = fetch_pdf_region(
+            name=item_name,
+            url=url,
+            region="full",
+            errors=errors,
+            lm_dts_all=lm_dts_all,
+        )
+        if img is not None:
+            pil_images.append(img)
 
     if not pil_images:
         errors.append(f"{combo_name}: no images to combine")
@@ -486,7 +546,7 @@ def add_vertical_pdf_combo(
         errors.append(f"{combo_name}: combine failed ({e})")
 
 
-def add_pair_grid_pdf_combo(
+def add_comp_style_grid(
     *,
     images: List[Attachment],
     errors: List[str],
@@ -494,53 +554,39 @@ def add_pair_grid_pdf_combo(
     combo_name: str,
     rows: List[Tuple[Tuple[str, str, str], Tuple[str, str, str]]],
 ) -> None:
-    """
-    2カラム合成。
-
-    rows:
-      [
-        ((左name, 左url, left/right/full), (右name, 右url, left/right/full)),
-        ...
-      ]
-    """
     out_rows: List[Tuple[Image.Image, Image.Image]] = []
 
     for left_spec, right_spec in rows:
-        row_imgs: List[Image.Image] = []
+        left_name, left_url, left_region = left_spec
+        right_name, right_url, right_region = right_spec
 
-        for item_name, url, side in (left_spec, right_spec):
-            blob, last_mod, st, ct = fetch_binary(item_name, url)
+        left_img = fetch_pdf_region(
+            name=left_name,
+            url=left_url,
+            region=left_region,
+            errors=errors,
+            lm_dts_all=lm_dts_all,
+        )
+        right_img = fetch_pdf_region(
+            name=right_name,
+            url=right_url,
+            region=right_region,
+            errors=errors,
+            lm_dts_all=lm_dts_all,
+        )
 
-            if last_mod:
-                dt = _httpdate_to_utc_dt(last_mod)
-                if dt:
-                    lm_dts_all.append(dt)
-
-            if not blob:
-                errors.append(f"{item_name}: download failed (HTTP={st})")
-                break
-
-            try:
-                img = pdf_to_pil_first_page(blob)
-                img = crop_half(img, side)
-                row_imgs.append(img)
-            except Exception as e:
-                errors.append(f"{item_name}: pdf crop failed ({e})")
-                break
-
-        if len(row_imgs) == 2:
-            out_rows.append((row_imgs[0], row_imgs[1]))
+        if left_img is not None and right_img is not None:
+            out_rows.append((left_img, right_img))
 
     if not out_rows:
         errors.append(f"{combo_name}: no images to combine")
         return
 
     try:
-        combined = combine_two_columns(out_rows)
+        combined = combine_comp_grid(out_rows)
         att = pil_to_attachment(combined, combo_name)
         write_attachment_to_tmp(att)
         images.append(att)
-
     except Exception as e:
         errors.append(f"{combo_name}: combine failed ({e})")
 
@@ -606,70 +652,91 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     )
 
     # -------------------------------------------------------------------------
-    # ④ 数値予報：00・12時間
+    # ④ COMP風：T=00-12
     #
-    # 左列：AUPQ35 / AUPQ78 の左半分（00時間）
-    # 右列：FXFE5782 / FXFE502 の左半分（12時間）
+    # 2列×4段
+    # 左：解析/初期値側
+    # 右：12時間予想側
+    #
+    # ※AUPQ35/AUPQ78は、必要に応じて top/bottom を入れ替え可能。
     # -------------------------------------------------------------------------
-    add_pair_grid_pdf_combo(
+    add_comp_style_grid(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
         combo_name=f"forecast_00_12_{run_utc}",
         rows=[
             (
-                (f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc), "left"),
-                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left"),
+                (f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc), "bottom"),
+                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_top"),
             ),
             (
-                (f"aupq78_{run_utc}", nwp_pdf_url("aupq78", run_utc), "left"),
+                (f"surface_now_as_analysis_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "left"),
                 (f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "left"),
+            ),
+            (
+                (f"aupq78_{run_utc}", nwp_pdf_url("aupq78", run_utc), "top"),
+                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_bottom"),
+            ),
+            (
+                (f"axfe578_{run_utc}", nwp_pdf_url("axfe578", run_utc), "bottom"),
+                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_bottom"),
             ),
         ],
     )
 
     # -------------------------------------------------------------------------
-    # ⑤ 数値予報：24・36時間
-    #
-    # 左列：FXFE5782 / FXFE502 の右半分（24時間）
-    # 右列：FXFE5784 / FXFE504 の左半分（36時間）
+    # ⑤ COMP風：T=24-36
     # -------------------------------------------------------------------------
-    add_pair_grid_pdf_combo(
+    add_comp_style_grid(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
         combo_name=f"forecast_24_36_{run_utc}",
         rows=[
             (
-                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right"),
-                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left"),
+                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_top"),
+                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_top"),
             ),
             (
                 (f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "right"),
                 (f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "left"),
             ),
+            (
+                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
+                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
+            ),
+            (
+                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
+                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
+            ),
         ],
     )
 
     # -------------------------------------------------------------------------
-    # ⑥ 数値予報：48・72時間
-    #
-    # 左列：FXFE5784 / FXFE504 の右半分（48時間）
-    # 右列：FXFE577 / FXFE507（72時間）
+    # ⑥ COMP風：T=48-72
     # -------------------------------------------------------------------------
-    add_pair_grid_pdf_combo(
+    add_comp_style_grid(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
         combo_name=f"forecast_48_72_{run_utc}",
         rows=[
             (
-                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right"),
-                (f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "full"),
+                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_top"),
+                (f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "top"),
             ),
             (
                 (f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "right"),
-                (f"fxfe507_{run_utc}", nwp_pdf_url("fxfe507", run_utc), "full"),
+                (f"fxfe507_{run_utc}", nwp_pdf_url("fxfe507", run_utc), "top"),
+            ),
+            (
+                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
+                (f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
+            ),
+            (
+                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
+                (f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
             ),
         ],
     )
@@ -726,7 +793,7 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     )
 
     # -------------------------------------------------------------------------
-    # ⑩ エマグラムを先頭に追加
+    # ⑩ エマグラムを先頭へ
     # -------------------------------------------------------------------------
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
