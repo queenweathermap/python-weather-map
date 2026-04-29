@@ -3,29 +3,31 @@
 # module/jobs/adv_tgv.py
 #
 # ADV TGV:
-#   取得 → 同時刻FTごとに縦結合 → JPG化 → R2 → Notion(DB) → Discord
+#   取得 → JPG化 → itemごとにGIF化 → R2 → Notion(DB) → Discord
 #
-# 今回の整理:
-#   - item単位で大量投稿する方式をやめる
-#   - モデルごとに全itemを取得
-#   - 同じ予想時刻 FT000 / FT006 / ... を縦に結合
-#   - 結合済み画像だけを R2 / Notion / Discord に流す
+# 今回の方針:
+#   - 元画像は結合しない
+#   - 各itemごとに時系列GIFを作る
+#   - Notionには「GIF」と「元画像JPG」を両方入れる
+#   - DiscordにはGIFのみ投稿する
 #
 # 例:
-#   GSM:
-#     300hPa + 300hPa-2 を FTごとに縦結合
-#     48枚 → 24枚
+#   GSM / 300hPa:
+#     FT000, FT006, FT009, ... FT072 のJPGを取得
+#     → GSM_300hPa.gif を作成
 #
-#   MSM:
-#     sfc / sfc-2 は除外
-#     500hPa + 500hPa-2 + 700hPa + 850hPa-2 + 050 を FTごとに縦結合
+#   Notion:
+#     GSM
+#       300hPa
+#         GIF
+#         元画像 24枚
 #
-#   LFM:
-#     850hPa + 925hPa + 975hPa + sfc + sfc-2 を FTごとに縦結合
+#   Discord:
+#     GSM / 300hPa のGIFだけ投稿
 #
 # 役割分担:
 #   - R2 / Notion が正本
-#   - Discord は画像ビューア
+#   - Discord は軽く見るためのビュー
 # =============================================================================
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ import base64
 import io
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import requests
 from PIL import Image
@@ -59,13 +61,9 @@ from module.utils.r2_utils import make_url, put_bytes
 # 型定義
 # =============================================================================
 
-# 通常の添付データ:
+# Attachment:
 #   filename, bytes, mime
 Attachment = Tuple[str, bytes, str]
-
-# FT付き添付データ:
-#   ft_hour, Attachment
-TimedAttachment = Tuple[int, Attachment]
 
 
 # =============================================================================
@@ -73,7 +71,7 @@ TimedAttachment = Tuple[int, Attachment]
 # =============================================================================
 
 def must_env(name: str) -> str:
-    """必須環境変数を取得する。なければ明示的に落とす。"""
+    """必須環境変数を取得する。存在しなければ明示的に落とす。"""
     v = os.getenv(name)
     if not v:
         raise RuntimeError(f"Missing required env: {name}")
@@ -81,7 +79,7 @@ def must_env(name: str) -> str:
 
 
 def env_int(name: str, default: int) -> int:
-    """整数環境変数。壊れた値なら安全側でdefaultを返す。"""
+    """整数の環境変数を読む。値が壊れている場合はdefaultに戻す。"""
     v = os.getenv(name)
     if v is None or v.strip() == "":
         return default
@@ -92,13 +90,13 @@ def env_int(name: str, default: int) -> int:
 
 
 def env_str(name: str, default: str = "") -> str:
-    """文字列環境変数。Noneだけdefaultにする。"""
+    """文字列の環境変数を読む。Noneだけdefaultにする。"""
     v = os.getenv(name)
     return default if v is None else v.strip()
 
 
 def env_bool(name: str, default: str = "0") -> bool:
-    """1/true/yes/on を True として扱う。"""
+    """1 / true / yes / on を True として扱う。"""
     v = os.getenv(name, default).strip().lower()
     return v in ("1", "true", "yes", "on")
 
@@ -129,7 +127,7 @@ def discord_adv_enabled() -> bool:
 
 
 def notion_page_url(page_id: str) -> str:
-    """Notion page_id からブラウザURLを作る。"""
+    """Notion page_idからブラウザURLを作る。"""
     clean = (page_id or "").replace("-", "")
     return f"https://www.notion.so/{clean}" if clean else ""
 
@@ -172,8 +170,11 @@ def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
     """
     requests の auth=(user, pass) に渡す形式を返す。
 
-    JMA_ADV_USER / JMA_ADV_PASS がある場合は requests 側の
-    Basic認証機能を使う。ない場合は Authorization ヘッダ方式へ回す。
+    JMA_ADV_USER / JMA_ADV_PASS がある場合:
+      requestsのBasic認証機能を使う
+
+    ない場合:
+      Authorizationヘッダ方式へ回す
     """
     if not use_auth_enabled():
         return None
@@ -192,7 +193,7 @@ def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
 # =============================================================================
 
 def headers_for(referer: str) -> dict:
-    """JMA画像取得用ヘッダ。認証方式に応じてAuthorizationも入れる。"""
+    """JMA画像取得用ヘッダ。必要に応じてAuthorizationも入れる。"""
     h = {
         "User-Agent": "Mozilla/5.0",
         "Referer": referer,
@@ -201,7 +202,7 @@ def headers_for(referer: str) -> dict:
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
 
-    # user/pass がない場合だけ、JMA_AUTH_BASIC形式を使う。
+    # JMA_ADV_USER/PASSがない場合だけ、JMA_AUTH_BASICを使う。
     if use_auth_enabled() and (get_requests_auth_tuple() is None):
         h["Authorization"] = get_auth_basic_header()
 
@@ -219,7 +220,12 @@ def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
 # =============================================================================
 
 def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
-    """PNG bytes を白背景JPEG bytesへ変換する。"""
+    """
+    PNG bytesをJPEG bytesへ変換する。
+
+    PNGに透過がある場合:
+      白背景へ合成してからJPEG化する。
+    """
     with Image.open(io.BytesIO(png_bytes)) as im:
         if im.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", im.size, (255, 255, 255))
@@ -233,42 +239,87 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
         return out.getvalue()
 
 
-def concat_jpgs_vert(
-    jpg_list: Sequence[bytes],
+def resize_for_gif(im: Image.Image, *, max_width: int) -> Image.Image:
+    """
+    GIF用に画像サイズを調整する。
+
+    目的:
+      - Discordで重くなりすぎるのを防ぐ
+      - GIFファイルサイズを抑える
+
+    max_width <= 0 の場合:
+      リサイズしない。
+    """
+    rgb = im.convert("RGB")
+
+    if max_width <= 0:
+        return rgb
+
+    if rgb.width <= max_width:
+        return rgb
+
+    ratio = max_width / float(rgb.width)
+    new_height = int(rgb.height * ratio)
+    return rgb.resize((max_width, new_height), Image.LANCZOS)
+
+
+def make_gif_from_attachments(
+    atts: Sequence[Attachment],
     *,
-    quality: int = 85,
-    padding: int = 12,
+    duration_ms: int = 700,
+    max_width: int = 900,
 ) -> bytes:
     """
-    複数JPEGを縦方向に結合する。
+    Attachment一覧からアニメーションGIFを作る。
 
-    幅が違う場合:
-      - 一番広い画像幅に合わせる
-      - 狭い画像は中央寄せ
-      - 背景は白
+    前提:
+      - attsはFT順に並んでいる
+      - fetch_item_images() は cfg.ft_list 順に取得するので基本OK
+
+    注意:
+      - Discord表示を考えて、デフォルトでは幅900pxへ縮小する
+      - 元画像JPGは別途R2/Notionへ保存するので、GIFは軽量ビュー用
     """
-    ims = [Image.open(io.BytesIO(b)).convert("RGB") for b in jpg_list]
+    if not atts:
+        raise ValueError("no attachments for gif")
+
+    frames: List[Image.Image] = []
+
+    for _, blob, _ in atts:
+        with Image.open(io.BytesIO(blob)) as im:
+            frames.append(resize_for_gif(im, max_width=max_width))
 
     try:
-        width = max(im.width for im in ims)
-        height = sum(im.height for im in ims) + padding * (len(ims) - 1)
+        # GIFは全フレームのサイズが揃っている方が安全。
+        # 念のため、先頭フレームのサイズへ統一する。
+        base_size = frames[0].size
+        normalized: List[Image.Image] = []
 
-        canvas = Image.new("RGB", (width, height), (255, 255, 255))
+        for frame in frames:
+            if frame.size == base_size:
+                normalized.append(frame.convert("P", palette=Image.ADAPTIVE))
+                continue
 
-        y = 0
-        for im in ims:
-            x = (width - im.width) // 2
-            canvas.paste(im, (x, y))
-            y += im.height + padding
+            canvas = Image.new("RGB", base_size, (255, 255, 255))
+            canvas.paste(frame.convert("RGB"), (0, 0))
+            normalized.append(canvas.convert("P", palette=Image.ADAPTIVE))
 
         out = io.BytesIO()
-        canvas.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
+        normalized[0].save(
+            out,
+            format="GIF",
+            save_all=True,
+            append_images=normalized[1:],
+            duration=duration_ms,
+            loop=0,
+            optimize=True,
+        )
         return out.getvalue()
 
     finally:
-        for im in ims:
+        for frame in frames:
             try:
-                im.close()
+                frame.close()
             except Exception:
                 pass
 
@@ -288,7 +339,7 @@ def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
 
 
 def floor_to_step(dt_utc: datetime, step_hours: int, minute: int) -> datetime:
-    """指定step時間へ丸める。GSM/MSM/LFMの初期値探索用。"""
+    """指定step時間へ丸める。初期値探索用。"""
     dt = dt_utc.astimezone(timezone.utc).replace(second=0, microsecond=0)
     h = (dt.hour // step_hours) * step_hours
     return dt.replace(hour=h, minute=minute)
@@ -311,26 +362,34 @@ def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
 
 
 # =============================================================================
-# Fetch
+# Fetch / R2
 # =============================================================================
 
-def fetch_item_images_with_ft(
+def r2_enabled() -> bool:
+    return env_bool("R2_ENABLE", "1")
+
+
+def fetch_item_images(
     model_name: str,
     cfg: ModelCfg,
     init_dt: datetime,
     item: Item,
-) -> Tuple[List[TimedAttachment], bool]:
+) -> Tuple[List[Attachment], bool]:
     """
     1つのitemについて、全FT画像を取得する。
 
     戻り値:
-      - [(ft, attachment), ...]
+      - JPG Attachment一覧
       - auth_failed
+
+    ここでは結合しない。
+    GIF作成もここではしない。
+    あくまで元画像JPGの取得だけを担当する。
     """
     quality = env_int("JPG_QUALITY", 85)
     timeout = env_int("HTTP_TIMEOUT", 60)
 
-    atts: List[TimedAttachment] = []
+    atts: List[Attachment] = []
     auth_failed = False
 
     for ft in cfg.ft_list:
@@ -346,19 +405,50 @@ def fetch_item_images_with_ft(
                 break
 
             if r.status_code != 200:
-                # ないFTは静かに飛ばす。JMA側の更新遅れ対策。
+                # 更新遅れや未提供FTはあり得るので、ここでは落とさず飛ばす。
                 continue
 
             jpg = png_bytes_to_jpg_bytes(r.content, quality=quality)
             fn = f"{item.jpg_prefix}_FT{ft:03d}_VIEW{view_code}_RJTD_{rjtd}.jpg"
 
-            atts.append((ft, (fn, jpg, "image/jpeg")))
+            atts.append((fn, jpg, "image/jpeg"))
 
         except Exception as e:
             print(f"[WARN] fetch failed: {model_name} {item.label} FT={ft}: {e}")
             continue
 
     return atts, auth_failed
+
+
+def upload_attachments_to_r2(
+    *,
+    run_prefix: str,
+    model_name: str,
+    item_label: str,
+    atts: Sequence[Attachment],
+    subdir: str,
+) -> List[str]:
+    """
+    AttachmentをR2へアップロードする共通関数。
+
+    保存先:
+      {run_prefix}/{model_name}/{item_label}/{subdir}/{filename}
+
+    subdir:
+      originals ... 元JPG
+      gif       ... アニメGIF
+    """
+    if not r2_enabled():
+        return []
+
+    urls: List[str] = []
+
+    for fn, blob, mime in atts:
+        key = f"{run_prefix}/{model_name}/{item_label}/{subdir}/{fn}"
+        put_bytes(key, blob, content_type=mime)
+        urls.append(make_url(key))
+
+    return urls
 
 
 def find_working_init_dt(
@@ -369,7 +459,7 @@ def find_working_init_dt(
     """
     実際に画像が存在する初期時刻を探す。
 
-    最新時刻がまだ公開されていないことがあるため、
+    最新の初期時刻がまだ公開されていないことがあるため、
     6時間刻みで過去へ戻りながら probe item を確認する。
     """
     timeout = env_int("HTTP_TIMEOUT", 30)
@@ -404,130 +494,6 @@ def find_working_init_dt(
 
 
 # =============================================================================
-# Vertical join rules
-# =============================================================================
-
-def target_items_for_model(model_name: str, items: Sequence[Item]) -> List[Item]:
-    """
-    モデルごとの結合対象itemを決める。
-
-    MSM:
-      sfc / sfc-2 は廃止するため除外。
-
-    GSM / LFM:
-      現在の models.py 定義にあるitemをそのまま使う。
-    """
-    if model_name == "MSM":
-        return [item for item in items if item.label not in ("sfc", "sfc-2")]
-
-    return list(items)
-
-
-def build_vertical_ft_attachments(
-    *,
-    model_name: str,
-    cfg: ModelCfg,
-    init_dt: datetime,
-    items: Sequence[Item],
-) -> Tuple[List[Attachment], List[str], bool]:
-    """
-    モデル内の複数itemを取得し、同じFTごとに縦結合する。
-
-    例:
-      LFM FT004:
-        850hPa
-        925hPa
-        975hPa
-        sfc
-        sfc-2
-      を1枚の縦長JPEGへする。
-    """
-    quality = env_int("JPG_QUALITY", 85)
-    padding = env_int("ADV_VERTICAL_PADDING", 12)
-
-    by_ft: Dict[int, List[Tuple[str, Attachment]]] = {}
-    errors: List[str] = []
-
-    for item in items:
-        timed_atts, auth_failed = fetch_item_images_with_ft(
-            model_name=model_name,
-            cfg=cfg,
-            init_dt=init_dt,
-            item=item,
-        )
-
-        if auth_failed:
-            return [], errors, True
-
-        if not timed_atts:
-            msg = f"{model_name} {item.label}: no images"
-            print(f"[WARN] {msg}")
-            errors.append(msg)
-            continue
-
-        for ft, att in timed_atts:
-            by_ft.setdefault(ft, []).append((item.label, att))
-
-    merged: List[Attachment] = []
-
-    for ft in cfg.ft_list:
-        group = by_ft.get(ft, [])
-        if not group:
-            continue
-
-        # 取得順は target_items_for_model() の順を保つ。
-        blobs = [att[1] for _, att in group]
-
-        try:
-            jpg = concat_jpgs_vert(blobs, quality=quality, padding=padding)
-        except Exception as e:
-            msg = f"{model_name} FT{ft:03d}: vertical join failed ({e})"
-            print(f"[WARN] {msg}")
-            errors.append(msg)
-            continue
-
-        labels = "_".join(label.replace("/", "-") for label, _ in group)
-        fn = f"{model_name}_FT{ft:03d}_vertical_{labels}.jpg"
-
-        merged.append((fn, jpg, "image/jpeg"))
-
-    return merged, errors, False
-
-
-# =============================================================================
-# R2
-# =============================================================================
-
-def r2_enabled() -> bool:
-    return env_bool("R2_ENABLE", "1")
-
-
-def upload_model_vertical_images_to_r2(
-    *,
-    run_prefix: str,
-    model_name: str,
-    atts: Sequence[Attachment],
-) -> List[str]:
-    """
-    縦結合済み画像をR2へアップロードする。
-
-    保存先:
-      {run_prefix}/{model_name}/vertical/{filename}
-    """
-    if not r2_enabled():
-        return []
-
-    urls: List[str] = []
-
-    for fn, blob, mime in atts:
-        key = f"{run_prefix}/{model_name}/vertical/{fn}"
-        put_bytes(key, blob, content_type=mime)
-        urls.append(make_url(key))
-
-    return urls
-
-
-# =============================================================================
 # Guidance links
 # =============================================================================
 
@@ -544,15 +510,22 @@ GUIDE_LINKS: List[Tuple[str, str]] = [
 # Discord
 # =============================================================================
 
-def notify_discord_adv_model(
+def notify_discord_adv_gif(
     *,
     model_name: str,
-    urls: List[str],
+    item_label: str,
+    gif_urls: List[str],
     init_dt: datetime,
     rjtd: str,
 ) -> None:
-    """モデル単位でDiscordへ画像投稿する。"""
-    if not discord_adv_enabled() or not urls:
+    """
+    ADV item単位のDiscord投稿。
+
+    重要:
+      DiscordにはGIFだけ投稿する。
+      元JPGはNotion/R2に残す。
+    """
+    if not discord_adv_enabled() or not gif_urls:
         return
 
     jst = timezone(timedelta(hours=9))
@@ -560,8 +533,8 @@ def notify_discord_adv_model(
 
     post_discord_item_image_urls(
         webhook_url=discord_adv_webhook_url(),
-        title=f"ADV TGV {model_name} / vertical FT",
-        image_urls=urls,
+        title=f"ADV TGV {model_name} / {item_label} GIF",
+        image_urls=gif_urls,
         notion_url="",
         rjtd=rjtd,
         init_jst=init_jst,
@@ -574,7 +547,12 @@ def notify_discord_adv_complete(
     errors: List[str],
     attach_count: int,
 ) -> None:
-    """完了通知。最後にNotion URLを出す。"""
+    """
+    ADV完了通知。
+
+    attach_count:
+      Discordに投稿したGIF数として扱う。
+    """
     if not discord_adv_enabled():
         return
 
@@ -592,13 +570,24 @@ def notify_discord_adv_complete(
 # =============================================================================
 
 def main() -> None:
-    print("=== Start ADV JMA TGV vertical ===")
+    print("=== Start ADV JMA TGV GIF ===")
 
     errors: List[str] = []
-    total_images = 0
+
+    # total_original_images:
+    #   Notion/R2へ保存した元JPGの総数。
+    #
+    # total_gifs:
+    #   Discordへ投稿したGIFの総数。
+    total_original_images = 0
+    total_gifs = 0
 
     search_hours = env_int("INIT_SEARCH_HOURS", 72)
     r2_prefix = env_str("R2_PREFIX", "adv-tgv").strip().strip("/")
+
+    gif_enable = env_bool("ADV_GIF_ENABLE", "1")
+    gif_duration_ms = env_int("ADV_GIF_DURATION_MS", 700)
+    gif_max_width = env_int("ADV_GIF_MAX_WIDTH", 900)
 
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
     print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
@@ -608,11 +597,13 @@ def main() -> None:
     print(f"[DEBUG] DISCORD_ADV_WEBHOOK_URL set={bool(discord_adv_webhook_url())}")
     print(f"[DEBUG] R2_PREFIX={r2_prefix}")
     print(f"[DEBUG] GUIDE_ENABLE={GUIDE_ENABLE}")
-    print(f"[DEBUG] ADV_VERTICAL_PADDING={env_int('ADV_VERTICAL_PADDING', 12)}")
+    print(f"[DEBUG] ADV_GIF_ENABLE={gif_enable}")
+    print(f"[DEBUG] ADV_GIF_DURATION_MS={gif_duration_ms}")
+    print(f"[DEBUG] ADV_GIF_MAX_WIDTH={gif_max_width}")
 
     groups = load_model_groups()
 
-    # タイトルやrun_prefixの基準はGSMの初期時刻に合わせる。
+    # NotionタイトルとR2 prefixの基準はGSMの初期値に合わせる。
     init_dt_for_title = find_working_init_dt(
         "GSM",
         groups["GSM"],
@@ -631,7 +622,7 @@ def main() -> None:
     run_prefix = f"{r2_prefix}/{day}/RJTD_{rjtd_for_title}"
 
     title = (
-        "ADV TGV vertical / "
+        "ADV TGV GIF / "
         f"{init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
     )
 
@@ -639,7 +630,7 @@ def main() -> None:
         title=title,
         category="ADV",
         init_jst_iso=init_jst_iso,
-        memo="同時刻FTごとに縦結合",
+        memo="DiscordはGIFのみ。NotionにはGIFと元画像JPGを保存。",
         rjtd=rjtd_for_title,
         prefix=run_prefix,
         r2_url="",
@@ -651,6 +642,7 @@ def main() -> None:
 
     if GUIDE_ENABLE:
         append_heading(page_id, "ガイダンス（リンク）", level=2)
+
         for caption, url in GUIDE_LINKS:
             append_bookmark(page_id, url, caption=caption)
 
@@ -659,7 +651,7 @@ def main() -> None:
     for model_name in ("GSM", "MSM", "LFM"):
         cfg: ModelCfg = groups[model_name]
 
-        print(f"\n--- Fetch model vertical: {model_name} items={len(cfg.items)} ---")
+        print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
 
         try:
             init_dt = find_working_init_dt(
@@ -667,6 +659,7 @@ def main() -> None:
                 cfg,
                 max_back_hours=search_hours,
             )
+
         except Exception as e:
             msg = f"{model_name}: INIT/auth failed ({type(e).__name__})"
             print(f"[NG] {msg}: {e}")
@@ -674,83 +667,140 @@ def main() -> None:
             continue
 
         rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
-        items = target_items_for_model(model_name, cfg.items)
-
-        print(
-            "[INFO] vertical items: "
-            + ", ".join(item.label for item in items)
-        )
-
-        atts, model_errors, auth_failed = build_vertical_ft_attachments(
-            model_name=model_name,
-            cfg=cfg,
-            init_dt=init_dt,
-            items=items,
-        )
-
-        errors.extend(model_errors)
-
-        if auth_failed:
-            msg = f"{model_name}: auth error while fetching images"
-            print(f"[NG] {msg}")
-            errors.append(msg)
-            continue
-
-        if not atts:
-            msg = f"{model_name}: no vertical images"
-            print(f"[WARN] {msg}")
-            errors.append(msg)
-            continue
-
-        urls = upload_model_vertical_images_to_r2(
-            run_prefix=run_prefix,
-            model_name=model_name,
-            atts=atts,
-        )
-
-        if not urls:
-            msg = f"{model_name}: R2 urls empty"
-            print(f"[WARN] {msg}")
-            errors.append(msg)
-            continue
-
-        total_images += len(urls)
-
-        if first_cover_url is None:
-            first_cover_url = urls[0]
-            set_page_cover(page_id, first_cover_url)
 
         append_heading(page_id, model_name, level=2)
+        model_parent: str = page_id
 
-        item_title = f"{model_name} vertical FT  ({len(urls)} images)"
-        toggle_id = append_toggle(page_id, item_title)
-
-        if toggle_id:
-            append_images(toggle_id, urls, chunk=30)
-        else:
-            append_images(page_id, urls, chunk=30)
-
-        print(f"[OK] R2+Notion vertical: {model_name} urls={len(urls)}")
-
-        try:
-            notify_discord_adv_model(
+        for item in cfg.items:
+            atts, auth_failed = fetch_item_images(
                 model_name=model_name,
-                urls=urls,
+                cfg=cfg,
                 init_dt=init_dt,
-                rjtd=rjtd,
+                item=item,
             )
 
-            if discord_adv_enabled():
-                print(f"[OK] Discord model sent: {model_name}")
+            if auth_failed:
+                msg = f"{model_name}: auth error while fetching {item.label}"
+                print(f"[NG] {msg}")
+                errors.append(msg)
+                break
 
-        except Exception as e:
-            print(f"[WARN] Discord model send failed: {model_name}: {e}")
+            if not atts:
+                msg = f"{model_name} {item.label}: no images"
+                print(f"[WARN] {msg}")
+                errors.append(msg)
+                continue
+
+            # -----------------------------------------------------------------
+            # 1. 元画像JPGをR2へ保存
+            # -----------------------------------------------------------------
+            original_urls = upload_attachments_to_r2(
+                run_prefix=run_prefix,
+                model_name=model_name,
+                item_label=item.label,
+                atts=atts,
+                subdir="originals",
+            )
+
+            if not original_urls:
+                msg = f"{model_name} {item.label}: original R2 urls empty"
+                print(f"[WARN] {msg}")
+                errors.append(msg)
+                continue
+
+            total_original_images += len(original_urls)
+
+            if first_cover_url is None:
+                first_cover_url = original_urls[0]
+                set_page_cover(page_id, first_cover_url)
+
+            # -----------------------------------------------------------------
+            # 2. itemごとの時系列GIFを作成してR2へ保存
+            # -----------------------------------------------------------------
+            gif_urls: List[str] = []
+
+            if gif_enable:
+                try:
+                    gif_blob = make_gif_from_attachments(
+                        atts,
+                        duration_ms=gif_duration_ms,
+                        max_width=gif_max_width,
+                    )
+
+                    safe_label = item.label.replace("/", "-")
+                    gif_name = f"{model_name}_{safe_label}_RJTD_{rjtd}.gif"
+
+                    gif_urls = upload_attachments_to_r2(
+                        run_prefix=run_prefix,
+                        model_name=model_name,
+                        item_label=item.label,
+                        atts=[(gif_name, gif_blob, "image/gif")],
+                        subdir="gif",
+                    )
+
+                    if gif_urls:
+                        total_gifs += len(gif_urls)
+                        print(f"[OK] GIF created: {model_name} {item.label}")
+
+                    else:
+                        msg = f"{model_name} {item.label}: GIF R2 urls empty"
+                        print(f"[WARN] {msg}")
+                        errors.append(msg)
+
+                except Exception as e:
+                    msg = f"{model_name} {item.label}: GIF create failed ({e})"
+                    print(f"[WARN] {msg}")
+                    errors.append(msg)
+
+            # -----------------------------------------------------------------
+            # 3. NotionにはGIFと元画像を両方入れる
+            # -----------------------------------------------------------------
+            item_title = (
+                f"{item.label}  "
+                f"(GIF {len(gif_urls)} / originals {len(original_urls)})"
+            )
+            item_toggle_id = append_toggle(model_parent, item_title)
+            notion_parent = item_toggle_id or model_parent
+
+            if gif_urls:
+                append_heading(notion_parent, "GIF", level=3)
+                append_images(notion_parent, gif_urls, chunk=30)
+
+            append_heading(notion_parent, "元画像", level=3)
+            append_images(notion_parent, original_urls, chunk=30)
+
+            print(
+                f"[OK] R2+Notion: {model_name} {item.label} "
+                f"gif={len(gif_urls)} originals={len(original_urls)}"
+            )
+
+            # -----------------------------------------------------------------
+            # 4. DiscordにはGIFだけ投稿する
+            # -----------------------------------------------------------------
+            if gif_urls:
+                try:
+                    notify_discord_adv_gif(
+                        model_name=model_name,
+                        item_label=item.label,
+                        gif_urls=gif_urls,
+                        init_dt=init_dt,
+                        rjtd=rjtd,
+                    )
+
+                    if discord_adv_enabled():
+                        print(f"[OK] Discord GIF sent: {model_name} {item.label}")
+
+                except Exception as e:
+                    print(
+                        "[WARN] Discord GIF send failed: "
+                        f"{model_name} {item.label}: {e}"
+                    )
 
     try:
         notify_discord_adv_complete(
             page_id=page_id,
             errors=errors,
-            attach_count=total_images,
+            attach_count=total_gifs,
         )
 
         if discord_adv_enabled():
@@ -759,7 +809,10 @@ def main() -> None:
     except Exception as e:
         print(f"[WARN] Discord complete send failed: {e}")
 
-    print("\n=== Done ADV JMA TGV vertical ===")
+    print(
+        "\n=== Done ADV JMA TGV GIF ===\n"
+        f"original_images={total_original_images}, gifs={total_gifs}"
+    )
 
 
 if __name__ == "__main__":
