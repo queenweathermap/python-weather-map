@@ -91,15 +91,35 @@ def capture():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+    user = os.getenv("JMA_ADV_USER", "").strip()
+    password = os.getenv("JMA_ADV_PASS", "").strip()
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT})
+
+        context_kwargs = {
+            "viewport": {"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+        }
+
+        if user and password:
+            context_kwargs["http_credentials"] = {
+                "username": user,
+                "password": password,
+            }
+
+        context = browser.new_context(**context_kwargs)
+        page = context.new_page()
 
         for name, label, url in GUIDANCE_TARGETS:
             try:
                 print(f"[INFO] {label}")
-                page.goto(url, wait_until="networkidle")
+                page.goto(url, wait_until="networkidle", timeout=60000)
                 page.wait_for_timeout(WAIT_MS)
+
+                body_text = page.locator("body").inner_text(timeout=5000)
+                if "Authentication Failed" in body_text:
+                    errors.append(f"{label}: authentication failed")
+                    continue
 
                 png = page.screenshot(full_page=True)
                 jpg = png_to_jpg(png)
@@ -110,6 +130,7 @@ def capture():
             except Exception as e:
                 errors.append(f"{label}: {e}")
 
+        context.close()
         browser.close()
 
     return atts, errors
