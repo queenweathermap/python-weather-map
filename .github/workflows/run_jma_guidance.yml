@@ -16,6 +16,9 @@ jobs:
       TZ: Asia/Tokyo
       JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
       JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
+      if not user or not password:
+    errors.append("JMA guidance auth env is missing: JMA_ADV_USER / JMA_ADV_PASS")return atts, errors
+
 
 
       # ------------------------------------------------------------
