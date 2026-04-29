@@ -673,13 +673,14 @@ def add_comp_style_grid_mixed(
 # =============================================================================
 # 出力構築
 # =============================================================================
-def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[datetime]]:
+def build_outputs(run_utc: str):
+
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    images: List[Attachment] = []
-    errors: List[str] = []
-    lm_dts_all: List[datetime] = []
+    images = []
+    errors = []
+    lm_dts_all = []
 
     # -------------------------------------------------------------------------
     # ① 地上天気図
@@ -696,6 +697,7 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
             url=url,
         )
 
+
     # -------------------------------------------------------------------------
     # ② 高層天気図：AUPA20 + AUPN30 縦結合
     # -------------------------------------------------------------------------
@@ -703,66 +705,44 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
-        combo_name=f"upper_aupa20_aupn30_{run_utc}",
+        combo_name=f"upper_{run_utc}",
         items=[
             (f"aupa20_{run_utc}", nwp_pdf_url("aupa20", run_utc)),
             (f"aupn30_{run_utc}", nwp_pdf_url("aupn30", run_utc)),
         ],
     )
-
+    
     # -------------------------------------------------------------------------
     # ③ 断面図：AXJP130 / AXJP140
     # -------------------------------------------------------------------------
-    add_pdf_as_jpg(
-        images=images,
-        errors=errors,
-        lm_dts_all=lm_dts_all,
-        base_name=f"axjp130_{run_utc}",
-        url=nwp_pdf_url("axjp130", run_utc),
-        force_all=False,
-    )
+    add_pdf_as_jpg(images=images, errors=errors, lm_dts_all=lm_dts_all,
+                   base_name=f"axjp130_{run_utc}",
+                   url=nwp_pdf_url("axjp130", run_utc))
 
-    add_pdf_as_jpg(
-        images=images,
-        errors=errors,
-        lm_dts_all=lm_dts_all,
-        base_name=f"axjp140_{run_utc}",
-        url=nwp_pdf_url("axjp140", run_utc),
-        force_all=False,
-    )
+    add_pdf_as_jpg(images=images, errors=errors, lm_dts_all=lm_dts_all,
+                   base_name=f"axjp140_{run_utc}",
+                   url=nwp_pdf_url("axjp140", run_utc))
 
-    # -------------------------------------------------------------------------
-    # ④ COMP風：T=00-12
-    #
-    # 左列:
-    #   1. AXFE578 上段
-    #   2. 地上実況天気図 PNG
-    #   3. AUPQ35 下段
-    #   4. AXFE578 下段
-    #
-    # 右列:
-    #   1. FXFE5782 左上（12h）
-    #   2. FXFE502 左（12h）
-    #   3. FXFE5782 左下（12h）
-    #   4. FXFE5782 左下（12h）
-    # -------------------------------------------------------------------------
+    # =========================
+    # ★ COMP① 00-12（4段）
+    # =========================
     add_comp_style_grid_mixed(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
-        combo_name=f"forecast_00_12_{run_utc}",
+        combo_name=f"comp_00_12_{run_utc}",
         rows=[
             (
                 ("pdf", f"axfe578_{run_utc}", nwp_pdf_url("axfe578", run_utc), "top"),
                 ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_top"),
             ),
             (
-                ("png", "surface_now_for_comp", surface_now_url, "full"),
+                ("png", "surface_now", surface_now_url, "full"),
                 ("pdf", f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "left"),
             ),
             (
                 ("pdf", f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc), "bottom"),
-                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_bottom"),
+                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_top"),
             ),
             (
                 ("pdf", f"axfe578_{run_utc}", nwp_pdf_url("axfe578", run_utc), "bottom"),
@@ -771,14 +751,14 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
         ],
     )
 
-    # -------------------------------------------------------------------------
-    # ⑤ COMP風：T=24-36
-    # -------------------------------------------------------------------------
+    # =========================
+    # ★ COMP② 24-36（4段）
+    # =========================
     add_comp_style_grid_mixed(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
-        combo_name=f"forecast_24_36_{run_utc}",
+        combo_name=f"comp_24_36_{run_utc}",
         rows=[
             (
                 ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_top"),
@@ -790,19 +770,23 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
             ),
             (
                 ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
+                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_top"),
+            ),
+            (
+                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_top"),
                 ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
             ),
         ],
     )
 
-    # -------------------------------------------------------------------------
-    # ⑥ COMP風：T=48-72
-    # -------------------------------------------------------------------------
+    # =========================
+    # ★ COMP③ 48-72（4段）
+    # =========================
     add_comp_style_grid_mixed(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
-        combo_name=f"forecast_48_72_{run_utc}",
+        combo_name=f"comp_48_72_{run_utc}",
         rows=[
             (
                 ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_top"),
@@ -814,10 +798,16 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
             ),
             (
                 ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
+                ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "top"),
+            ),
+            (
+                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_top"),
                 ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
             ),
         ],
     )
+
+    return images, errors, None
 
     # -------------------------------------------------------------------------
     # ⑦ FXJP854 単体
