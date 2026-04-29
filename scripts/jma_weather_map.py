@@ -186,8 +186,21 @@ def build_surface_weather_map_targets() -> List[Tuple[str, str]]:
         near = data.get("near", {})
         result: List[Tuple[str, str]] = []
 
+        def pick_latest_contains(files: list, keyword: str) -> Optional[str]:
+            matched = [f for f in files if keyword in f]
+            return matched[-1] if matched else None
+
+        # 実況は白黒の地上実況天気図 JCIasas を優先
+        now_files = near.get("now") or []
+        now_file = pick_latest_contains(now_files, "JCIasas")
+
+        if now_file:
+            result.append(("surface_now", f"{WEATHER_MAP_PNG_BASE_URL}/{now_file}"))
+        else:
+            print("[WARN] surface_now JCIasas not found")
+
+        # 24h / 48h は従来通り
         items = [
-            ("surface_now", near.get("now") or []),
             ("surface_fsas24", near.get("ft24") or []),
             ("surface_fsas48", near.get("ft48") or []),
         ]
@@ -779,10 +792,6 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
                 ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
                 ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
             ),
-            (
-                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
-                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
-            ),
         ],
     )
 
@@ -802,10 +811,6 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
             (
                 ("pdf", f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "right"),
                 ("pdf", f"fxfe507_{run_utc}", nwp_pdf_url("fxfe507", run_utc), "top"),
-            ),
-            (
-                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
-                ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
             ),
             (
                 ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
