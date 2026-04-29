@@ -14,6 +14,9 @@ jobs:
 
     env:
       TZ: Asia/Tokyo
+      JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
+      JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
+
 
       # ------------------------------------------------------------
       # R2
