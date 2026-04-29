@@ -2,21 +2,16 @@
 # =============================================================================
 # scripts/jma_weather_map.py
 #
-# JMA Weather Map:
-#   JMA PDF / PNG / GIF → JPG → R2 → Notion DB → Discord
+# Weathercaster / JMA Weather Map:
+#   Weathercaster PDF / GIF → JPG → R2 → Notion DB → Discord
 #
-# 配信順:
+# 構成:
 #   ① エマグラム
-#   ② 地上実況・予想
-#   ③ 高層天気図（AUPA20 + AUPN30 縦結合）
-#   ④ 断面図（AXJP130 / AXJP140）
-#   ⑤ 数値予報 合成3枚
-#        - T=00-12
-#        - T=24-36
-#        - T=48-72
-#   ⑥ FXJP854
-#   ⑦ 週間
-#   ⑧ 解説
+#   ② 実況      ASAS / FSAS24 / FSAS48
+#   ③ 予想      COMP12 / COMP36 / COMP72 / FXJP854
+#   ④ 数値      AUPA20 + AUPA25 + AUPN30 縦結合 / AXJP140
+#   ⑤ 週間      FXXN519 / FZCX50 / FEFE19
+#   ⑥ 解説      TKAISETU / SKAISETU
 # =============================================================================
 
 from __future__ import annotations
@@ -27,9 +22,8 @@ import shutil
 import sys
 import time
 from datetime import datetime, timezone, timedelta
-from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 from pdf2image import convert_from_bytes
@@ -56,20 +50,20 @@ from module.utils.discord_utils import (
 # =============================================================================
 # 基本設定
 # =============================================================================
+BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
+
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
-JPEG_DPI = int(os.environ.get("JPEG_DPI", "200"))
+JPEG_DPI = int(os.environ.get("JPEG_DPI", "220"))
 JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
 
-JMA_UTC_OVERRIDE = os.environ.get("JMA_UTC_OVERRIDE", "").strip()
-
-WEATHER_MAP_LIST_URL = "https://www.jma.go.jp/bosai/weather_map/data/list.json"
-WEATHER_MAP_PNG_BASE_URL = "https://www.jma.go.jp/bosai/weather_map/data/png"
-NWP_BASE_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap"
+WEATHERCASTER_USER = os.environ.get("WEATHERCASTER_USER", "").strip()
+WEATHERCASTER_PASS = os.environ.get("WEATHERCASTER_PASS", "").strip()
+WEATHERCASTER_DRIVE_FOLDER_ID = os.environ.get("WEATHERCASTER_DRIVE_FOLDER_ID", "").strip()
 
 Attachment = Tuple[str, bytes, str]
 
@@ -94,9 +88,18 @@ def discord_jma_enabled() -> bool:
     return env_bool("DISCORD_ENABLE", "0") and bool(discord_jma_webhook_url())
 
 
-def notion_page_url(page_id: str) -> str:
-    clean = (page_id or "").replace("-", "")
-    return f"https://www.notion.so/{clean}" if clean else ""
+def post_discord_text(content: str) -> None:
+    if not discord_jma_enabled():
+        return
+
+    try:
+        requests.post(
+            discord_jma_webhook_url(),
+            json={"content": content},
+            timeout=20,
+        )
+    except Exception as e:
+        print(f"[WARN] Discord text send failed: {e}")
 
 
 # =============================================================================
@@ -108,7 +111,7 @@ EMAGRAM_FILENAME = os.environ.get("EMAGRAM_FILENAME", "ema_aki_00.gif").strip()
 
 
 # =============================================================================
-# リンクのみ
+# 関連リンク
 # =============================================================================
 AMEDAS_LINK = os.environ.get(
     "AMEDAS_LINK",
@@ -123,7 +126,7 @@ GUIDANCE_LINKS = [
 
 
 # =============================================================================
-# 日時処理
+# 日時
 # =============================================================================
 def jst_tz() -> timezone:
     return timezone(timedelta(hours=9))
@@ -133,147 +136,90 @@ def now_jst() -> datetime:
     return datetime.now(timezone.utc).astimezone(jst_tz())
 
 
-def _httpdate_to_utc_dt(http_date: str) -> Optional[datetime]:
+def notion_page_url(page_id: str) -> str:
+    clean = (page_id or "").replace("-", "")
+    return f"https://www.notion.so/{clean}" if clean else ""
+
+
+# =============================================================================
+# Weathercasterログイン / 取得
+# =============================================================================
+def weathercaster_session() -> requests.Session:
+    if not WEATHERCASTER_USER or not WEATHERCASTER_PASS:
+        raise RuntimeError("WEATHERCASTER_USER / WEATHERCASTER_PASS is missing")
+
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0",
+            "Accept": "application/pdf,image/*,*/*",
+        }
+    )
+
+    # Weathercaster の member_only は Basic 認証想定
+    session.auth = (WEATHERCASTER_USER, WEATHERCASTER_PASS)
+    return session
+
+
+def weathercaster_pdf_url(name: str) -> str:
+    return f"{BASE_URL}/{name}.pdf"
+
+
+def fetch_weathercaster_pdf(
+    session: requests.Session,
+    name: str,
+) -> Optional[bytes]:
+    url = weathercaster_pdf_url(name)
+
     try:
-        dt = parsedate_to_datetime(http_date)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
+        r = session.get(url, timeout=60, allow_redirects=True)
+
+        ct = (r.headers.get("Content-Type") or "").lower()
+
+        if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
+            return r.content
+
+        print(f"[NG] {name}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
         return None
-
-
-def select_jma_utc_run() -> str:
-    if JMA_UTC_OVERRIDE in ("00", "12"):
-        return JMA_UTC_OVERRIDE
-
-    h = now_jst().hour
-    return "00" if 10 <= h < 20 else "12"
-
-
-def issue_base_utc_from_run(run_utc: str) -> datetime:
-    n = now_jst()
-
-    if run_utc == "00":
-        base_jst = n.replace(hour=9, minute=0, second=0, microsecond=0)
-        return base_jst.astimezone(timezone.utc)
-
-    base_jst = n.replace(hour=21, minute=0, second=0, microsecond=0)
-
-    if n.hour < 10:
-        base_jst = base_jst - timedelta(days=1)
-
-    return base_jst.astimezone(timezone.utc)
-
-
-# =============================================================================
-# URL生成
-# =============================================================================
-def nwp_pdf_url(code: str, run_utc: str) -> str:
-    return f"{NWP_BASE_URL}/{code.lower()}_{run_utc}.pdf"
-
-
-# =============================================================================
-# 地上天気図 list.json
-# =============================================================================
-def build_surface_weather_map_targets() -> List[Tuple[str, str]]:
-    try:
-        headers = {"User-Agent": "jma-weather-map-bot/1.0"}
-        r = requests.get(WEATHER_MAP_LIST_URL, headers=headers, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-
-        near = data.get("near", {})
-        result: List[Tuple[str, str]] = []
-
-        def pick_latest_contains(files: list, keyword: str) -> Optional[str]:
-            matched = [f for f in files if keyword in f]
-            return matched[-1] if matched else None
-
-        # 実況は白黒の地上実況天気図 JCIasas を優先
-        now_files = near.get("now") or []
-        now_file = pick_latest_contains(now_files, "JCIasas")
-
-        if now_file:
-            result.append(("surface_now", f"{WEATHER_MAP_PNG_BASE_URL}/{now_file}"))
-        else:
-            print("[WARN] surface_now JCIasas not found")
-
-        # 24h / 48h は従来通り
-        items = [
-            ("surface_fsas24", near.get("ft24") or []),
-            ("surface_fsas48", near.get("ft48") or []),
-        ]
-
-        for base_name, files in items:
-            if not files:
-                print(f"[WARN] surface weather map missing: {base_name}")
-                continue
-
-            filename = files[-1]
-            result.append((base_name, f"{WEATHER_MAP_PNG_BASE_URL}/{filename}"))
-
-        return result
-
-    except Exception as e:
-        print(f"[WARN] surface weather map list fetch failed: {e}")
-        return []
-
-
-# =============================================================================
-# 取得
-# =============================================================================
-def fetch_binary(name: str, url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int], Optional[str]]:
-    try:
-        headers = {"User-Agent": "jma-weather-map-bot/1.0"}
-        r = requests.get(url, headers=headers, timeout=60)
-
-        lm = r.headers.get("Last-Modified")
-        ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-
-        if r.status_code == 200:
-            return r.content, lm, r.status_code, ct
-
-        print(f"[NG] {name} HTTP {r.status_code}: {url}")
-        return None, lm, r.status_code, ct
 
     except Exception as e:
         print(f"[ERR] {name}: {e}")
-        return None, None, None, None
+        return None
 
 
-def fetch_image_content(url: str) -> Tuple[Optional[bytes], Optional[str], Optional[int], Optional[str]]:
+def fetch_image_content(url: str) -> Optional[bytes]:
     try:
-        headers = {"User-Agent": "jma-weather-map-bot/1.0"}
-        r = requests.get(url, headers=headers, timeout=30)
-
-        lm = r.headers.get("Last-Modified")
-        ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        r = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0"},
+            timeout=30,
+        )
 
         if r.status_code == 200:
-            return r.content, lm, r.status_code, ct
+            return r.content
 
         print(f"[NG] image HTTP {r.status_code}: {url}")
-        return None, lm, r.status_code, ct
+        return None
 
     except Exception as e:
         print(f"[ERR] image: {e} ({url})")
-        return None, None, None, None
+        return None
 
 
 # =============================================================================
 # 画像変換
 # =============================================================================
-def pdf_to_pil_first_page(pdf_bytes: bytes) -> Image.Image:
-    pages = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
-    if not pages:
-        raise ValueError("PDF has no pages")
-    return pages[0].convert("RGB")
+def pil_to_attachment(img: Image.Image, base_filename: str) -> Attachment:
+    buf = io.BytesIO()
+    img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return (f"{base_filename}.jpg", buf.getvalue(), "image/jpeg")
 
 
 def pdf_bytes_to_jpgs(
     pdf_bytes: bytes,
     base_filename: str,
+    *,
     force_all: bool = False,
 ) -> List[Attachment]:
     pages = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
@@ -284,134 +230,52 @@ def pdf_bytes_to_jpgs(
     out: List[Attachment] = []
 
     if force_all:
-        for idx, im in enumerate(pages, start=1):
-            out.append(pil_to_attachment(im.convert("RGB"), f"{base_filename}_p{idx:02d}"))
+        for idx, page in enumerate(pages, start=1):
+            out.append(pil_to_attachment(page.convert("RGB"), f"{base_filename}_p{idx:02d}"))
         return out
 
     out.append(pil_to_attachment(pages[0].convert("RGB"), base_filename))
     return out
 
 
-def png_bytes_to_pil(png_bytes: bytes) -> Image.Image:
-    with Image.open(io.BytesIO(png_bytes)) as im:
-        return im.convert("RGB")
-
-
-def png_bytes_to_jpg(
-    png_bytes: bytes,
-    base_filename: str,
-) -> Attachment:
-    return pil_to_attachment(png_bytes_to_pil(png_bytes), base_filename)
-
-
-def gif_to_jpg_bytes(gif_bytes: bytes, quality: int = 85) -> bytes:
+def gif_to_jpg_attachment(gif_bytes: bytes, base_filename: str) -> Attachment:
     with Image.open(io.BytesIO(gif_bytes)) as im:
         im.seek(0)
         im = im.convert("RGB")
-
-        out = io.BytesIO()
-        im.save(out, format="JPEG", quality=quality, optimize=True)
-        return out.getvalue()
+        return pil_to_attachment(im, base_filename)
 
 
-def pil_to_attachment(img: Image.Image, base_filename: str) -> Attachment:
-    buf = io.BytesIO()
-    img = img.convert("RGB")
-    img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-    return (f"{base_filename}.jpg", buf.getvalue(), "image/jpeg")
+def combine_vertical_attachments(
+    atts: List[Attachment],
+    base_filename: str,
+    *,
+    padding: int = 16,
+) -> Attachment:
+    imgs: List[Image.Image] = []
 
+    for _, blob, _ in atts:
+        with Image.open(io.BytesIO(blob)) as im:
+            imgs.append(im.convert("RGB"))
 
-def resize_to_width(img: Image.Image, width: int) -> Image.Image:
-    img = img.convert("RGB")
-    if img.width == width:
-        return img
-
-    ratio = width / img.width
-    height = int(img.height * ratio)
-    return img.resize((width, height), Image.LANCZOS)
-
-
-def crop_region(img: Image.Image, region: str) -> Image.Image:
-    img = img.convert("RGB")
-    w, h = img.size
-    mx = w // 2
-    my = h // 2
-
-    if region == "full":
-        return img
-    if region == "left":
-        return img.crop((0, 0, mx, h))
-    if region == "right":
-        return img.crop((mx, 0, w, h))
-    if region == "top":
-        return img.crop((0, 0, w, my))
-    if region == "bottom":
-        return img.crop((0, my, w, h))
-    if region == "left_top":
-        return img.crop((0, 0, mx, my))
-    if region == "left_bottom":
-        return img.crop((0, my, mx, h))
-    if region == "right_top":
-        return img.crop((mx, 0, w, my))
-    if region == "right_bottom":
-        return img.crop((mx, my, w, h))
-
-    raise ValueError(f"unknown crop region: {region}")
-
-
-def combine_vertical(images: List[Image.Image], padding: int = 16) -> Image.Image:
-    rgb_images = [im.convert("RGB") for im in images if im is not None]
-
-    if not rgb_images:
+    if not imgs:
         raise ValueError("no images to combine")
 
-    max_width = max(im.width for im in rgb_images)
-    total_height = sum(im.height for im in rgb_images) + padding * (len(rgb_images) - 1)
+    max_width = max(im.width for im in imgs)
+    total_height = sum(im.height for im in imgs) + padding * (len(imgs) - 1)
 
     canvas = Image.new("RGB", (max_width, total_height), "white")
 
     y = 0
-    for im in rgb_images:
+    for im in imgs:
         x = (max_width - im.width) // 2
         canvas.paste(im, (x, y))
         y += im.height + padding
 
-    return canvas
-
-
-def combine_comp_grid(
-    rows: List[Tuple[Image.Image, Image.Image]],
-    *,
-    cell_width: int = 760,
-    padding_x: int = 24,
-    padding_y: int = 18,
-    margin: int = 16,
-) -> Image.Image:
-    resized_rows: List[Tuple[Image.Image, Image.Image]] = []
-
-    for left, right in rows:
-        left = resize_to_width(left, cell_width)
-        right = resize_to_width(right, cell_width)
-        resized_rows.append((left, right))
-
-    row_heights = [max(left.height, right.height) for left, right in resized_rows]
-
-    total_width = margin * 2 + cell_width * 2 + padding_x
-    total_height = margin * 2 + sum(row_heights) + padding_y * (len(resized_rows) - 1)
-
-    canvas = Image.new("RGB", (total_width, total_height), "white")
-
-    y = margin
-    for (left, right), row_h in zip(resized_rows, row_heights):
-        canvas.paste(left, (margin, y))
-        canvas.paste(right, (margin + cell_width + padding_x, y))
-        y += row_h + padding_y
-
-    return canvas
+    return pil_to_attachment(canvas, base_filename)
 
 
 # =============================================================================
-# 出力構築ヘルパー
+# 一時保存
 # =============================================================================
 def write_attachment_to_tmp(att: Attachment) -> None:
     fname, data, _ = att
@@ -422,467 +286,175 @@ def write_attachment_to_tmp(att: Attachment) -> None:
         pass
 
 
-def fetch_pdf_region(
+def add_pdf_item(
     *,
-    name: str,
-    url: str,
-    region: str,
-    errors: List[str],
-    lm_dts_all: List[datetime],
-) -> Optional[Image.Image]:
-    blob, last_mod, st, ct = fetch_binary(name, url)
-
-    if last_mod:
-        dt = _httpdate_to_utc_dt(last_mod)
-        if dt:
-            lm_dts_all.append(dt)
-
-    if not blob:
-        errors.append(f"{name}: download failed (HTTP={st})")
-        return None
-
-    try:
-        img = pdf_to_pil_first_page(blob)
-        return crop_region(img, region)
-    except Exception as e:
-        errors.append(f"{name}: pdf crop failed ({e})")
-        return None
-
-
-def fetch_png_region(
-    *,
-    name: str,
-    url: str,
-    region: str,
-    errors: List[str],
-    lm_dts_all: List[datetime],
-) -> Optional[Image.Image]:
-    if not url:
-        errors.append(f"{name}: png url is empty")
-        return None
-
-    blob, last_mod, st, ct = fetch_binary(name, url)
-
-    if last_mod:
-        dt = _httpdate_to_utc_dt(last_mod)
-        if dt:
-            lm_dts_all.append(dt)
-
-    if not blob:
-        errors.append(f"{name}: download failed (HTTP={st})")
-        return None
-
-    try:
-        img = png_bytes_to_pil(blob)
-        return crop_region(img, region)
-    except Exception as e:
-        errors.append(f"{name}: png crop failed ({e})")
-        return None
-
-
-def add_png_as_jpg(
-    *,
+    session: requests.Session,
     images: List[Attachment],
+    groups: Dict[str, List[str]],
     errors: List[str],
-    lm_dts_all: List[datetime],
-    base_name: str,
-    url: str,
-) -> None:
-    blob, last_mod, st, ct = fetch_binary(base_name, url)
-
-    if last_mod:
-        dt = _httpdate_to_utc_dt(last_mod)
-        if dt:
-            lm_dts_all.append(dt)
-
-    if not blob:
-        errors.append(f"{base_name}: download failed (HTTP={st})")
-        return
-
-    try:
-        att = png_bytes_to_jpg(blob, base_name)
-        write_attachment_to_tmp(att)
-        images.append(att)
-    except Exception as e:
-        errors.append(f"{base_name}: png conversion failed ({e})")
-
-
-def add_pdf_as_jpg(
-    *,
-    images: List[Attachment],
-    errors: List[str],
-    lm_dts_all: List[datetime],
-    base_name: str,
-    url: str,
+    section: str,
+    name: str,
     force_all: bool = False,
 ) -> None:
-    blob, last_mod, st, ct = fetch_binary(base_name, url)
+    pdf = fetch_weathercaster_pdf(session, name)
 
-    if last_mod:
-        dt = _httpdate_to_utc_dt(last_mod)
-        if dt:
-            lm_dts_all.append(dt)
-
-    if not blob:
-        errors.append(f"{base_name}: download failed (HTTP={st})")
+    if not pdf:
+        errors.append(f"{name}: download failed")
         return
 
     try:
-        atts = pdf_bytes_to_jpgs(blob, base_name, force_all=force_all)
+        atts = pdf_bytes_to_jpgs(pdf, name, force_all=force_all)
 
         if not atts:
-            errors.append(f"{base_name}: conversion failed")
+            errors.append(f"{name}: conversion failed")
             return
 
         for att in atts:
             write_attachment_to_tmp(att)
-
-        images.extend(atts)
-
-    except Exception as e:
-        errors.append(f"{base_name}: pdf conversion failed ({e})")
-
-
-def add_vertical_pdf_combo(
-    *,
-    images: List[Attachment],
-    errors: List[str],
-    lm_dts_all: List[datetime],
-    combo_name: str,
-    items: List[Tuple[str, str]],
-) -> None:
-    pil_images: List[Image.Image] = []
-
-    for item_name, url in items:
-        img = fetch_pdf_region(
-            name=item_name,
-            url=url,
-            region="full",
-            errors=errors,
-            lm_dts_all=lm_dts_all,
-        )
-        if img is not None:
-            pil_images.append(img)
-
-    if not pil_images:
-        errors.append(f"{combo_name}: no images to combine")
-        return
-
-    try:
-        combined = combine_vertical(pil_images)
-        att = pil_to_attachment(combined, combo_name)
-        write_attachment_to_tmp(att)
-        images.append(att)
+            images.append(att)
+            groups.setdefault(section, []).append(att[0])
 
     except Exception as e:
-        errors.append(f"{combo_name}: combine failed ({e})")
-
-
-def fetch_mixed_region(
-    *,
-    kind: str,
-    name: str,
-    url: str,
-    region: str,
-    errors: List[str],
-    lm_dts_all: List[datetime],
-) -> Optional[Image.Image]:
-    if kind == "pdf":
-        return fetch_pdf_region(
-            name=name,
-            url=url,
-            region=region,
-            errors=errors,
-            lm_dts_all=lm_dts_all,
-        )
-
-    if kind == "png":
-        return fetch_png_region(
-            name=name,
-            url=url,
-            region=region,
-            errors=errors,
-            lm_dts_all=lm_dts_all,
-        )
-
-    errors.append(f"{name}: unknown kind {kind}")
-    return None
-
-
-def add_comp_style_grid_mixed(
-    *,
-    images: List[Attachment],
-    errors: List[str],
-    lm_dts_all: List[datetime],
-    combo_name: str,
-    rows: List[
-        Tuple[
-            Tuple[str, str, str, str],
-            Tuple[str, str, str, str],
-        ]
-    ],
-) -> None:
-    """
-    COMP風 2列×4段グリッド。
-
-    spec:
-      (kind, name, url, region)
-
-    kind:
-      pdf / png
-    """
-    out_rows: List[Tuple[Image.Image, Image.Image]] = []
-
-    for left_spec, right_spec in rows:
-        left_kind, left_name, left_url, left_region = left_spec
-        right_kind, right_name, right_url, right_region = right_spec
-
-        left_img = fetch_mixed_region(
-            kind=left_kind,
-            name=left_name,
-            url=left_url,
-            region=left_region,
-            errors=errors,
-            lm_dts_all=lm_dts_all,
-        )
-        right_img = fetch_mixed_region(
-            kind=right_kind,
-            name=right_name,
-            url=right_url,
-            region=right_region,
-            errors=errors,
-            lm_dts_all=lm_dts_all,
-        )
-
-        if left_img is not None and right_img is not None:
-            out_rows.append((left_img, right_img))
-
-    if not out_rows:
-        errors.append(f"{combo_name}: no images to combine")
-        return
-
-    try:
-        combined = combine_comp_grid(out_rows)
-        att = pil_to_attachment(combined, combo_name)
-        write_attachment_to_tmp(att)
-        images.append(att)
-    except Exception as e:
-        errors.append(f"{combo_name}: combine failed ({e})")
+        errors.append(f"{name}: conversion failed ({e})")
 
 
 # =============================================================================
 # 出力構築
 # =============================================================================
-def build_outputs(run_utc: str):
-
+def build_outputs() -> Tuple[List[Attachment], Dict[str, List[str]], List[str]]:
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    images = []
-    errors = []
-    lm_dts_all = []
+    session = weathercaster_session()
+
+    images: List[Attachment] = []
+    groups: Dict[str, List[str]] = {}
+    errors: List[str] = []
 
     # -------------------------------------------------------------------------
-    # ① 地上天気図
+    # ① エマグラム
     # -------------------------------------------------------------------------
-    surface_targets = build_surface_weather_map_targets()
-    surface_now_url = surface_targets[0][1] if surface_targets else ""
+    if EMAGRAM_ENABLE and EMAGRAM_URL:
+        blob = fetch_image_content(EMAGRAM_URL)
 
-    for base_name, url in surface_targets:
-        add_png_as_jpg(
+        if blob:
+            try:
+                base = EMAGRAM_FILENAME.replace(".gif", "")
+                att = gif_to_jpg_attachment(blob, base)
+
+                write_attachment_to_tmp(att)
+                images.append(att)
+                groups.setdefault("エマグラム", []).append(att[0])
+
+            except Exception as e:
+                errors.append(f"EMAGRAM: conversion failed ({e})")
+        else:
+            errors.append("EMAGRAM: download failed")
+
+    # -------------------------------------------------------------------------
+    # ② 実況
+    # -------------------------------------------------------------------------
+    for name in ["ASAS", "FSAS24", "FSAS48"]:
+        add_pdf_item(
+            session=session,
             images=images,
+            groups=groups,
             errors=errors,
-            lm_dts_all=lm_dts_all,
-            base_name=base_name,
-            url=url,
+            section="実況",
+            name=name,
+            force_all=False,
         )
 
+    # -------------------------------------------------------------------------
+    # ③ 予想
+    # -------------------------------------------------------------------------
+    for name in ["COMP12", "COMP36", "COMP72", "FXJP854"]:
+        add_pdf_item(
+            session=session,
+            images=images,
+            groups=groups,
+            errors=errors,
+            section="予想",
+            name=name,
+            force_all=False,
+        )
 
     # -------------------------------------------------------------------------
-    # ② 高層天気図：AUPA20 + AUPN30 縦結合
+    # ④ 数値（上空 → 地上）
+    # AUPA20 / AUPA25 / AUPN30 を縦結合して1枚
     # -------------------------------------------------------------------------
-    add_vertical_pdf_combo(
+    upper_parts: List[Attachment] = []
+
+    for name in ["AUPA20", "AUPA25", "AUPN30"]:
+        pdf = fetch_weathercaster_pdf(session, name)
+
+        if not pdf:
+            errors.append(f"{name}: download failed")
+            continue
+
+        try:
+            atts = pdf_bytes_to_jpgs(pdf, name, force_all=False)
+
+            if atts:
+                upper_parts.append(atts[0])
+            else:
+                errors.append(f"{name}: conversion failed")
+
+        except Exception as e:
+            errors.append(f"{name}: conversion failed ({e})")
+
+    if upper_parts:
+        try:
+            upper_att = combine_vertical_attachments(
+                upper_parts,
+                "UPPER_AUPA20_AUPA25_AUPN30",
+                padding=16,
+            )
+            write_attachment_to_tmp(upper_att)
+            images.append(upper_att)
+            groups.setdefault("数値", []).append(upper_att[0])
+        except Exception as e:
+            errors.append(f"UPPER combo: failed ({e})")
+
+    add_pdf_item(
+        session=session,
         images=images,
+        groups=groups,
         errors=errors,
-        lm_dts_all=lm_dts_all,
-        combo_name=f"upper_{run_utc}",
-        items=[
-            (f"aupa20_{run_utc}", nwp_pdf_url("aupa20", run_utc)),
-            (f"aupn30_{run_utc}", nwp_pdf_url("aupn30", run_utc)),
-        ],
-    )
-    
-    # -------------------------------------------------------------------------
-    # ③ 断面図：AXJP130 / AXJP140
-    # -------------------------------------------------------------------------
-    add_pdf_as_jpg(images=images, errors=errors, lm_dts_all=lm_dts_all,
-                   base_name=f"axjp130_{run_utc}",
-                   url=nwp_pdf_url("axjp130", run_utc))
-
-    add_pdf_as_jpg(images=images, errors=errors, lm_dts_all=lm_dts_all,
-                   base_name=f"axjp140_{run_utc}",
-                   url=nwp_pdf_url("axjp140", run_utc))
-
-    # =========================
-    # ★ COMP① 00-12（4段）
-    # =========================
-    add_comp_style_grid_mixed(
-        images=images,
-        errors=errors,
-        lm_dts_all=lm_dts_all,
-        combo_name=f"comp_00_12_{run_utc}",
-        rows=[
-            (
-                ("pdf", f"axfe578_{run_utc}", nwp_pdf_url("axfe578", run_utc), "top"),
-                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_top"),
-            ),
-            (
-                ("png", "surface_now", surface_now_url, "full"),
-                ("pdf", f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "left"),
-            ),
-            (
-                ("pdf", f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc), "bottom"),
-                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_top"),
-            ),
-            (
-                ("pdf", f"axfe578_{run_utc}", nwp_pdf_url("axfe578", run_utc), "bottom"),
-                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_bottom"),
-            ),
-        ],
-    )
-
-    # =========================
-    # ★ COMP② 24-36（4段）
-    # =========================
-    add_comp_style_grid_mixed(
-        images=images,
-        errors=errors,
-        lm_dts_all=lm_dts_all,
-        combo_name=f"comp_24_36_{run_utc}",
-        rows=[
-            (
-                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_top"),
-                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_top"),
-            ),
-            (
-                ("pdf", f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "right"),
-                ("pdf", f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "left"),
-            ),
-            (
-                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
-                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_top"),
-            ),
-            (
-                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_top"),
-                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
-            ),
-        ],
-    )
-
-    # =========================
-    # ★ COMP③ 48-72（4段）
-    # =========================
-    add_comp_style_grid_mixed(
-        images=images,
-        errors=errors,
-        lm_dts_all=lm_dts_all,
-        combo_name=f"comp_48_72_{run_utc}",
-        rows=[
-            (
-                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_top"),
-                ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "top"),
-            ),
-            (
-                ("pdf", f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "right"),
-                ("pdf", f"fxfe507_{run_utc}", nwp_pdf_url("fxfe507", run_utc), "top"),
-            ),
-            (
-                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
-                ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "top"),
-            ),
-            (
-                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_top"),
-                ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
-            ),
-        ],
-    )
-
-    return images, errors, None
-
-    # -------------------------------------------------------------------------
-    # ⑦ FXJP854 単体
-    # -------------------------------------------------------------------------
-    add_pdf_as_jpg(
-        images=images,
-        errors=errors,
-        lm_dts_all=lm_dts_all,
-        base_name=f"fxjp854_{run_utc}",
-        url=nwp_pdf_url("fxjp854", run_utc),
+        section="数値",
+        name="AXJP140",
         force_all=False,
     )
 
     # -------------------------------------------------------------------------
-    # ⑧ 週間系 PNG → JPG
+    # ⑤ 週間
     # -------------------------------------------------------------------------
-    weekly_pngs = [
-        ("fefe19", f"{NWP_BASE_URL}/fefe19.png"),
-        ("fzcx50", f"{NWP_BASE_URL}/fzcx50.png"),
-        ("fxxn519", f"{NWP_BASE_URL}/fxxn519.png"),
-    ]
-
-    for base_name, url in weekly_pngs:
-        add_png_as_jpg(
+    for name in ["FXXN519", "FZCX50", "FEFE19"]:
+        add_pdf_item(
+            session=session,
             images=images,
+            groups=groups,
             errors=errors,
-            lm_dts_all=lm_dts_all,
-            base_name=base_name,
-            url=url,
+            section="週間",
+            name=name,
+            force_all=False,
         )
 
     # -------------------------------------------------------------------------
-    # ⑨ 解説資料 PDF
+    # ⑥ 解説
     # -------------------------------------------------------------------------
-    add_pdf_as_jpg(
-        images=images,
-        errors=errors,
-        lm_dts_all=lm_dts_all,
-        base_name="kaisetsu_tanki",
-        url="https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
-        force_all=True,
-    )
+    for name in ["TKAISETU", "SKAISETU"]:
+        add_pdf_item(
+            session=session,
+            images=images,
+            groups=groups,
+            errors=errors,
+            section="解説",
+            name=name,
+            force_all=True,
+        )
 
-    add_pdf_as_jpg(
-        images=images,
-        errors=errors,
-        lm_dts_all=lm_dts_all,
-        base_name="kaisetsu_shukan",
-        url="https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf",
-        force_all=True,
-    )
-
-    # -------------------------------------------------------------------------
-    # ⑩ エマグラムを先頭へ
-    # -------------------------------------------------------------------------
-    if EMAGRAM_ENABLE and EMAGRAM_URL:
-        blob, last_mod, st, ct = fetch_image_content(EMAGRAM_URL)
-
-        if blob:
-            try:
-                jpg_blob = gif_to_jpg_bytes(blob, quality=JPEG_QUALITY)
-                jpg_name = EMAGRAM_FILENAME.replace(".gif", ".jpg")
-                att = (jpg_name, jpg_blob, "image/jpeg")
-
-                images.insert(0, att)
-                write_attachment_to_tmp(att)
-
-            except Exception as e:
-                print(f"[WARN] emagram convert failed: {e}")
-        else:
-            errors.append(f"EMAGRAM: download failed (HTTP={st})")
-
-    issued_dt_utc_guess: Optional[datetime] = max(lm_dts_all) if lm_dts_all else None
-
-    return images, errors, issued_dt_utc_guess
+    return images, groups, errors
 
 
 # =============================================================================
@@ -891,14 +463,14 @@ def build_outputs(run_utc: str):
 def upload_to_r2(
     run_prefix: str,
     atts: List[Attachment],
-) -> Tuple[List[str], Optional[str]]:
+) -> Tuple[List[str], Optional[str], Dict[str, str]]:
     if not R2_ENABLE:
-        return [], None
+        return [], None, {}
 
     urls: List[str] = []
+    url_by_filename: Dict[str, str] = {}
     rep_url: Optional[str] = None
     first_url: Optional[str] = None
-    first_jpeg_url: Optional[str] = None
 
     for fname, blob, mime in atts:
         key = f"{run_prefix}/{fname}"
@@ -906,27 +478,26 @@ def upload_to_r2(
 
         url = make_url(key)
         urls.append(url)
+        url_by_filename[fname] = url
 
         if first_url is None:
             first_url = url
 
-        if first_jpeg_url is None and mime == "image/jpeg":
-            first_jpeg_url = url
-
-        if rep_url is None and fname.lower().endswith("_cover.jpg"):
+        if rep_url is None and fname.lower().endswith(".jpg"):
             rep_url = url
 
     if rep_url is None:
-        rep_url = first_jpeg_url or first_url
+        rep_url = first_url
 
-    return urls, rep_url
+    return urls, rep_url, url_by_filename
 
 
 # =============================================================================
 # Notion
 # =============================================================================
 def notion_write_db(
-    issue_base_utc: datetime,
+    *,
+    issue_dt_jst: datetime,
     rjtd: str,
     run_prefix: str,
     rep_url: Optional[str],
@@ -936,10 +507,8 @@ def notion_write_db(
     if not notion_enabled():
         return None
 
-    issue_base_jst = issue_base_utc.astimezone(jst_tz())
-    day = issue_base_utc.strftime("%Y%m%d")
-
-    title = f"JMA / {day} {issue_base_jst.strftime('%H:%M')} JST"
+    day = issue_dt_jst.strftime("%Y%m%d")
+    title = f"JMA / {day} {issue_dt_jst.strftime('%H:%M')} JST"
 
     memo_lines: List[str] = []
     if errors:
@@ -951,7 +520,7 @@ def notion_write_db(
     page_id = create_db_row(
         title=title,
         category="JMA",
-        init_jst_iso=issue_base_jst.isoformat(),
+        init_jst_iso=issue_dt_jst.isoformat(),
         memo=memo,
         rjtd=rjtd,
         prefix=run_prefix,
@@ -992,31 +561,63 @@ def notion_write_db(
 # =============================================================================
 # Discord
 # =============================================================================
-def notify_discord_jma_images(
+def discord_links_text() -> str:
+    lines = ["**参考リンク**"]
+
+    for title, url in GUIDANCE_LINKS:
+        lines.append(f"・{title}\n{url}")
+
+    if AMEDAS_LINK:
+        lines.append(f"・アメダス\n{AMEDAS_LINK}")
+
+    return "\n\n".join(lines)
+
+
+def notify_discord_sections(
     *,
-    all_urls: List[str],
+    groups: Dict[str, List[str]],
+    url_by_filename: Dict[str, str],
     rjtd: str,
-    issue_base_utc: datetime,
+    issue_dt_jst: datetime,
 ) -> None:
     if not discord_jma_enabled():
         return
 
-    issue_base_jst = issue_base_utc.astimezone(jst_tz())
-    init_jst = issue_base_jst.strftime("%Y-%m-%d %H:%M JST")
+    init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
 
-    post_discord_item_image_urls(
-        webhook_url=discord_jma_webhook_url(),
-        title="JMA 天気図",
-        image_urls=all_urls,
-        notion_url="",
-        rjtd=rjtd,
-        init_jst=init_jst,
-    )
+    order = [
+        ("エマグラム", "エマグラム"),
+        ("実況", "■実況"),
+        ("予想", "■予想"),
+        ("数値", "■数値（上空 → 地上）"),
+        ("週間", "■週間"),
+        ("解説", "■解説"),
+    ]
+
+    for key, title in order:
+        filenames = groups.get(key, [])
+        urls = [url_by_filename[f] for f in filenames if f in url_by_filename]
+
+        if not urls:
+            continue
+
+        try:
+            post_discord_item_image_urls(
+                webhook_url=discord_jma_webhook_url(),
+                title=title,
+                image_urls=urls,
+                notion_url="",
+                rjtd=rjtd,
+                init_jst=init_jst,
+            )
+        except Exception as e:
+            print(f"[WARN] Discord section send failed ({title}): {e}")
+
+    post_discord_text(discord_links_text())
 
 
-def notify_discord_jma_complete(
+def notify_discord_complete(
     *,
-    page_id: Optional[str],
     errors: List[str],
     attach_count: int,
 ) -> None:
@@ -1038,36 +639,32 @@ def notify_discord_jma_complete(
 def main() -> None:
     page_id: Optional[str] = None
     all_urls: List[str] = []
+    url_by_filename: Dict[str, str] = {}
     errors: List[str] = []
 
     try:
-        print("=== Start JMA Weather Map ===")
+        print("=== Start Weathercaster JMA Weather Map ===")
 
-        run_utc = select_jma_utc_run()
-        print(f"[INFO] selected JMA run: {run_utc}UTC")
-
-        images, errors, issued_guess_utc = build_outputs(run_utc)
-
-        issue_base_utc = issue_base_utc_from_run(run_utc)
-
-        rjtd = issue_base_utc.strftime("%d%H%M")
-        day = issue_base_utc.strftime("%Y%m%d")
+        issue_dt_jst = now_jst()
+        rjtd = issue_dt_jst.strftime("%d%H%M")
+        day = issue_dt_jst.strftime("%Y%m%d")
         run_prefix = f"{R2_PREFIX}/{day}/RJTD_{rjtd}"
+
+        images, groups, errors = build_outputs()
 
         rep_url: Optional[str] = None
 
         if images:
-            all_urls, rep_url = upload_to_r2(run_prefix, images)
+            all_urls, rep_url, url_by_filename = upload_to_r2(run_prefix, images)
 
-        if all_urls or AMEDAS_LINK or GUIDANCE_LINKS:
-            page_id = notion_write_db(
-                issue_base_utc=issue_base_utc,
-                rjtd=rjtd,
-                run_prefix=run_prefix,
-                rep_url=rep_url,
-                all_urls=all_urls,
-                errors=errors,
-            )
+        page_id = notion_write_db(
+            issue_dt_jst=issue_dt_jst,
+            rjtd=rjtd,
+            run_prefix=run_prefix,
+            rep_url=rep_url,
+            all_urls=all_urls,
+            errors=errors,
+        )
 
         if page_id:
             print(f"[OK] Notion DB row created: {page_id}")
@@ -1076,24 +673,20 @@ def main() -> None:
             print("[WARN] Notion page was not created")
 
         try:
-            if all_urls:
-                notify_discord_jma_images(
-                    all_urls=all_urls,
-                    rjtd=rjtd,
-                    issue_base_utc=issue_base_utc,
-                )
+            notify_discord_sections(
+                groups=groups,
+                url_by_filename=url_by_filename,
+                rjtd=rjtd,
+                issue_dt_jst=issue_dt_jst,
+            )
 
-                if discord_jma_enabled():
-                    print(f"[OK] Discord images sent: {len(all_urls)}")
-
-            notify_discord_jma_complete(
-                page_id=page_id,
+            notify_discord_complete(
                 errors=errors,
                 attach_count=len(all_urls),
             )
 
             if discord_jma_enabled():
-                print("[OK] Discord complete sent")
+                print("[OK] Discord sent")
 
         except Exception as e:
             print(f"[WARN] Discord send failed: {e}")
@@ -1103,7 +696,7 @@ def main() -> None:
             for e in errors:
                 print(f"  - {e}")
 
-        print("=== Done JMA Weather Map ===")
+        print("=== Done Weathercaster JMA Weather Map ===")
 
     finally:
         shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
