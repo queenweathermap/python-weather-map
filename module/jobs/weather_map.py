@@ -454,7 +454,7 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
     # -------------------------------------------------------------------------
     # ⑤ 解説
     # -------------------------------------------------------------------------
-    for name in ["TKAISETU", "SKAISETU"]:
+    for name in ["SKAISETU", "TKAISETU"]:
         add_pdf_item(
             session=session,
             images=images,
