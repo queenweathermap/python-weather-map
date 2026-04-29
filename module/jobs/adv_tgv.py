@@ -3,57 +3,77 @@
 # module/jobs/adv_tgv.py
 #
 # ADV TGV:
-#   取得 → JPG化(3up) → R2 → Notion(DB) → Discord
+#   取得 → 同時刻FTごとに縦結合 → JPG化 → R2 → Notion(DB) → Discord
+#
+# 今回の整理:
+#   - item単位で大量投稿する方式をやめる
+#   - モデルごとに全itemを取得
+#   - 同じ予想時刻 FT000 / FT006 / ... を縦に結合
+#   - 結合済み画像だけを R2 / Notion / Discord に流す
+#
+# 例:
+#   GSM:
+#     300hPa + 300hPa-2 を FTごとに縦結合
+#     48枚 → 24枚
+#
+#   MSM:
+#     sfc / sfc-2 は除外
+#     500hPa + 500hPa-2 + 700hPa + 850hPa-2 + 050 を FTごとに縦結合
+#
+#   LFM:
+#     850hPa + 925hPa + 975hPa + sfc + sfc-2 を FTごとに縦結合
 #
 # 役割分担:
-#   - Notion / R2 が正本
+#   - R2 / Notion が正本
 #   - Discord は画像ビューア
-#   - Slack は使わない
-#
-# Discord設計:
-#   - ADV専用チャンネルへ投稿
-#   - itemごとに画像投稿
-#   - 画像はR2 URLをembed表示
-#   - 最後に完了通知を投稿
-#   - 完了通知にNotion URLを表示
 # =============================================================================
 
-import sys
-from pathlib import Path
+from __future__ import annotations
 
-import os
-import io
 import base64
+import io
+import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Tuple, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import requests
 from PIL import Image
 
-from module.utils.r2_utils import put_bytes, make_url
+from module.adv_tgv.models import Item, ModelCfg, load_model_groups
+from module.utils.discord_utils import (
+    post_discord_complete,
+    post_discord_item_image_urls,
+)
 from module.utils.notion_utils import (
+    append_bookmark,
+    append_heading,
+    append_images,
+    append_toggle,
     create_db_row,
     set_page_cover,
-    append_heading,
-    append_toggle,
-    append_images,
-    append_bookmark,
 )
-from module.utils.discord_utils import (
-    post_discord_item_image_urls,
-    post_discord_complete,
-)
-
-from module.adv_tgv.models import load_model_groups, ModelCfg, Item
+from module.utils.r2_utils import make_url, put_bytes
 
 
+# =============================================================================
+# 型定義
+# =============================================================================
+
+# 通常の添付データ:
+#   filename, bytes, mime
 Attachment = Tuple[str, bytes, str]
+
+# FT付き添付データ:
+#   ft_hour, Attachment
+TimedAttachment = Tuple[int, Attachment]
 
 
 # =============================================================================
 # Env utils
 # =============================================================================
+
 def must_env(name: str) -> str:
+    """必須環境変数を取得する。なければ明示的に落とす。"""
     v = os.getenv(name)
     if not v:
         raise RuntimeError(f"Missing required env: {name}")
@@ -61,6 +81,7 @@ def must_env(name: str) -> str:
 
 
 def env_int(name: str, default: int) -> int:
+    """整数環境変数。壊れた値なら安全側でdefaultを返す。"""
     v = os.getenv(name)
     if v is None or v.strip() == "":
         return default
@@ -71,14 +92,20 @@ def env_int(name: str, default: int) -> int:
 
 
 def env_str(name: str, default: str = "") -> str:
+    """文字列環境変数。Noneだけdefaultにする。"""
     v = os.getenv(name)
     return default if v is None else v.strip()
 
 
 def env_bool(name: str, default: str = "0") -> bool:
+    """1/true/yes/on を True として扱う。"""
     v = os.getenv(name, default).strip().lower()
     return v in ("1", "true", "yes", "on")
 
+
+# =============================================================================
+# Discord / Notion helpers
+# =============================================================================
 
 def discord_adv_webhook_url() -> str:
     """
@@ -89,9 +116,6 @@ def discord_adv_webhook_url() -> str:
 
     互換:
       DISCORD_WEBHOOK_URL
-
-    互換を残す理由:
-      以前の単一Webhook構成から移行しやすくするため。
     """
     return (
         os.getenv("DISCORD_ADV_WEBHOOK_URL", "").strip()
@@ -100,23 +124,12 @@ def discord_adv_webhook_url() -> str:
 
 
 def discord_adv_enabled() -> bool:
-    """
-    ADVのDiscord投稿ON/OFF。
-
-    DISCORD_ENABLE=1
-    かつ
-    DISCORD_ADV_WEBHOOK_URL がある時だけ投稿する。
-    """
+    """DISCORD_ENABLE=1 かつ Webhook URL がある時だけ投稿する。"""
     return env_bool("DISCORD_ENABLE", "0") and bool(discord_adv_webhook_url())
 
 
 def notion_page_url(page_id: str) -> str:
-    """
-    Notionのpage_idからブラウザで開けるURLを作る。
-
-    Notion APIのpage_idはハイフン付きUUIDで返ることがある。
-    ブラウザURLではハイフンなしでも開ける。
-    """
+    """Notion page_id からブラウザURLを作る。"""
     clean = (page_id or "").replace("-", "")
     return f"https://www.notion.so/{clean}" if clean else ""
 
@@ -124,24 +137,44 @@ def notion_page_url(page_id: str) -> str:
 # =============================================================================
 # Auth
 # =============================================================================
+
 def make_basic_auth_header(user: str, password: str) -> str:
+    """Basic認証ヘッダを作る。JMA_AUTH_BASIC互換用。"""
     token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
     return f"Basic {token}"
 
 
 def get_auth_basic_header() -> str:
+    """
+    認証情報を取得する。
+
+    優先:
+      JMA_ADV_USER / JMA_ADV_PASS
+
+    互換:
+      JMA_AUTH_BASIC
+    """
     user = os.getenv("JMA_ADV_USER")
     pw = os.getenv("JMA_ADV_PASS")
+
     if user and pw:
         return make_basic_auth_header(user.strip(), pw.strip())
+
     return must_env("JMA_AUTH_BASIC").strip()
 
 
 def use_auth_enabled() -> bool:
+    """TGV_USE_AUTH=0 の時だけ認証を切る。通常はON。"""
     return os.getenv("TGV_USE_AUTH", "1").strip() == "1"
 
 
 def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
+    """
+    requests の auth=(user, pass) に渡す形式を返す。
+
+    JMA_ADV_USER / JMA_ADV_PASS がある場合は requests 側の
+    Basic認証機能を使う。ない場合は Authorization ヘッダ方式へ回す。
+    """
     if not use_auth_enabled():
         return None
 
@@ -157,7 +190,9 @@ def get_requests_auth_tuple() -> Optional[Tuple[str, str]]:
 # =============================================================================
 # HTTP
 # =============================================================================
+
 def headers_for(referer: str) -> dict:
+    """JMA画像取得用ヘッダ。認証方式に応じてAuthorizationも入れる。"""
     h = {
         "User-Agent": "Mozilla/5.0",
         "Referer": referer,
@@ -166,6 +201,7 @@ def headers_for(referer: str) -> dict:
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     }
 
+    # user/pass がない場合だけ、JMA_AUTH_BASIC形式を使う。
     if use_auth_enabled() and (get_requests_auth_tuple() is None):
         h["Authorization"] = get_auth_basic_header()
 
@@ -173,6 +209,7 @@ def headers_for(referer: str) -> dict:
 
 
 def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
+    """画像URLを取得する。"""
     auth = get_requests_auth_tuple()
     return requests.get(url, headers=headers_for(referer), auth=auth, timeout=timeout)
 
@@ -180,7 +217,9 @@ def http_get(url: str, *, referer: str, timeout: int) -> requests.Response:
 # =============================================================================
 # Image helpers
 # =============================================================================
+
 def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
+    """PNG bytes を白背景JPEG bytesへ変換する。"""
     with Image.open(io.BytesIO(png_bytes)) as im:
         if im.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", im.size, (255, 255, 255))
@@ -194,26 +233,33 @@ def png_bytes_to_jpg_bytes(png_bytes: bytes, *, quality: int = 85) -> bytes:
         return out.getvalue()
 
 
-def make_white_jpg(width: int, height: int, *, quality: int = 85) -> bytes:
-    im = Image.new("RGB", (width, height), (255, 255, 255))
-    out = io.BytesIO()
-    im.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
-    return out.getvalue()
+def concat_jpgs_vert(
+    jpg_list: Sequence[bytes],
+    *,
+    quality: int = 85,
+    padding: int = 12,
+) -> bytes:
+    """
+    複数JPEGを縦方向に結合する。
 
-
-def concat_jpgs_horiz(jpg_list: Sequence[bytes], *, quality: int = 85) -> bytes:
+    幅が違う場合:
+      - 一番広い画像幅に合わせる
+      - 狭い画像は中央寄せ
+      - 背景は白
+    """
     ims = [Image.open(io.BytesIO(b)).convert("RGB") for b in jpg_list]
 
     try:
-        h = max(im.height for im in ims)
-        w = sum(im.width for im in ims)
+        width = max(im.width for im in ims)
+        height = sum(im.height for im in ims) + padding * (len(ims) - 1)
 
-        canvas = Image.new("RGB", (w, h), (255, 255, 255))
+        canvas = Image.new("RGB", (width, height), (255, 255, 255))
 
-        x = 0
+        y = 0
         for im in ims:
-            canvas.paste(im, (x, 0))
-            x += im.width
+            x = (width - im.width) // 2
+            canvas.paste(im, (x, y))
+            y += im.height + padding
 
         out = io.BytesIO()
         canvas.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
@@ -227,65 +273,12 @@ def concat_jpgs_horiz(jpg_list: Sequence[bytes], *, quality: int = 85) -> bytes:
                 pass
 
 
-def maybe_triple_join_attachments(atts: List[Attachment], *, quality: int) -> List[Attachment]:
-    """
-    3枚を横3upで結合する。
-
-    Discordにもこの3up済み画像を流す。
-    """
-    if not env_bool("JOIN_TRIPLE", "1"):
-        return atts
-
-    if not atts:
-        return atts
-
-    joined: List[Attachment] = []
-
-    try:
-        with Image.open(io.BytesIO(atts[0][1])) as im0:
-            base_w, base_h = im0.size
-    except Exception:
-        return atts
-
-    i = 0
-    while i < len(atts):
-        group = atts[i:i + 3]
-
-        if len(group) == 3:
-            fn1, b1, _ = group[0]
-            _, b2, _ = group[1]
-            _, b3, _ = group[2]
-
-            merged = concat_jpgs_horiz([b1, b2, b3], quality=quality)
-            joined.append((fn1.replace(".jpg", "") + "_3up.jpg", merged, "image/jpeg"))
-            i += 3
-            continue
-
-        if len(group) == 2:
-            fn1, b1, _ = group[0]
-            _, b2, _ = group[1]
-
-            white = make_white_jpg(base_w, base_h, quality=quality)
-            merged = concat_jpgs_horiz([b1, b2, white], quality=quality)
-            joined.append((fn1.replace(".jpg", "") + "_3up_pad.jpg", merged, "image/jpeg"))
-            i += 2
-            continue
-
-        fn1, b1, _ = group[0]
-        white1 = make_white_jpg(base_w, base_h, quality=quality)
-        white2 = make_white_jpg(base_w, base_h, quality=quality)
-
-        merged = concat_jpgs_horiz([b1, white1, white2], quality=quality)
-        joined.append((fn1.replace(".jpg", "") + "_3up_pad.jpg", merged, "image/jpeg"))
-        i += 1
-
-    return joined
-
-
 # =============================================================================
 # URL rules
 # =============================================================================
+
 def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
+    """RJTD_281200 の 281200 部分を作る。"""
     dt = init_dt_utc.astimezone(timezone.utc).replace(
         minute=minute,
         second=0,
@@ -295,36 +288,49 @@ def fmt_rjtd(init_dt_utc: datetime, minute: int) -> str:
 
 
 def floor_to_step(dt_utc: datetime, step_hours: int, minute: int) -> datetime:
+    """指定step時間へ丸める。GSM/MSM/LFMの初期値探索用。"""
     dt = dt_utc.astimezone(timezone.utc).replace(second=0, microsecond=0)
     h = (dt.hour // step_hours) * step_hours
     return dt.replace(hour=h, minute=minute)
 
 
 def build_png_url(base: str, layer: str, view_code: str, rjtd: str) -> str:
+    """JMA画像URLを組み立てる。"""
     return f"{base}/{layer}/images/VIEW{view_code}_RJTD_{rjtd}.png"
 
 
 def view_for_ft(view_base: str, ft_hours: int, digits: int) -> str:
+    """
+    item.view_base の末尾FT部分だけ差し替える。
+
+    例:
+      view_base=3001000, ft=6, digits=3
+      → 3001006
+    """
     return f"{view_base[:-digits]}{ft_hours:0{digits}d}"
 
 
 # =============================================================================
-# Fetch / R2
+# Fetch
 # =============================================================================
-def r2_enabled() -> bool:
-    return env_bool("R2_ENABLE", "1")
 
-
-def fetch_item_images(
+def fetch_item_images_with_ft(
     model_name: str,
     cfg: ModelCfg,
     init_dt: datetime,
     item: Item,
-) -> Tuple[List[Attachment], bool]:
+) -> Tuple[List[TimedAttachment], bool]:
+    """
+    1つのitemについて、全FT画像を取得する。
+
+    戻り値:
+      - [(ft, attachment), ...]
+      - auth_failed
+    """
     quality = env_int("JPG_QUALITY", 85)
     timeout = env_int("HTTP_TIMEOUT", 60)
 
-    atts: List[Attachment] = []
+    atts: List[TimedAttachment] = []
     auth_failed = False
 
     for ft in cfg.ft_list:
@@ -340,40 +346,19 @@ def fetch_item_images(
                 break
 
             if r.status_code != 200:
+                # ないFTは静かに飛ばす。JMA側の更新遅れ対策。
                 continue
 
             jpg = png_bytes_to_jpg_bytes(r.content, quality=quality)
             fn = f"{item.jpg_prefix}_FT{ft:03d}_VIEW{view_code}_RJTD_{rjtd}.jpg"
 
-            atts.append((fn, jpg, "image/jpeg"))
+            atts.append((ft, (fn, jpg, "image/jpeg")))
 
         except Exception as e:
             print(f"[WARN] fetch failed: {model_name} {item.label} FT={ft}: {e}")
             continue
 
-    atts = maybe_triple_join_attachments(atts, quality=quality)
-
     return atts, auth_failed
-
-
-def upload_item_images_to_r2(
-    *,
-    run_prefix: str,
-    model_name: str,
-    item_label: str,
-    atts: List[Attachment],
-) -> List[str]:
-    if not r2_enabled():
-        return []
-
-    urls: List[str] = []
-
-    for fn, blob, mime in atts:
-        key = f"{run_prefix}/{model_name}/{item_label}/{fn}"
-        put_bytes(key, blob, content_type=mime)
-        urls.append(make_url(key))
-
-    return urls
 
 
 def find_working_init_dt(
@@ -381,6 +366,12 @@ def find_working_init_dt(
     cfg: ModelCfg,
     max_back_hours: int,
 ) -> datetime:
+    """
+    実際に画像が存在する初期時刻を探す。
+
+    最新時刻がまだ公開されていないことがあるため、
+    6時間刻みで過去へ戻りながら probe item を確認する。
+    """
     timeout = env_int("HTTP_TIMEOUT", 30)
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
@@ -413,8 +404,133 @@ def find_working_init_dt(
 
 
 # =============================================================================
+# Vertical join rules
+# =============================================================================
+
+def target_items_for_model(model_name: str, items: Sequence[Item]) -> List[Item]:
+    """
+    モデルごとの結合対象itemを決める。
+
+    MSM:
+      sfc / sfc-2 は廃止するため除外。
+
+    GSM / LFM:
+      現在の models.py 定義にあるitemをそのまま使う。
+    """
+    if model_name == "MSM":
+        return [item for item in items if item.label not in ("sfc", "sfc-2")]
+
+    return list(items)
+
+
+def build_vertical_ft_attachments(
+    *,
+    model_name: str,
+    cfg: ModelCfg,
+    init_dt: datetime,
+    items: Sequence[Item],
+) -> Tuple[List[Attachment], List[str], bool]:
+    """
+    モデル内の複数itemを取得し、同じFTごとに縦結合する。
+
+    例:
+      LFM FT004:
+        850hPa
+        925hPa
+        975hPa
+        sfc
+        sfc-2
+      を1枚の縦長JPEGへする。
+    """
+    quality = env_int("JPG_QUALITY", 85)
+    padding = env_int("ADV_VERTICAL_PADDING", 12)
+
+    by_ft: Dict[int, List[Tuple[str, Attachment]]] = {}
+    errors: List[str] = []
+
+    for item in items:
+        timed_atts, auth_failed = fetch_item_images_with_ft(
+            model_name=model_name,
+            cfg=cfg,
+            init_dt=init_dt,
+            item=item,
+        )
+
+        if auth_failed:
+            return [], errors, True
+
+        if not timed_atts:
+            msg = f"{model_name} {item.label}: no images"
+            print(f"[WARN] {msg}")
+            errors.append(msg)
+            continue
+
+        for ft, att in timed_atts:
+            by_ft.setdefault(ft, []).append((item.label, att))
+
+    merged: List[Attachment] = []
+
+    for ft in cfg.ft_list:
+        group = by_ft.get(ft, [])
+        if not group:
+            continue
+
+        # 取得順は target_items_for_model() の順を保つ。
+        blobs = [att[1] for _, att in group]
+
+        try:
+            jpg = concat_jpgs_vert(blobs, quality=quality, padding=padding)
+        except Exception as e:
+            msg = f"{model_name} FT{ft:03d}: vertical join failed ({e})"
+            print(f"[WARN] {msg}")
+            errors.append(msg)
+            continue
+
+        labels = "_".join(label.replace("/", "-") for label, _ in group)
+        fn = f"{model_name}_FT{ft:03d}_vertical_{labels}.jpg"
+
+        merged.append((fn, jpg, "image/jpeg"))
+
+    return merged, errors, False
+
+
+# =============================================================================
+# R2
+# =============================================================================
+
+def r2_enabled() -> bool:
+    return env_bool("R2_ENABLE", "1")
+
+
+def upload_model_vertical_images_to_r2(
+    *,
+    run_prefix: str,
+    model_name: str,
+    atts: Sequence[Attachment],
+) -> List[str]:
+    """
+    縦結合済み画像をR2へアップロードする。
+
+    保存先:
+      {run_prefix}/{model_name}/vertical/{filename}
+    """
+    if not r2_enabled():
+        return []
+
+    urls: List[str] = []
+
+    for fn, blob, mime in atts:
+        key = f"{run_prefix}/{model_name}/vertical/{fn}"
+        put_bytes(key, blob, content_type=mime)
+        urls.append(make_url(key))
+
+    return urls
+
+
+# =============================================================================
 # Guidance links
 # =============================================================================
+
 GUIDE_ENABLE = env_bool("GUIDE_ENABLE", "1")
 
 GUIDE_LINKS: List[Tuple[str, str]] = [
@@ -427,23 +543,16 @@ GUIDE_LINKS: List[Tuple[str, str]] = [
 # =============================================================================
 # Discord
 # =============================================================================
-def notify_discord_adv_item(
+
+def notify_discord_adv_model(
     *,
     model_name: str,
-    item_label: str,
     urls: List[str],
     init_dt: datetime,
     rjtd: str,
 ) -> None:
-    """
-    ADV item単位のDiscord投稿。
-
-    Notion URLはここでは出さない。
-    理由:
-      - item投稿ごとにNotion URLを出すと多すぎる
-      - 最後の完了通知だけにNotion URLを出す方が見やすい
-    """
-    if not discord_adv_enabled():
+    """モデル単位でDiscordへ画像投稿する。"""
+    if not discord_adv_enabled() or not urls:
         return
 
     jst = timezone(timedelta(hours=9))
@@ -451,7 +560,7 @@ def notify_discord_adv_item(
 
     post_discord_item_image_urls(
         webhook_url=discord_adv_webhook_url(),
-        title=f"ADV TGV {model_name} / {item_label}",
+        title=f"ADV TGV {model_name} / vertical FT",
         image_urls=urls,
         notion_url="",
         rjtd=rjtd,
@@ -465,29 +574,25 @@ def notify_discord_adv_complete(
     errors: List[str],
     attach_count: int,
 ) -> None:
-    """
-    ADV完了通知。
-
-    すべての画像をR2・Notionに入れ終わった後、
-    最後にNotion URLを表示する。
-    """
+    """完了通知。最後にNotion URLを出す。"""
     if not discord_adv_enabled():
         return
 
     post_discord_complete(
-        webhook_url=...,
+        webhook_url=discord_adv_webhook_url(),
         category="ADV TGV",
-        notion_url="",
-        attach_count=...,
-        errors=...,
+        notion_url=notion_page_url(page_id),
+        attach_count=attach_count,
+        errors=errors,
     )
 
 
 # =============================================================================
 # main
 # =============================================================================
+
 def main() -> None:
-    print("=== Start ADV JMA TGV ===")
+    print("=== Start ADV JMA TGV vertical ===")
 
     errors: List[str] = []
     total_images = 0
@@ -496,7 +601,6 @@ def main() -> None:
     r2_prefix = env_str("R2_PREFIX", "adv-tgv").strip().strip("/")
 
     print(f"[DEBUG] TGV_USE_AUTH={os.getenv('TGV_USE_AUTH','')}")
-    print(f"[DEBUG] JOIN_TRIPLE={os.getenv('JOIN_TRIPLE','')}")
     print(f"[DEBUG] INIT_SEARCH_HOURS={search_hours}")
     print(f"[DEBUG] R2_ENABLE={os.getenv('R2_ENABLE','')}")
     print(f"[DEBUG] NOTION_ENABLE={os.getenv('NOTION_ENABLE','')}")
@@ -504,9 +608,11 @@ def main() -> None:
     print(f"[DEBUG] DISCORD_ADV_WEBHOOK_URL set={bool(discord_adv_webhook_url())}")
     print(f"[DEBUG] R2_PREFIX={r2_prefix}")
     print(f"[DEBUG] GUIDE_ENABLE={GUIDE_ENABLE}")
+    print(f"[DEBUG] ADV_VERTICAL_PADDING={env_int('ADV_VERTICAL_PADDING', 12)}")
 
     groups = load_model_groups()
 
+    # タイトルやrun_prefixの基準はGSMの初期時刻に合わせる。
     init_dt_for_title = find_working_init_dt(
         "GSM",
         groups["GSM"],
@@ -524,13 +630,16 @@ def main() -> None:
     day = init_dt_for_title.strftime("%Y%m%d")
     run_prefix = f"{r2_prefix}/{day}/RJTD_{rjtd_for_title}"
 
-    title = f"ADV TGV / {init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
+    title = (
+        "ADV TGV vertical / "
+        f"{init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
+    )
 
     page_id = create_db_row(
         title=title,
         category="ADV",
         init_jst_iso=init_jst_iso,
-        memo="",
+        memo="同時刻FTごとに縦結合",
         rjtd=rjtd_for_title,
         prefix=run_prefix,
         r2_url="",
@@ -542,7 +651,6 @@ def main() -> None:
 
     if GUIDE_ENABLE:
         append_heading(page_id, "ガイダンス（リンク）", level=2)
-
         for caption, url in GUIDE_LINKS:
             append_bookmark(page_id, url, caption=caption)
 
@@ -551,7 +659,7 @@ def main() -> None:
     for model_name in ("GSM", "MSM", "LFM"):
         cfg: ModelCfg = groups[model_name]
 
-        print(f"\n--- Fetch model: {model_name} items={len(cfg.items)} ---")
+        print(f"\n--- Fetch model vertical: {model_name} items={len(cfg.items)} ---")
 
         try:
             init_dt = find_working_init_dt(
@@ -559,7 +667,6 @@ def main() -> None:
                 cfg,
                 max_back_hours=search_hours,
             )
-
         except Exception as e:
             msg = f"{model_name}: INIT/auth failed ({type(e).__name__})"
             print(f"[NG] {msg}: {e}")
@@ -567,69 +674,77 @@ def main() -> None:
             continue
 
         rjtd = fmt_rjtd(init_dt, cfg.rjtd_minute)
+        items = target_items_for_model(model_name, cfg.items)
+
+        print(
+            "[INFO] vertical items: "
+            + ", ".join(item.label for item in items)
+        )
+
+        atts, model_errors, auth_failed = build_vertical_ft_attachments(
+            model_name=model_name,
+            cfg=cfg,
+            init_dt=init_dt,
+            items=items,
+        )
+
+        errors.extend(model_errors)
+
+        if auth_failed:
+            msg = f"{model_name}: auth error while fetching images"
+            print(f"[NG] {msg}")
+            errors.append(msg)
+            continue
+
+        if not atts:
+            msg = f"{model_name}: no vertical images"
+            print(f"[WARN] {msg}")
+            errors.append(msg)
+            continue
+
+        urls = upload_model_vertical_images_to_r2(
+            run_prefix=run_prefix,
+            model_name=model_name,
+            atts=atts,
+        )
+
+        if not urls:
+            msg = f"{model_name}: R2 urls empty"
+            print(f"[WARN] {msg}")
+            errors.append(msg)
+            continue
+
+        total_images += len(urls)
+
+        if first_cover_url is None:
+            first_cover_url = urls[0]
+            set_page_cover(page_id, first_cover_url)
 
         append_heading(page_id, model_name, level=2)
-        model_parent: str = page_id
 
-        for item in cfg.items:
-            atts, auth_failed = fetch_item_images(
-                model_name,
-                cfg,
-                init_dt,
-                item,
-            )
+        item_title = f"{model_name} vertical FT  ({len(urls)} images)"
+        toggle_id = append_toggle(page_id, item_title)
 
-            if auth_failed:
-                msg = f"{model_name}: auth error while fetching {item.label}"
-                print(f"[NG] {msg}")
-                errors.append(msg)
-                break
+        if toggle_id:
+            append_images(toggle_id, urls, chunk=30)
+        else:
+            append_images(page_id, urls, chunk=30)
 
-            if not atts:
-                print(f"[WARN] {model_name} {item.label}: no images")
-                continue
+        print(f"[OK] R2+Notion vertical: {model_name} urls={len(urls)}")
 
-            urls = upload_item_images_to_r2(
-                run_prefix=run_prefix,
+        try:
+            notify_discord_adv_model(
                 model_name=model_name,
-                item_label=item.label,
-                atts=atts,
+                urls=urls,
+                init_dt=init_dt,
+                rjtd=rjtd,
             )
 
-            if not urls:
-                print(f"[WARN] {model_name} {item.label}: R2 urls empty")
-                continue
+            if discord_adv_enabled():
+                print(f"[OK] Discord model sent: {model_name}")
 
-            total_images += len(urls)
-
-            if first_cover_url is None:
-                first_cover_url = urls[0]
-                set_page_cover(page_id, first_cover_url)
-
-            item_title = f"{item.label}  ({len(urls)} images)"
-            item_toggle_id = append_toggle(model_parent, item_title)
-
-            if item_toggle_id:
-                append_images(item_toggle_id, urls, chunk=30)
-            else:
-                append_images(model_parent, urls, chunk=30)
-
-            print(f"[OK] R2+Notion: {model_name} {item.label} urls={len(urls)}")
-
-            try:
-                notify_discord_adv_item(
-                    model_name=model_name,
-                    item_label=item.label,
-                    urls=urls,
-                    init_dt=init_dt,
-                    rjtd=rjtd,
-                )
-
-                if discord_adv_enabled():
-                    print(f"[OK] Discord item sent: {model_name} {item.label}")
-
-            except Exception as e:
-                print(f"[WARN] Discord item send failed: {model_name} {item.label}: {e}")
+        except Exception as e:
+            print(f"[WARN] Discord model send failed: {model_name}: {e}")
 
     try:
         notify_discord_adv_complete(
@@ -644,7 +759,7 @@ def main() -> None:
     except Exception as e:
         print(f"[WARN] Discord complete send failed: {e}")
 
-    print("\n=== Done ADV JMA TGV ===")
+    print("\n=== Done ADV JMA TGV vertical ===")
 
 
 if __name__ == "__main__":
