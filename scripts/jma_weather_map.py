@@ -319,14 +319,6 @@ def resize_to_width(img: Image.Image, width: int) -> Image.Image:
 
 
 def crop_region(img: Image.Image, region: str) -> Image.Image:
-    """
-    PDF画像から必要な領域を切り出す。
-
-    full
-    left / right
-    top / bottom
-    left_top / left_bottom / right_top / right_bottom
-    """
     img = img.convert("RGB")
     w, h = img.size
     mx = w // 2
@@ -382,10 +374,6 @@ def combine_comp_grid(
     padding_y: int = 18,
     margin: int = 16,
 ) -> Image.Image:
-    """
-    COMP12 / COMP36 / COMP72 と同じ思想の2列×4段合成。
-    すべてのセルを同じ幅にそろえて配置する。
-    """
     resized_rows: List[Tuple[Image.Image, Image.Image]] = []
 
     for left, right in rows:
@@ -445,6 +433,37 @@ def fetch_pdf_region(
         return crop_region(img, region)
     except Exception as e:
         errors.append(f"{name}: pdf crop failed ({e})")
+        return None
+
+
+def fetch_png_region(
+    *,
+    name: str,
+    url: str,
+    region: str,
+    errors: List[str],
+    lm_dts_all: List[datetime],
+) -> Optional[Image.Image]:
+    if not url:
+        errors.append(f"{name}: png url is empty")
+        return None
+
+    blob, last_mod, st, ct = fetch_binary(name, url)
+
+    if last_mod:
+        dt = _httpdate_to_utc_dt(last_mod)
+        if dt:
+            lm_dts_all.append(dt)
+
+    if not blob:
+        errors.append(f"{name}: download failed (HTTP={st})")
+        return None
+
+    try:
+        img = png_bytes_to_pil(blob)
+        return crop_region(img, region)
+    except Exception as e:
+        errors.append(f"{name}: png crop failed ({e})")
         return None
 
 
@@ -546,28 +565,75 @@ def add_vertical_pdf_combo(
         errors.append(f"{combo_name}: combine failed ({e})")
 
 
-def add_comp_style_grid(
+def fetch_mixed_region(
+    *,
+    kind: str,
+    name: str,
+    url: str,
+    region: str,
+    errors: List[str],
+    lm_dts_all: List[datetime],
+) -> Optional[Image.Image]:
+    if kind == "pdf":
+        return fetch_pdf_region(
+            name=name,
+            url=url,
+            region=region,
+            errors=errors,
+            lm_dts_all=lm_dts_all,
+        )
+
+    if kind == "png":
+        return fetch_png_region(
+            name=name,
+            url=url,
+            region=region,
+            errors=errors,
+            lm_dts_all=lm_dts_all,
+        )
+
+    errors.append(f"{name}: unknown kind {kind}")
+    return None
+
+
+def add_comp_style_grid_mixed(
     *,
     images: List[Attachment],
     errors: List[str],
     lm_dts_all: List[datetime],
     combo_name: str,
-    rows: List[Tuple[Tuple[str, str, str], Tuple[str, str, str]]],
+    rows: List[
+        Tuple[
+            Tuple[str, str, str, str],
+            Tuple[str, str, str, str],
+        ]
+    ],
 ) -> None:
+    """
+    COMP風 2列×4段グリッド。
+
+    spec:
+      (kind, name, url, region)
+
+    kind:
+      pdf / png
+    """
     out_rows: List[Tuple[Image.Image, Image.Image]] = []
 
     for left_spec, right_spec in rows:
-        left_name, left_url, left_region = left_spec
-        right_name, right_url, right_region = right_spec
+        left_kind, left_name, left_url, left_region = left_spec
+        right_kind, right_name, right_url, right_region = right_spec
 
-        left_img = fetch_pdf_region(
+        left_img = fetch_mixed_region(
+            kind=left_kind,
             name=left_name,
             url=left_url,
             region=left_region,
             errors=errors,
             lm_dts_all=lm_dts_all,
         )
-        right_img = fetch_pdf_region(
+        right_img = fetch_mixed_region(
+            kind=right_kind,
             name=right_name,
             url=right_url,
             region=right_region,
@@ -606,6 +672,7 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     # ① 地上天気図
     # -------------------------------------------------------------------------
     surface_targets = build_surface_weather_map_targets()
+    surface_now_url = surface_targets[0][1] if surface_targets else ""
 
     for base_name, url in surface_targets:
         add_png_as_jpg(
@@ -654,33 +721,39 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     # -------------------------------------------------------------------------
     # ④ COMP風：T=00-12
     #
-    # 2列×4段
-    # 左：解析/初期値側
-    # 右：12時間予想側
+    # 左列:
+    #   1. AXFE578 上段
+    #   2. 地上実況天気図 PNG
+    #   3. AUPQ35 下段
+    #   4. AXFE578 下段
     #
-    # ※AUPQ35/AUPQ78は、必要に応じて top/bottom を入れ替え可能。
+    # 右列:
+    #   1. FXFE5782 左上（12h）
+    #   2. FXFE502 左（12h）
+    #   3. FXFE5782 左下（12h）
+    #   4. FXFE5782 左下（12h）
     # -------------------------------------------------------------------------
-    add_comp_style_grid(
+    add_comp_style_grid_mixed(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
         combo_name=f"forecast_00_12_{run_utc}",
         rows=[
             (
-                (f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc), "bottom"),
-                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_top"),
+                ("pdf", f"axfe578_{run_utc}", nwp_pdf_url("axfe578", run_utc), "top"),
+                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_top"),
             ),
             (
-                (f"surface_now_as_analysis_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "left"),
-                (f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "left"),
+                ("png", "surface_now_for_comp", surface_now_url, "full"),
+                ("pdf", f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "left"),
             ),
             (
-                (f"aupq78_{run_utc}", nwp_pdf_url("aupq78", run_utc), "top"),
-                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_bottom"),
+                ("pdf", f"aupq35_{run_utc}", nwp_pdf_url("aupq35", run_utc), "bottom"),
+                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_bottom"),
             ),
             (
-                (f"axfe578_{run_utc}", nwp_pdf_url("axfe578", run_utc), "bottom"),
-                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_bottom"),
+                ("pdf", f"axfe578_{run_utc}", nwp_pdf_url("axfe578", run_utc), "bottom"),
+                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "left_bottom"),
             ),
         ],
     )
@@ -688,27 +761,27 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     # -------------------------------------------------------------------------
     # ⑤ COMP風：T=24-36
     # -------------------------------------------------------------------------
-    add_comp_style_grid(
+    add_comp_style_grid_mixed(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
         combo_name=f"forecast_24_36_{run_utc}",
         rows=[
             (
-                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_top"),
-                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_top"),
+                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_top"),
+                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_top"),
             ),
             (
-                (f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "right"),
-                (f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "left"),
+                ("pdf", f"fxfe502_{run_utc}", nwp_pdf_url("fxfe502", run_utc), "right"),
+                ("pdf", f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "left"),
             ),
             (
-                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
-                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
+                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
+                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
             ),
             (
-                (f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
-                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
+                ("pdf", f"fxfe5782_{run_utc}", nwp_pdf_url("fxfe5782", run_utc), "right_bottom"),
+                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "left_bottom"),
             ),
         ],
     )
@@ -716,27 +789,27 @@ def build_outputs(run_utc: str) -> Tuple[List[Attachment], List[str], Optional[d
     # -------------------------------------------------------------------------
     # ⑥ COMP風：T=48-72
     # -------------------------------------------------------------------------
-    add_comp_style_grid(
+    add_comp_style_grid_mixed(
         images=images,
         errors=errors,
         lm_dts_all=lm_dts_all,
         combo_name=f"forecast_48_72_{run_utc}",
         rows=[
             (
-                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_top"),
-                (f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "top"),
+                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_top"),
+                ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "top"),
             ),
             (
-                (f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "right"),
-                (f"fxfe507_{run_utc}", nwp_pdf_url("fxfe507", run_utc), "top"),
+                ("pdf", f"fxfe504_{run_utc}", nwp_pdf_url("fxfe504", run_utc), "right"),
+                ("pdf", f"fxfe507_{run_utc}", nwp_pdf_url("fxfe507", run_utc), "top"),
             ),
             (
-                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
-                (f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
+                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
+                ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
             ),
             (
-                (f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
-                (f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
+                ("pdf", f"fxfe5784_{run_utc}", nwp_pdf_url("fxfe5784", run_utc), "right_bottom"),
+                ("pdf", f"fxfe577_{run_utc}", nwp_pdf_url("fxfe577", run_utc), "bottom"),
             ),
         ],
     )
