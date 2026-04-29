@@ -41,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from r2_utils import put_bytes, make_url
+from module.utils.r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
     notion_enabled,
     create_db_row,
