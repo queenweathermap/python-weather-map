@@ -34,7 +34,7 @@ from typing import List, Tuple, Optional, Sequence
 import requests
 from PIL import Image
 
-from r2_utils import put_bytes, make_url
+from module.utils.r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
     create_db_row,
     set_page_cover,
