@@ -2,20 +2,15 @@
 # =============================================================================
 # module/jobs/weather_map.py
 #
-# Weathercaster / JMA Weather Map:
-#   Weathercaster PDF / GIF → PNG/JPG → R2 → Notion DB → Discord
+# Weathercaster / JMA Weather Map
+# Custom Layout PNG Version / 5 outputs explicit
 #
-# 今回の方針:
-#   - ファイル名は weather_map.py のまま
-#   - workflow / import / secrets は変更しない
-#   - 8000x6300px の「全部のせ」PNGを1枚生成
-#   - ASAS / FSAS24 / FSAS48 は上段
-#   - COMP12 / COMP36 / COMP72 は上段実況の下側を含むメイン領域へ配置
-#   - AUPA20 / AUPA25 / AUPN30 は縦結合せず、左列に単体配置
-#   - FXJP854 はページを上下段に分けて横方向へ配置
-#
-# 出力:
-#   ALL_IN_ONE_WEATHER_MAP.png
+# 出力は必ず次の5枚を基本にする:
+#   ① 01_EMAGRAM.png
+#   ② 02_AXJP140.png
+#   ③ 03_AUPA20.png
+#   ④ 04_LAYOUT_4_WEEKLY.png
+#   ⑤ 05_LAYOUT_5_DASHBOARD.png
 # =============================================================================
 
 from __future__ import annotations
@@ -49,35 +44,45 @@ from module.utils.discord_utils import (
 # 基本設定
 # =============================================================================
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
-
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
-JPEG_DPI = int(os.environ.get("JPEG_DPI", "220"))
-JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "85"))
+# 既存workflowの JPEG_DPI をそのまま読めるようにしつつ、内部ではPDF_DPIとして扱う
+PDF_DPI = int(os.environ.get("PDF_DPI", os.environ.get("JPEG_DPI", "220")))
 
-# 全部のせPNG設定
-ALL_IN_ONE_ENABLE = os.environ.get("ALL_IN_ONE_ENABLE", "1").lower() in ("1", "true", "yes", "on")
-ALL_IN_ONE_WIDTH = int(os.environ.get("ALL_IN_ONE_WIDTH", "8000"))
-ALL_IN_ONE_HEIGHT = int(os.environ.get("ALL_IN_ONE_HEIGHT", "6300"))
-ALL_IN_ONE_FILENAME = os.environ.get("ALL_IN_ONE_FILENAME", "ALL_IN_ONE_WEATHER_MAP.png").strip()
+PNG_OPTIMIZE = os.environ.get("PNG_OPTIMIZE", "1").lower() in ("1", "true", "yes", "on")
+LAYOUT_GAP = int(os.environ.get("LAYOUT_GAP", "24"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
 
 WEATHERCASTER_USER = os.environ.get("WEATHERCASTER_USER", "").strip()
 WEATHERCASTER_PASS = os.environ.get("WEATHERCASTER_PASS", "").strip()
-WEATHERCASTER_DRIVE_FOLDER_ID = os.environ.get("WEATHERCASTER_DRIVE_FOLDER_ID", "").strip()
 
 Attachment = Tuple[str, bytes, str]
 
+OUTPUT_TITLES = [
+    "① エマグラム",
+    "② AXJP140",
+    "③ AUPA20",
+    "④ 週間4列結合",
+    "⑤ 全部入り",
+]
+
+OUTPUT_FILENAMES = [
+    "01_EMAGRAM",
+    "02_AXJP140",
+    "03_AUPA20",
+    "04_LAYOUT_4_WEEKLY",
+    "05_LAYOUT_5_DASHBOARD",
+]
+
 
 # =============================================================================
-# Discord設定
+# Discord / 関連リンク設定
 # =============================================================================
 def env_bool(name: str, default: str = "0") -> bool:
-    v = os.getenv(name, default).strip().lower()
-    return v in ("1", "true", "yes", "on")
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 
 def discord_jma_webhook_url() -> str:
@@ -101,17 +106,10 @@ def post_discord_text(content: str) -> None:
         print(f"[WARN] Discord text send failed: {e}")
 
 
-# =============================================================================
-# エマグラム
-# =============================================================================
 EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 EMAGRAM_URL = os.environ.get("EMAGRAM_URL", "https://bk-pro.jp/images/ema/ema_aki_00.gif").strip()
 EMAGRAM_FILENAME = os.environ.get("EMAGRAM_FILENAME", "ema_aki_00.gif").strip()
 
-
-# =============================================================================
-# 関連リンク
-# =============================================================================
 DISCORD_LINKS = [
     ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
     ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
@@ -149,6 +147,7 @@ def issue_base_jst() -> datetime:
     n = now_jst()
     if 10 <= n.hour < 20:
         return n.replace(hour=9, minute=0, second=0, microsecond=0)
+
     base = n.replace(hour=21, minute=0, second=0, microsecond=0)
     if n.hour < 10:
         base = base - timedelta(days=1)
@@ -178,263 +177,228 @@ def weathercaster_session() -> requests.Session:
     return session
 
 
-def weathercaster_pdf_url(name: str) -> str:
-    return f"{BASE_URL}/{name}.pdf"
-
-
-def fetch_weathercaster_pdf(session: requests.Session, name: str) -> Optional[bytes]:
-    url = weathercaster_pdf_url(name)
+def fetch_pdf_pages(session: requests.Session, name: str) -> List[Image.Image]:
+    """PDFをダウンロードして全ページのPIL Imageリストを返す"""
+    url = f"{BASE_URL}/{name}.pdf"
     try:
         r = session.get(url, timeout=60, allow_redirects=True)
         ct = (r.headers.get("Content-Type") or "").lower()
+
         if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
-            return r.content
+            return [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+
         print(f"[NG] {name}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
-        return None
     except Exception as e:
-        print(f"[ERR] {name}: {e}")
-        return None
+        print(f"[ERR] fetch {name}: {e}")
+
+    return []
 
 
 def fetch_image_content(url: str) -> Optional[bytes]:
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0"}, timeout=30)
+        r = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0"},
+            timeout=30,
+        )
         if r.status_code == 200:
             return r.content
         print(f"[NG] image HTTP {r.status_code}: {url}")
-        return None
     except Exception as e:
-        print(f"[ERR] image: {e} ({url})")
+        print(f"[ERR] image fetch: {e} ({url})")
+
+    return None
+
+
+# =============================================================================
+# 共通画像処理
+# =============================================================================
+def pil_to_attachment(img: Image.Image, filename_without_ext: str) -> Attachment:
+    """PIL ImageをPNG添付に変換する。PDF由来の細線・文字を保つためJPEG圧縮は使わない。"""
+    buf = io.BytesIO()
+    img = img.convert("RGB")
+    img.save(buf, format="PNG", optimize=PNG_OPTIMIZE)
+    return (f"{filename_without_ext}.png", buf.getvalue(), "image/png")
+
+
+def rename_attachment(att: Attachment, filename_without_ext: str) -> Attachment:
+    _old_name, data, mime = att
+    return (f"{filename_without_ext}.png", data, mime)
+
+
+def append_output(images: List[Attachment], att: Attachment, index: int) -> None:
+    """
+    出力5枚を明示的に追加する。
+    GitHub Actionsログ・R2・Discordで何枚目か分かるよう、ファイル名を固定する。
+    """
+    fixed = rename_attachment(att, OUTPUT_FILENAMES[index - 1])
+    images.append(fixed)
+    print(f"[OUT {index:02d}] {fixed[0]}")
+
+
+def get_first_page_or_none(pages: List[Image.Image]) -> Optional[Image.Image]:
+    return pages[0] if pages else None
+
+
+def combine_vertical(images: List[Image.Image], *, gap: int = 0) -> Optional[Image.Image]:
+    valid = [im.convert("RGB") for im in images if im is not None]
+    if not valid:
         return None
 
+    w = max(im.width for im in valid)
+    h = sum(im.height for im in valid) + gap * (len(valid) - 1)
+
+    canvas = Image.new("RGB", (w, h), "white")
+    y = 0
+    for im in valid:
+        canvas.paste(im, ((w - im.width) // 2, y))
+        y += im.height + gap
+
+    return canvas
+
+
+def combine_horizontal(images: List[Image.Image], *, gap: int = 0, valign: str = "top") -> Optional[Image.Image]:
+    valid = [im.convert("RGB") for im in images if im is not None]
+    if not valid:
+        return None
+
+    w = sum(im.width for im in valid) + gap * (len(valid) - 1)
+    h = max(im.height for im in valid)
+
+    canvas = Image.new("RGB", (w, h), "white")
+    x = 0
+    for im in valid:
+        if valign == "center":
+            y = (h - im.height) // 2
+        else:
+            y = 0
+        canvas.paste(im, (x, y))
+        x += im.width + gap
+
+    return canvas
+
 
 # =============================================================================
-# 画像変換
+# 特殊画像生成関数
 # =============================================================================
-def pil_to_attachment(img: Image.Image, base_filename: str) -> Attachment:
-    buf = io.BytesIO()
-    img = img.convert("RGB")
-    img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-    return (f"{base_filename}.jpg", buf.getvalue(), "image/jpeg")
-
-
-def pil_to_png_attachment(img: Image.Image, filename: str) -> Attachment:
-    buf = io.BytesIO()
-    img = img.convert("RGB")
-    img.save(buf, format="PNG", optimize=True)
-    return (filename, buf.getvalue(), "image/png")
-
-
-def pdf_bytes_to_pil_images(pdf_bytes: bytes, *, force_all: bool = False) -> List[Image.Image]:
-    pages = convert_from_bytes(pdf_bytes, dpi=JPEG_DPI)
+def process_fxjp854_split(pages: List[Image.Image]) -> Optional[Image.Image]:
+    """FXJP854の1枚目を上下に分割し、横並びにする"""
     if not pages:
-        return []
-    if force_all:
-        return [p.convert("RGB") for p in pages]
-    return [pages[0].convert("RGB")]
+        return None
 
-
-def pdf_bytes_to_jpgs(pdf_bytes: bytes, base_filename: str, *, force_all: bool = False) -> List[Attachment]:
-    pages = pdf_bytes_to_pil_images(pdf_bytes, force_all=force_all)
-    out: List[Attachment] = []
-    for idx, page in enumerate(pages, start=1):
-        suffix = f"_p{idx:02d}" if force_all else ""
-        out.append(pil_to_attachment(page, f"{base_filename}{suffix}"))
-    return out
-
-
-def gif_to_jpg_attachment(gif_bytes: bytes, base_filename: str) -> Attachment:
-    with Image.open(io.BytesIO(gif_bytes)) as im:
-        im.seek(0)
-        return pil_to_attachment(im.convert("RGB"), base_filename)
-
-
-def fit_image(img: Image.Image, box_w: int, box_h: int, *, allow_upscale: bool = True) -> Image.Image:
-    """余白をそろえるため、指定ボックス内に縦横比維持で収める。"""
-    img = img.convert("RGB")
-    scale = min(box_w / img.width, box_h / img.height)
-    if not allow_upscale:
-        scale = min(scale, 1.0)
-    new_w = max(1, int(img.width * scale))
-    new_h = max(1, int(img.height * scale))
-    return img.resize((new_w, new_h), Image.LANCZOS)
-
-
-def paste_fit(
-    canvas: Image.Image,
-    img: Image.Image,
-    box: Tuple[int, int, int, int],
-    *,
-    anchor: str = "center",
-) -> None:
-    x, y, w, h = box
-    fitted = fit_image(img, w, h)
-
-    if anchor == "top":
-        px = x + (w - fitted.width) // 2
-        py = y
-    elif anchor == "left_top":
-        px = x
-        py = y
-    else:
-        px = x + (w - fitted.width) // 2
-        py = y + (h - fitted.height) // 2
-
-    canvas.paste(fitted, (px, py))
-
-
-def crop_top_bottom_halves(img: Image.Image) -> Tuple[Image.Image, Image.Image]:
-    """FXJP854など、1ページ内の上下段を分ける。"""
-    img = img.convert("RGB")
+    img = pages[0].convert("RGB")
     w, h = img.size
-    mid = h // 2
-    return img.crop((0, 0, w, mid)), img.crop((0, mid, w, h))
+    mid_y = h // 2
+
+    top_part = img.crop((0, 0, w, mid_y))
+    bottom_part = img.crop((0, mid_y, w, h))
+
+    return combine_horizontal([top_part, bottom_part], gap=LAYOUT_GAP, valign="top")
 
 
-def write_attachment_to_tmp(att: Attachment) -> None:
-    fname, data, _ = att
-    try:
-        with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
-            f.write(data)
-    except Exception:
-        pass
-
-
-def fetch_pdf_images(
-    *,
-    session: requests.Session,
-    name: str,
-    errors: List[str],
-    force_all: bool = False,
-) -> List[Image.Image]:
-    pdf = fetch_weathercaster_pdf(session, name)
-    if not pdf:
-        errors.append(f"{name}: download failed")
-        return []
-    try:
-        imgs = pdf_bytes_to_pil_images(pdf, force_all=force_all)
-        if not imgs:
-            errors.append(f"{name}: conversion failed")
-        return imgs
-    except Exception as e:
-        errors.append(f"{name}: conversion failed ({e})")
-        return []
-
-
-def add_pdf_item(*, session: requests.Session, images: List[Attachment], errors: List[str], name: str, force_all: bool = False) -> None:
-    pdf = fetch_weathercaster_pdf(session, name)
-    if not pdf:
-        errors.append(f"{name}: download failed")
-        return
-    try:
-        atts = pdf_bytes_to_jpgs(pdf, name, force_all=force_all)
-        if not atts:
-            errors.append(f"{name}: conversion failed")
-            return
-        for att in atts:
-            write_attachment_to_tmp(att)
-            images.append(att)
-    except Exception as e:
-        errors.append(f"{name}: conversion failed ({e})")
-
-
-# =============================================================================
-# 全部のせレイアウト
-# =============================================================================
-def make_all_in_one_canvas(imgs: dict[str, List[Image.Image]], issue_dt_jst: datetime) -> Attachment:
+def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
-    8000x6300px固定の全部のせPNG。
-    図2のように、左列に解説/数値、右側に実況・予想・週間・FXJPを敷き詰める。
+    ④ 週間 4列結合
+      1列目: SKAISETU 全ページ縦結合
+      2列目: FEFE19
+      3列目: FXXN519
+      4列目: FZCX50
     """
-    W = ALL_IN_ONE_WIDTH
-    H = ALL_IN_ONE_HEIGHT
-    canvas = Image.new("RGB", (W, H), "white")
+    print("-> Building Layout 4 (Weekly Multicolumn)")
 
-    # 余白は図2に近く、広すぎない設定
-    margin = 150
-    gap = 34
+    skai_pages = fetch_pdf_pages(session, "SKAISETU")
+    col1_img = combine_vertical(skai_pages, gap=LAYOUT_GAP) if skai_pages else None
+    if col1_img is None:
+        errors.append("Layout4: SKAISETU download/conversion failed")
 
-    left_w = 1550
-    main_x = margin + left_w + gap
-    main_w = W - main_x - margin
+    col2_img = get_first_page_or_none(fetch_pdf_pages(session, "FEFE19"))
+    col3_img = get_first_page_or_none(fetch_pdf_pages(session, "FXXN519"))
+    col4_img = get_first_page_or_none(fetch_pdf_pages(session, "FZCX50"))
 
-    top_h = 1450
-    start_y = margin
+    if col2_img is None:
+        errors.append("Layout4: FEFE19 failed")
+    if col3_img is None:
+        errors.append("Layout4: FXXN519 failed")
+    if col4_img is None:
+        errors.append("Layout4: FZCX50 failed")
 
-    # 左上: 解説。SKAISETU優先、なければTKAISETU、なければエマグラム
-    commentary = None
-    for key in ("SKAISETU", "TKAISETU", "EMAGRAM"):
-        if imgs.get(key):
-            commentary = imgs[key][0]
-            break
-    if commentary:
-        paste_fit(canvas, commentary, (margin, start_y, left_w, top_h), anchor="top")
+    canvas = combine_horizontal([col1_img, col2_img, col3_img, col4_img], gap=LAYOUT_GAP, valign="top")
+    if canvas is None:
+        return None
 
-    # 上段: 実況 ASAS / FSAS24 / FSAS48
-    top_cell_w = (main_w - gap * 2) // 3
-    for i, key in enumerate(["ASAS", "FSAS24", "FSAS48"]):
-        if imgs.get(key):
-            paste_fit(canvas, imgs[key][0], (main_x + i * (top_cell_w + gap), start_y, top_cell_w, top_h), anchor="center")
+    return pil_to_attachment(canvas, "LAYOUT_4_WEEKLY")
 
-    # 中段以下
-    grid_y = start_y + top_h + gap
-    grid_h = H - grid_y - margin
 
-    # 左列: AUPA20 / AUPA25 / AUPN30 / AXJP140 を縦結合せず単体で積む
-    left_keys = ["AUPA20", "AUPA25", "AUPN30", "AXJP140"]
-    left_cell_h = (grid_h - gap * (len(left_keys) - 1)) // len(left_keys)
-    for i, key in enumerate(left_keys):
-        if imgs.get(key):
-            paste_fit(canvas, imgs[key][0], (margin, grid_y + i * (left_cell_h + gap), left_w, left_cell_h), anchor="center")
+def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
+    """
+    ⑤ 全部入り
+      左列: TKAISETU / AUPQ35 / UPPQ78
+      上段: ASAS / FSAS24 / FSAS48
+      中段: COMP12 / COMP36 / COMP72
+      下段: FXJP854（上下分割→横並び→中央配置）
+    """
+    print("-> Building Layout 5 (Dashboard)")
 
-    # 右側メイン: 6列 x 5段を基本に敷き詰める
-    cols = 6
-    rows = 5
-    cell_w = (main_w - gap * (cols - 1)) // cols
-    cell_h = (grid_h - gap * (rows - 1)) // rows
+    # 左列
+    tkai = get_first_page_or_none(fetch_pdf_pages(session, "TKAISETU"))
+    aupq35 = get_first_page_or_none(fetch_pdf_pages(session, "AUPQ35"))
+    uppq78 = get_first_page_or_none(fetch_pdf_pages(session, "UPPQ78"))
+    left_canvas = combine_vertical([tkai, aupq35, uppq78], gap=LAYOUT_GAP)
 
-    cells: List[Image.Image] = []
+    # 右側・上段
+    asas = get_first_page_or_none(fetch_pdf_pages(session, "ASAS"))
+    fsas24 = get_first_page_or_none(fetch_pdf_pages(session, "FSAS24"))
+    fsas48 = get_first_page_or_none(fetch_pdf_pages(session, "FSAS48"))
+    top_canvas = combine_horizontal([asas, fsas24, fsas48], gap=LAYOUT_GAP, valign="top")
 
-    # 1段目〜: COMP12 / COMP36 / COMP72 はページが複数あれば全部使う
-    for key in ["COMP12", "COMP36", "COMP72"]:
-        cells.extend(imgs.get(key, []))
+    # 右側・中段
+    comp12 = get_first_page_or_none(fetch_pdf_pages(session, "COMP12"))
+    comp36 = get_first_page_or_none(fetch_pdf_pages(session, "COMP36"))
+    comp72 = get_first_page_or_none(fetch_pdf_pages(session, "COMP72"))
+    mid_canvas = combine_horizontal([comp12, comp36, comp72], gap=LAYOUT_GAP, valign="top")
 
-    # 週間
-    for key in ["FXXN519", "FZCX50", "FEFE19"]:
-        cells.extend(imgs.get(key, []))
+    # 右側・下段
+    fxjp854 = process_fxjp854_split(fetch_pdf_pages(session, "FXJP854"))
 
-    # 解説の2枚目以降があれば入れる
-    for key in ["SKAISETU", "TKAISETU"]:
-        if len(imgs.get(key, [])) > 1:
-            cells.extend(imgs[key][1:])
+    if left_canvas is None:
+        errors.append("Layout5: Left column parts missing")
+    if top_canvas is None:
+        errors.append("Layout5: Top row parts missing")
+    if mid_canvas is None:
+        errors.append("Layout5: Middle row parts missing")
+    if fxjp854 is None:
+        errors.append("Layout5: FXJP854 missing")
 
-    # FXJP854は上下段に分け、それぞれ横に並ぶように最後の段へ入れる
-    fx_imgs: List[Image.Image] = []
-    for im in imgs.get("FXJP854", []):
-        top, bottom = crop_top_bottom_halves(im)
-        fx_imgs.extend([top, bottom])
+    right_rows = [top_canvas, mid_canvas, fxjp854]
+    valid_rows = [row for row in right_rows if row is not None]
+    if left_canvas is None and not valid_rows:
+        return None
 
-    # まず通常セルを詰める。最後の1段はFXJP用に空ける。
-    normal_capacity = cols * (rows - 1)
-    normal_cells = cells[:normal_capacity]
-    for idx, im in enumerate(normal_cells):
-        r = idx // cols
-        c = idx % cols
-        paste_fit(canvas, im, (main_x + c * (cell_w + gap), grid_y + r * (cell_h + gap), cell_w, cell_h), anchor="center")
+    right_w = max((row.width for row in valid_rows), default=0)
+    right_h = sum(row.height for row in valid_rows) + LAYOUT_GAP * max(0, len(valid_rows) - 1)
 
-    # FXJP854: 下段で横結合気味に配置。2枚なら半幅ずつ、4枚なら4分割。
-    fx_y = grid_y + (rows - 1) * (cell_h + gap)
-    if fx_imgs:
-        n = min(len(fx_imgs), 4)
-        fx_w = (main_w - gap * (n - 1)) // n
-        for i, im in enumerate(fx_imgs[:n]):
-            paste_fit(canvas, im, (main_x + i * (fx_w + gap), fx_y, fx_w, cell_h), anchor="center")
+    right_canvas = Image.new("RGB", (right_w, right_h), "white")
+    y = 0
+    for row in valid_rows:
+        x = (right_w - row.width) // 2 if row is fxjp854 else 0
+        right_canvas.paste(row, (x, y))
+        y += row.height + LAYOUT_GAP
 
-    return pil_to_png_attachment(canvas, ALL_IN_ONE_FILENAME)
+    if left_canvas is None:
+        return pil_to_attachment(right_canvas, "LAYOUT_5_DASHBOARD")
+
+    final_w = left_canvas.width + LAYOUT_GAP + right_canvas.width
+    final_h = max(left_canvas.height, right_canvas.height)
+
+    final_canvas = Image.new("RGB", (final_w, final_h), "white")
+    final_canvas.paste(left_canvas, (0, 0))
+    final_canvas.paste(right_canvas, (left_canvas.width + LAYOUT_GAP, 0))
+
+    return pil_to_attachment(final_canvas, "LAYOUT_5_DASHBOARD")
 
 
 # =============================================================================
-# 出力構築
+# メイン出力構築
 # =============================================================================
 def build_outputs() -> Tuple[List[Attachment], List[str]]:
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -444,81 +408,69 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
     images: List[Attachment] = []
     errors: List[str] = []
 
-    if ALL_IN_ONE_ENABLE:
-        collected: dict[str, List[Image.Image]] = {}
-
-        # エマグラム
-        if EMAGRAM_ENABLE and EMAGRAM_URL:
-            blob = fetch_image_content(EMAGRAM_URL)
-            if blob:
-                try:
-                    with Image.open(io.BytesIO(blob)) as im:
-                        im.seek(0)
-                        collected["EMAGRAM"] = [im.convert("RGB")]
-                except Exception as e:
-                    errors.append(f"EMAGRAM: conversion failed ({e})")
-            else:
-                errors.append("EMAGRAM: download failed")
-
-        # 全部のせに使う素材
-        for name in [
-            "SKAISETU", "TKAISETU",
-            "ASAS", "FSAS24", "FSAS48",
-            "AUPA20", "AUPA25", "AUPN30", "AXJP140",
-            "COMP12", "COMP36", "COMP72",
-            "FXXN519", "FZCX50", "FEFE19",
-            "FXJP854",
-        ]:
-            # 解説とCOMP/FXJPは複数ページがあれば使えるように全ページ変換
-            force_all = name in ("SKAISETU", "TKAISETU", "COMP12", "COMP36", "COMP72", "FXJP854")
-            collected[name] = fetch_pdf_images(session=session, name=name, errors=errors, force_all=force_all)
-
-        try:
-            att = make_all_in_one_canvas(collected, issue_base_jst())
-            write_attachment_to_tmp(att)
-            images.append(att)
-            return images, errors
-        except Exception as e:
-            errors.append(f"ALL_IN_ONE: failed ({e})")
-            # 失敗時は従来形式にフォールバック
-
     # -------------------------------------------------------------------------
-    # フォールバック: 従来の個別出力
+    # ① エマグラム 単体
     # -------------------------------------------------------------------------
     if EMAGRAM_ENABLE and EMAGRAM_URL:
         blob = fetch_image_content(EMAGRAM_URL)
         if blob:
             try:
-                base = EMAGRAM_FILENAME.replace(".gif", "")
-                att = gif_to_jpg_attachment(blob, base)
-                write_attachment_to_tmp(att)
-                images.append(att)
+                with Image.open(io.BytesIO(blob)) as im:
+                    im.seek(0)
+                    append_output(images, pil_to_attachment(im, "EMAGRAM"), 1)
             except Exception as e:
                 errors.append(f"EMAGRAM: conversion failed ({e})")
         else:
             errors.append("EMAGRAM: download failed")
 
-    for name in ["ASAS", "FSAS24", "FSAS48"]:
-        add_pdf_item(session=session, images=images, errors=errors, name=name, force_all=False)
+    # -------------------------------------------------------------------------
+    # ② AXJP140.pdf 単体
+    # -------------------------------------------------------------------------
+    axjp_pages = fetch_pdf_pages(session, "AXJP140")
+    if axjp_pages:
+        append_output(images, pil_to_attachment(axjp_pages[0], "AXJP140"), 2)
+    else:
+        errors.append("AXJP140: download failed")
 
-    # AUPAは縦結合せず単体
-    for name in ["AUPA20", "AUPA25", "AUPN30", "AXJP140"]:
-        add_pdf_item(session=session, images=images, errors=errors, name=name, force_all=False)
+    # -------------------------------------------------------------------------
+    # ③ 数値 AUPA20 単体
+    # -------------------------------------------------------------------------
+    aupa_pages = fetch_pdf_pages(session, "AUPA20")
+    if aupa_pages:
+        append_output(images, pil_to_attachment(aupa_pages[0], "AUPA20"), 3)
+    else:
+        errors.append("AUPA20: download failed")
 
-    for name in ["FXXN519", "FZCX50", "FEFE19"]:
-        add_pdf_item(session=session, images=images, errors=errors, name=name, force_all=False)
+    # -------------------------------------------------------------------------
+    # ④ 週間 4列結合
+    # -------------------------------------------------------------------------
+    layout4_att = build_layout_4(session, errors)
+    if layout4_att:
+        append_output(images, layout4_att, 4)
 
-    for name in ["SKAISETU", "TKAISETU"]:
-        add_pdf_item(session=session, images=images, errors=errors, name=name, force_all=True)
+    # -------------------------------------------------------------------------
+    # ⑤ 全部入り
+    # -------------------------------------------------------------------------
+    layout5_att = build_layout_5(session, errors)
+    if layout5_att:
+        append_output(images, layout5_att, 5)
 
-    for name in ["COMP12", "COMP36", "COMP72", "FXJP854"]:
-        add_pdf_item(session=session, images=images, errors=errors, name=name, force_all=True)
+    # ローカルへの一時デバッグ書き出し
+    for fname, data, _ in images:
+        try:
+            with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                f.write(data)
+        except Exception:
+            pass
+
+    print(f"[OK] output image count: {len(images)}")
+    print(f"[OK] output images: {[name for name, _, _ in images]}")
 
     return images, errors
 
 
 # =============================================================================
-# R2
+# R2 / Notion / Discord 連携
 # =============================================================================
 def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Optional[str]]:
     if not R2_ENABLE:
@@ -533,19 +485,18 @@ def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Op
         put_bytes(key, blob, content_type=mime)
         url = make_url(key)
         urls.append(url)
+
         if first_url is None:
             first_url = url
-        if rep_url is None and fname.lower().endswith((".jpg", ".jpeg", ".png")):
+        if rep_url is None and fname.lower().endswith((".png", ".jpg", ".jpeg")):
             rep_url = url
 
     if rep_url is None:
         rep_url = first_url
+
     return urls, rep_url
 
 
-# =============================================================================
-# Notion
-# =============================================================================
 def notion_write_db(
     *,
     issue_dt_jst: datetime,
@@ -560,12 +511,7 @@ def notion_write_db(
 
     day = issue_dt_jst.strftime("%Y%m%d")
     title = f"JMA / {day} {issue_dt_jst.strftime('%H:%M')} JST"
-
-    memo_lines: List[str] = []
-    if errors:
-        memo_lines.append("ERROR:")
-        memo_lines += [f"- {e}" for e in errors]
-    memo = "\n".join(memo_lines)
+    memo = "\n".join(["ERROR:"] + [f"- {e}" for e in errors]) if errors else ""
 
     page_id = create_db_row(
         title=title,
@@ -578,6 +524,7 @@ def notion_write_db(
         autogen=True,
         icon_emoji="🗺️",
     )
+
     if not page_id:
         return None
 
@@ -588,7 +535,7 @@ def notion_write_db(
         for cap, url in NOTION_LINKS:
             append_bookmark(page_id, url, caption=cap)
     except Exception as e:
-        print(f"[WARN] append links failed: {e}")
+        print(f"[WARN] links failed: {e}")
 
     try:
         if all_urls:
@@ -599,14 +546,8 @@ def notion_write_db(
     return page_id
 
 
-# =============================================================================
-# Discord
-# =============================================================================
 def discord_links_text() -> str:
-    lines = ["**参考リンク**"]
-    for title, url in DISCORD_LINKS:
-        lines.append(f"・{title}\n{url}")
-    return "\n\n".join(lines)
+    return "\n\n".join(["**参考リンク**"] + [f"・{t}\n{u}" for t, u in DISCORD_LINKS])
 
 
 def notify_discord_images(*, all_urls: List[str], rjtd: str, issue_dt_jst: datetime) -> None:
@@ -614,20 +555,26 @@ def notify_discord_images(*, all_urls: List[str], rjtd: str, issue_dt_jst: datet
         return
 
     init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
-    post_discord_item_image_urls(
-        webhook_url=discord_jma_webhook_url(),
-        title=init_jst,
-        image_urls=all_urls,
-        notion_url="",
-        rjtd=rjtd,
-        init_jst="",
-    )
+
+    # 5枚を1メッセージでギャラリー表示にせず、1枚ずつ順番に投稿する
+    for idx, url in enumerate(all_urls):
+        title = OUTPUT_TITLES[idx] if idx < len(OUTPUT_TITLES) else f"資料 {idx + 1}"
+        post_discord_item_image_urls(
+            webhook_url=discord_jma_webhook_url(),
+            title=f"{init_jst} / {title}",
+            image_urls=[url],
+            notion_url="",
+            rjtd=rjtd,
+            init_jst="",
+        )
+
     post_discord_text(discord_links_text())
 
 
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
     if not discord_jma_enabled():
         return
+
     post_discord_complete(
         webhook_url=discord_jma_webhook_url(),
         category="JMA",
@@ -641,12 +588,8 @@ def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
 # main
 # =============================================================================
 def main() -> None:
-    page_id: Optional[str] = None
-    all_urls: List[str] = []
-    errors: List[str] = []
-
     try:
-        print("=== Start Weathercaster JMA Weather Map ===")
+        print("=== Start Weathercaster JMA Weather Map (Custom Layout PNG / 5 outputs) ===")
 
         issue_dt_jst = issue_base_jst()
         rjtd = issue_dt_jst.strftime("%d%H%M")
@@ -654,10 +597,7 @@ def main() -> None:
         run_prefix = f"{R2_PREFIX}/{day}/RJTD_{rjtd}"
 
         images, errors = build_outputs()
-
-        rep_url: Optional[str] = None
-        if images:
-            all_urls, rep_url = upload_to_r2(run_prefix, images)
+        all_urls, rep_url = upload_to_r2(run_prefix, images)
 
         page_id = notion_write_db(
             issue_dt_jst=issue_dt_jst,
@@ -669,25 +609,20 @@ def main() -> None:
         )
 
         if page_id:
-            print(f"[OK] Notion DB row created: {page_id}")
             print(f"[OK] Notion URL: {notion_page_url(page_id)}")
-        else:
-            print("[WARN] Notion page was not created")
 
         try:
             notify_discord_images(all_urls=all_urls, rjtd=rjtd, issue_dt_jst=issue_dt_jst)
             notify_discord_complete(errors=errors, attach_count=len(all_urls))
-            if discord_jma_enabled():
-                print("[OK] Discord sent")
         except Exception as e:
-            print(f"[WARN] Discord send failed: {e}")
+            print(f"[WARN] Discord failed: {e}")
 
         if errors:
             print("[WARN] completed with errors:")
             for e in errors:
                 print(f"  - {e}")
 
-        print("=== Done Weathercaster JMA Weather Map ===")
+        print("=== Done ===")
 
     finally:
         shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
