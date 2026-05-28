@@ -382,15 +382,12 @@ def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Att
 def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ⑤ 全部入り
-      左列: TKAISETU / AUPQ35 / UPPQ78(またはUPQ78)
+      左列: TKAISETU / AUPQ35 / AUPQ78
       上段: ASAS / FSAS24 / FSAS48
       中段: COMP12 / COMP36 / COMP72
       下段: FXJP854（上下分割→横並び→2〜4列エリアの中央配置）
 
     メモ:
-    - UPPQ78 はまず UPPQ78.pdf を試し、無ければ UPQ78.pdf も試す。
-    - 「1つ前の時刻」へのフォールバックは、このURL形式が最新のみを返す場合は実装不可。
-      そのため現段階ではファイル名の揺れ吸収を優先する。
     - ASAS/FSAS24/FSAS48 は縮小して合わせるのではなく、セル幅を広げて合わせる。
       画像全体が縦長になってもよい、という要望に合わせた。
     """
@@ -399,7 +396,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     # 左列
     tkai = get_first_page_or_none(fetch_pdf_pages(session, "TKAISETU"))
     aupq35 = get_first_page_or_none(fetch_pdf_pages(session, "AUPQ35"))
-    uppq78 = fetch_first_available_first_page(session, ["UPPQ78", "UPQ78"])
+    aupq78 = get_first_page_or_none(fetch_pdf_pages(session, "AUPQ78"))
 
     left_parts: List[Image.Image] = []
     if tkai is not None:
@@ -412,10 +409,10 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     else:
         errors.append("Layout5: AUPQ35 missing")
 
-    if uppq78 is not None:
-        left_parts.append(uppq78)
+    if aupq78 is not None:
+        left_parts.append(aupq78)
     else:
-        print("[INFO] Layout5: UPPQ78/UPQ78 not found; left column uses TKAISETU + AUPQ35 only")
+        errors.append("Layout5: AUPQ78 missing")
 
     left_canvas = combine_vertical(left_parts, gap=LAYOUT_GAP)
 
