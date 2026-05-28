@@ -3,7 +3,7 @@
 # module/jobs/weather_map.py
 #
 # Weathercaster / JMA Weather Map
-# Custom Layout PNG Version / 5 outputs explicit / layout5 aligned
+# Custom Layout PNG Version / 5 outputs explicit / layout5 widened / layout5 widened
 #
 # 出力は必ず次の5枚を基本にする:
 #   ① 01_EMAGRAM.png
@@ -240,6 +240,19 @@ def get_first_page_or_none(pages: List[Image.Image]) -> Optional[Image.Image]:
     return pages[0] if pages else None
 
 
+def fetch_first_available_first_page(session: requests.Session, names: List[str]) -> Optional[Image.Image]:
+    """
+    候補名を順番に試して最初に取れたPDFの1ページ目を返す。
+    例: UPPQ78 / UPQ78 の揺れ吸収用。
+    """
+    for name in names:
+        pages = fetch_pdf_pages(session, name)
+        if pages:
+            print(f"[OK] fetched alias source: {name}.pdf")
+            return pages[0]
+    return None
+
+
 def combine_vertical(images: List[Image.Image], *, gap: int = 0) -> Optional[Image.Image]:
     valid = [im.convert("RGB") for im in images if im is not None]
     if not valid:
@@ -287,16 +300,30 @@ def resize_to_width(img: Image.Image, target_w: int) -> Image.Image:
     return img.resize((target_w, target_h), Image.LANCZOS)
 
 
+def pad_to_cell_width(img: Image.Image, cell_w: int, *, valign: str = "top") -> Image.Image:
+    """
+    画像自体は拡大縮小せず、セル幅だけをそろえる。
+    幅を広げたいという要望に合わせ、足りない分は余白で持たせる。
+    """
+    img = img.convert("RGB")
+    cell_w = max(cell_w, img.width)
+    canvas = Image.new("RGB", (cell_w, img.height), "white")
+    x = (cell_w - img.width) // 2
+    y = 0
+    canvas.paste(img, (x, y))
+    return canvas
+
+
 def normalize_row_to_columns(images: List[Optional[Image.Image]], col_w: int, *, gap: int = 0) -> Optional[Image.Image]:
     """
-    3列を同じ幅に揃えて横結合する。
-    ASAS/FSAS24/FSAS48、COMP12/COMP36/COMP72 を同じ列幅にそろえるための関数。
+    3列を同じセル幅に揃えて横結合する。
+    ここでは縮小よりも『幅を広げる』方針を優先し、画像は原寸維持・余白で調整する。
     """
     normalized: List[Image.Image] = []
     for im in images:
         if im is None:
             continue
-        normalized.append(resize_to_width(im, col_w))
+        normalized.append(pad_to_cell_width(im, col_w, valign="top"))
 
     return combine_horizontal(normalized, gap=gap, valign="top")
 
@@ -355,22 +382,24 @@ def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Att
 def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ⑤ 全部入り
-      左列: TKAISETU / AUPQ35
-            UPPQ78 は取得できた場合だけ入れる。無ければ空白や代替文字は作らない。
+      左列: TKAISETU / AUPQ35 / UPPQ78(またはUPQ78)
       上段: ASAS / FSAS24 / FSAS48
-            2〜4列の幅をそろえる。
       中段: COMP12 / COMP36 / COMP72
-            上段と同じ3列幅にそろえる。
       下段: FXJP854（上下分割→横並び→2〜4列エリアの中央配置）
+
+    メモ:
+    - UPPQ78 はまず UPPQ78.pdf を試し、無ければ UPQ78.pdf も試す。
+    - 「1つ前の時刻」へのフォールバックは、このURL形式が最新のみを返す場合は実装不可。
+      そのため現段階ではファイル名の揺れ吸収を優先する。
+    - ASAS/FSAS24/FSAS48 は縮小して合わせるのではなく、セル幅を広げて合わせる。
+      画像全体が縦長になってもよい、という要望に合わせた。
     """
-    print("-> Building Layout 5 (Dashboard / aligned columns)")
+    print("-> Building Layout 5 (Dashboard / widened top row)")
 
     # 左列
     tkai = get_first_page_or_none(fetch_pdf_pages(session, "TKAISETU"))
     aupq35 = get_first_page_or_none(fetch_pdf_pages(session, "AUPQ35"))
-
-    # UPPQ78 は無いことがあるため、取れた場合だけ追加する
-    uppq78 = get_first_page_or_none(fetch_pdf_pages(session, "UPPQ78"))
+    uppq78 = fetch_first_available_first_page(session, ["UPPQ78", "UPQ78"])
 
     left_parts: List[Image.Image] = []
     if tkai is not None:
@@ -386,7 +415,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     if uppq78 is not None:
         left_parts.append(uppq78)
     else:
-        print("[INFO] Layout5: UPPQ78 not found; left column uses TKAISETU + AUPQ35 only")
+        print("[INFO] Layout5: UPPQ78/UPQ78 not found; left column uses TKAISETU + AUPQ35 only")
 
     left_canvas = combine_vertical(left_parts, gap=LAYOUT_GAP)
 
@@ -394,41 +423,34 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     asas = get_first_page_or_none(fetch_pdf_pages(session, "ASAS"))
     fsas24 = get_first_page_or_none(fetch_pdf_pages(session, "FSAS24"))
     fsas48 = get_first_page_or_none(fetch_pdf_pages(session, "FSAS48"))
-
     top_parts = [asas, fsas24, fsas48]
     if any(p is None for p in top_parts):
         errors.append("Layout5: Top row parts missing")
-
-    # 2〜4列の基準幅。ASAS/FSAS24/FSAS48 の最大幅を基準にして3列をそろえる。
-    # これにより、右側の上段・中段・下段が同じ幅の中に収まる。
-    valid_top = [p for p in top_parts if p is not None]
-    if valid_top:
-        col_w = max(p.width for p in valid_top)
-    else:
-        col_w = 1
-
-    right_w = col_w * 3 + LAYOUT_GAP * 2
-    top_canvas = normalize_row_to_columns(top_parts, col_w, gap=LAYOUT_GAP)
 
     # 右側・中段
     comp12 = get_first_page_or_none(fetch_pdf_pages(session, "COMP12"))
     comp36 = get_first_page_or_none(fetch_pdf_pages(session, "COMP36"))
     comp72 = get_first_page_or_none(fetch_pdf_pages(session, "COMP72"))
-
     mid_parts = [comp12, comp36, comp72]
     if any(p is None for p in mid_parts):
         errors.append("Layout5: Middle row parts missing")
 
+    # 右側3列のセル幅を決める。
+    # 上段/中段で最も広い画像に合わせ、縮小ではなくパディングで幅をそろえる。
+    candidates = [p.width for p in top_parts + mid_parts if p is not None]
+    col_w = max(candidates) if candidates else 1
+    right_w = col_w * 3 + LAYOUT_GAP * 2
+
+    top_canvas = normalize_row_to_columns(top_parts, col_w, gap=LAYOUT_GAP)
     mid_canvas = normalize_row_to_columns(mid_parts, col_w, gap=LAYOUT_GAP)
 
     # 右側・下段
     fxjp854 = process_fxjp854_split(fetch_pdf_pages(session, "FXJP854"))
     if fxjp854 is None:
         errors.append("Layout5: FXJP854 missing")
-    else:
-        # 2〜4列エリアより広い場合だけ縮小。狭い場合は画素を落とさず中央配置。
-        if fxjp854.width > right_w:
-            fxjp854 = resize_to_width(fxjp854, right_w)
+    elif fxjp854.width > right_w:
+        # FX は3列エリアより広い場合のみ縮小。狭い場合は中央配置だけ行う。
+        fxjp854 = resize_to_width(fxjp854, right_w)
 
     valid_rows = [row for row in [top_canvas, mid_canvas, fxjp854] if row is not None]
     if left_canvas is None and not valid_rows:
@@ -439,7 +461,6 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
 
     y = 0
     for row in valid_rows:
-        # 上段・中段も念のため中央配置。基本的にはright_wぴったり。
         x = (right_w - row.width) // 2
         right_canvas.paste(row, (x, y))
         y += row.height + LAYOUT_GAP
@@ -449,7 +470,6 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
 
     final_w = left_canvas.width + LAYOUT_GAP + right_canvas.width
     final_h = max(left_canvas.height, right_canvas.height)
-
     final_canvas = Image.new("RGB", (final_w, final_h), "white")
     final_canvas.paste(left_canvas, (0, 0))
     final_canvas.paste(right_canvas, (left_canvas.width + LAYOUT_GAP, 0))
