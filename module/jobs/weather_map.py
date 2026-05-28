@@ -7,11 +7,11 @@
 #
 # 構成順:
 #   ① エマグラム
-#   ② 実況      ASAS / FSAS24 / FSAS48
-#   ③ 数値      AUPA20 + AUPA25 + AUPN30 縦結合 / AXJP140
+#   ② 実況＋予想  上段: ASAS / FSAS24 / FSAS48、下段: COMP12 / COMP36 / COMP72 を1枚化
+#   ③ 数値      AUPA20 / AUPA25 / AUPN30（縦結合しない） / AXJP140
 #   ④ 週間      FXXN519 / FZCX50 / FEFE19
 #   ⑤ 解説      TKAISETU / SKAISETU
-#   ⑥ 予想      COMP12 / COMP36 / COMP72 / FXJP854
+#   ⑥ 予想      FXJP854
 #
 # Discord:
 #   - 見出しは初期時刻のみ
@@ -310,6 +310,87 @@ def combine_vertical_attachments(
     return pil_to_attachment(canvas, base_filename)
 
 
+
+def _attachments_to_images(atts: List[Attachment]) -> List[Image.Image]:
+    imgs: List[Image.Image] = []
+
+    for _, blob, _ in atts:
+        with Image.open(io.BytesIO(blob)) as im:
+            imgs.append(im.convert("RGB"))
+
+    return imgs
+
+
+def _resize_to_height(img: Image.Image, target_height: int) -> Image.Image:
+    if img.height == target_height:
+        return img
+
+    ratio = target_height / img.height
+    target_width = max(1, int(img.width * ratio))
+    return img.resize((target_width, target_height), Image.LANCZOS)
+
+
+def combine_horizontal_attachments(
+    atts: List[Attachment],
+    base_filename: str,
+    *,
+    padding: int = 16,
+    normalize_height: bool = True,
+) -> Attachment:
+    imgs = _attachments_to_images(atts)
+
+    if not imgs:
+        raise ValueError("no images to combine")
+
+    if normalize_height:
+        target_height = min(im.height for im in imgs)
+        imgs = [_resize_to_height(im, target_height) for im in imgs]
+
+    total_width = sum(im.width for im in imgs) + padding * (len(imgs) - 1)
+    max_height = max(im.height for im in imgs)
+
+    canvas = Image.new("RGB", (total_width, max_height), "white")
+
+    x = 0
+    for im in imgs:
+        y = (max_height - im.height) // 2
+        canvas.paste(im, (x, y))
+        x += im.width + padding
+
+    return pil_to_attachment(canvas, base_filename)
+
+
+def combine_two_rows_attachments(
+    upper_atts: List[Attachment],
+    lower_atts: List[Attachment],
+    base_filename: str,
+    *,
+    padding: int = 16,
+) -> Attachment:
+    """
+    上段を横結合、下段を横結合し、上下に貼って1枚にする。
+    今回は 上段: ASAS/FSAS24/FSAS48、下段: COMP12/COMP36/COMP72 を想定。
+    """
+    upper_row = combine_horizontal_attachments(
+        upper_atts,
+        f"{base_filename}_upper",
+        padding=padding,
+        normalize_height=True,
+    )
+    lower_row = combine_horizontal_attachments(
+        lower_atts,
+        f"{base_filename}_lower",
+        padding=padding,
+        normalize_height=True,
+    )
+
+    return combine_vertical_attachments(
+        [upper_row, lower_row],
+        base_filename,
+        padding=padding,
+    )
+
+
 # =============================================================================
 # 一時保存
 # =============================================================================
@@ -351,6 +432,34 @@ def add_pdf_item(
         errors.append(f"{name}: conversion failed ({e})")
 
 
+
+def fetch_first_pdf_attachment(
+    *,
+    session: requests.Session,
+    errors: List[str],
+    name: str,
+) -> Optional[Attachment]:
+    """PDFの1ページ目だけをAttachmentとして返す。imagesには直接追加しない。"""
+    pdf = fetch_weathercaster_pdf(session, name)
+
+    if not pdf:
+        errors.append(f"{name}: download failed")
+        return None
+
+    try:
+        atts = pdf_bytes_to_jpgs(pdf, name, force_all=False)
+
+        if not atts:
+            errors.append(f"{name}: conversion failed")
+            return None
+
+        return atts[0]
+
+    except Exception as e:
+        errors.append(f"{name}: conversion failed ({e})")
+        return None
+
+
 # =============================================================================
 # 出力構築
 # =============================================================================
@@ -383,9 +492,59 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
             errors.append("EMAGRAM: download failed")
 
     # -------------------------------------------------------------------------
-    # ② 実況
+    # ② 実況＋予想COMP
+    # 上段: ASAS / FSAS24 / FSAS48
+    # 下段: COMP12 / COMP36 / COMP72
+    # → 6枚を1枚にする
     # -------------------------------------------------------------------------
+    live_parts: List[Attachment] = []
+    comp_parts: List[Attachment] = []
+
     for name in ["ASAS", "FSAS24", "FSAS48"]:
+        att = fetch_first_pdf_attachment(session=session, errors=errors, name=name)
+        if att:
+            live_parts.append(att)
+
+    for name in ["COMP12", "COMP36", "COMP72"]:
+        att = fetch_first_pdf_attachment(session=session, errors=errors, name=name)
+        if att:
+            comp_parts.append(att)
+
+    if live_parts or comp_parts:
+        try:
+            if live_parts and comp_parts:
+                combo_att = combine_two_rows_attachments(
+                    live_parts,
+                    comp_parts,
+                    "ASAS_FSAS_COMP12_COMP36_COMP72",
+                    padding=16,
+                )
+            elif live_parts:
+                combo_att = combine_horizontal_attachments(
+                    live_parts,
+                    "ASAS_FSAS",
+                    padding=16,
+                    normalize_height=True,
+                )
+            else:
+                combo_att = combine_horizontal_attachments(
+                    comp_parts,
+                    "COMP12_COMP36_COMP72",
+                    padding=16,
+                    normalize_height=True,
+                )
+
+            write_attachment_to_tmp(combo_att)
+            images.append(combo_att)
+        except Exception as e:
+            errors.append(f"ASAS/FSAS/COMP combo: failed ({e})")
+
+    # -------------------------------------------------------------------------
+    # ③ 数値（上空 → 地上）
+    # AUPA20 / AUPA25 / AUPN30 は縦結合しない
+    # AXJP140 は単体
+    # -------------------------------------------------------------------------
+    for name in ["AUPA20", "AUPA25", "AUPN30", "AXJP140"]:
         add_pdf_item(
             session=session,
             images=images,
@@ -393,51 +552,6 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
             name=name,
             force_all=False,
         )
-
-    # -------------------------------------------------------------------------
-    # ③ 数値（上空 → 地上）
-    # AUPA20 / AUPA25 / AUPN30 を縦結合して1枚
-    # AXJP140 は単体
-    # -------------------------------------------------------------------------
-    upper_parts: List[Attachment] = []
-
-    for name in ["AUPA20", "AUPA25", "AUPN30"]:
-        pdf = fetch_weathercaster_pdf(session, name)
-
-        if not pdf:
-            errors.append(f"{name}: download failed")
-            continue
-
-        try:
-            atts = pdf_bytes_to_jpgs(pdf, name, force_all=False)
-
-            if atts:
-                upper_parts.append(atts[0])
-            else:
-                errors.append(f"{name}: conversion failed")
-
-        except Exception as e:
-            errors.append(f"{name}: conversion failed ({e})")
-
-    if upper_parts:
-        try:
-            upper_att = combine_vertical_attachments(
-                upper_parts,
-                "UPPER_AUPA20_AUPA25_AUPN30",
-                padding=16,
-            )
-            write_attachment_to_tmp(upper_att)
-            images.append(upper_att)
-        except Exception as e:
-            errors.append(f"UPPER combo: failed ({e})")
-
-    add_pdf_item(
-        session=session,
-        images=images,
-        errors=errors,
-        name="AXJP140",
-        force_all=False,
-    )
 
     # -------------------------------------------------------------------------
     # ④ 週間
@@ -465,15 +579,15 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
 
     # -------------------------------------------------------------------------
     # ⑥ 予想
+    # COMP12 / COMP36 / COMP72 は②で実況と一緒に1枚化済み
     # -------------------------------------------------------------------------
-    for name in ["COMP12", "COMP36", "COMP72", "FXJP854"]:
-        add_pdf_item(
-            session=session,
-            images=images,
-            errors=errors,
-            name=name,
-            force_all=False,
-        )
+    add_pdf_item(
+        session=session,
+        images=images,
+        errors=errors,
+        name="FXJP854",
+        force_all=False,
+    )
 
     return images, errors
 
