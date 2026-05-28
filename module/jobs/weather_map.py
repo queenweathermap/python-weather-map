@@ -3,7 +3,7 @@
 # module/jobs/weather_map.py
 #
 # Weathercaster / JMA Weather Map
-# Custom Layout PNG Version / 5 outputs explicit
+# Custom Layout PNG Version / 5 outputs explicit / layout5 aligned
 #
 # 出力は必ず次の5枚を基本にする:
 #   ① 01_EMAGRAM.png
@@ -278,6 +278,29 @@ def combine_horizontal(images: List[Image.Image], *, gap: int = 0, valign: str =
     return canvas
 
 
+def resize_to_width(img: Image.Image, target_w: int) -> Image.Image:
+    """縦横比を保ったまま、指定幅に合わせる。"""
+    img = img.convert("RGB")
+    if target_w <= 0 or img.width <= 0:
+        return img
+    target_h = max(1, int(img.height * (target_w / img.width)))
+    return img.resize((target_w, target_h), Image.LANCZOS)
+
+
+def normalize_row_to_columns(images: List[Optional[Image.Image]], col_w: int, *, gap: int = 0) -> Optional[Image.Image]:
+    """
+    3列を同じ幅に揃えて横結合する。
+    ASAS/FSAS24/FSAS48、COMP12/COMP36/COMP72 を同じ列幅にそろえるための関数。
+    """
+    normalized: List[Image.Image] = []
+    for im in images:
+        if im is None:
+            continue
+        normalized.append(resize_to_width(im, col_w))
+
+    return combine_horizontal(normalized, gap=gap, valign="top")
+
+
 # =============================================================================
 # 特殊画像生成関数
 # =============================================================================
@@ -332,55 +355,92 @@ def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Att
 def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ⑤ 全部入り
-      左列: TKAISETU / AUPQ35 / UPPQ78
+      左列: TKAISETU / AUPQ35
+            UPPQ78 は取得できた場合だけ入れる。無ければ空白や代替文字は作らない。
       上段: ASAS / FSAS24 / FSAS48
+            2〜4列の幅をそろえる。
       中段: COMP12 / COMP36 / COMP72
-      下段: FXJP854（上下分割→横並び→中央配置）
+            上段と同じ3列幅にそろえる。
+      下段: FXJP854（上下分割→横並び→2〜4列エリアの中央配置）
     """
-    print("-> Building Layout 5 (Dashboard)")
+    print("-> Building Layout 5 (Dashboard / aligned columns)")
 
     # 左列
     tkai = get_first_page_or_none(fetch_pdf_pages(session, "TKAISETU"))
     aupq35 = get_first_page_or_none(fetch_pdf_pages(session, "AUPQ35"))
+
+    # UPPQ78 は無いことがあるため、取れた場合だけ追加する
     uppq78 = get_first_page_or_none(fetch_pdf_pages(session, "UPPQ78"))
-    left_canvas = combine_vertical([tkai, aupq35, uppq78], gap=LAYOUT_GAP)
+
+    left_parts: List[Image.Image] = []
+    if tkai is not None:
+        left_parts.append(tkai)
+    else:
+        errors.append("Layout5: TKAISETU missing")
+
+    if aupq35 is not None:
+        left_parts.append(aupq35)
+    else:
+        errors.append("Layout5: AUPQ35 missing")
+
+    if uppq78 is not None:
+        left_parts.append(uppq78)
+    else:
+        print("[INFO] Layout5: UPPQ78 not found; left column uses TKAISETU + AUPQ35 only")
+
+    left_canvas = combine_vertical(left_parts, gap=LAYOUT_GAP)
 
     # 右側・上段
     asas = get_first_page_or_none(fetch_pdf_pages(session, "ASAS"))
     fsas24 = get_first_page_or_none(fetch_pdf_pages(session, "FSAS24"))
     fsas48 = get_first_page_or_none(fetch_pdf_pages(session, "FSAS48"))
-    top_canvas = combine_horizontal([asas, fsas24, fsas48], gap=LAYOUT_GAP, valign="top")
+
+    top_parts = [asas, fsas24, fsas48]
+    if any(p is None for p in top_parts):
+        errors.append("Layout5: Top row parts missing")
+
+    # 2〜4列の基準幅。ASAS/FSAS24/FSAS48 の最大幅を基準にして3列をそろえる。
+    # これにより、右側の上段・中段・下段が同じ幅の中に収まる。
+    valid_top = [p for p in top_parts if p is not None]
+    if valid_top:
+        col_w = max(p.width for p in valid_top)
+    else:
+        col_w = 1
+
+    right_w = col_w * 3 + LAYOUT_GAP * 2
+    top_canvas = normalize_row_to_columns(top_parts, col_w, gap=LAYOUT_GAP)
 
     # 右側・中段
     comp12 = get_first_page_or_none(fetch_pdf_pages(session, "COMP12"))
     comp36 = get_first_page_or_none(fetch_pdf_pages(session, "COMP36"))
     comp72 = get_first_page_or_none(fetch_pdf_pages(session, "COMP72"))
-    mid_canvas = combine_horizontal([comp12, comp36, comp72], gap=LAYOUT_GAP, valign="top")
+
+    mid_parts = [comp12, comp36, comp72]
+    if any(p is None for p in mid_parts):
+        errors.append("Layout5: Middle row parts missing")
+
+    mid_canvas = normalize_row_to_columns(mid_parts, col_w, gap=LAYOUT_GAP)
 
     # 右側・下段
     fxjp854 = process_fxjp854_split(fetch_pdf_pages(session, "FXJP854"))
-
-    if left_canvas is None:
-        errors.append("Layout5: Left column parts missing")
-    if top_canvas is None:
-        errors.append("Layout5: Top row parts missing")
-    if mid_canvas is None:
-        errors.append("Layout5: Middle row parts missing")
     if fxjp854 is None:
         errors.append("Layout5: FXJP854 missing")
+    else:
+        # 2〜4列エリアより広い場合だけ縮小。狭い場合は画素を落とさず中央配置。
+        if fxjp854.width > right_w:
+            fxjp854 = resize_to_width(fxjp854, right_w)
 
-    right_rows = [top_canvas, mid_canvas, fxjp854]
-    valid_rows = [row for row in right_rows if row is not None]
+    valid_rows = [row for row in [top_canvas, mid_canvas, fxjp854] if row is not None]
     if left_canvas is None and not valid_rows:
         return None
 
-    right_w = max((row.width for row in valid_rows), default=0)
     right_h = sum(row.height for row in valid_rows) + LAYOUT_GAP * max(0, len(valid_rows) - 1)
-
     right_canvas = Image.new("RGB", (right_w, right_h), "white")
+
     y = 0
     for row in valid_rows:
-        x = (right_w - row.width) // 2 if row is fxjp854 else 0
+        # 上段・中段も念のため中央配置。基本的にはright_wぴったり。
+        x = (right_w - row.width) // 2
         right_canvas.paste(row, (x, y))
         y += row.height + LAYOUT_GAP
 
