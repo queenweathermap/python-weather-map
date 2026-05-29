@@ -473,7 +473,7 @@ def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Att
 def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ⑤ 全部入り（TeamSABOTENスタイル・タブレット天気図完全再現版）
-      左列: TKAISETU(JMA直接) / AUPQ35(JMA) / AUPQ78(JMA)
+      左列: TKAISETU(WCN) / AUPQ35(JMA) / AUPQ78(JMA)
       上段: ASAS / FSAS24 / FSAS48
       中段: COMP12 / COMP36 / COMP72
       下段: FXJP854（上下分割→横並び）
@@ -501,45 +501,35 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     fxjp854_raw = fetch_pdf_pages(session, "FXJP854")
     fxjp854 = process_fxjp854_split(fxjp854_raw) if fxjp854_raw else None
 
-    # 2. 左列の基準幅を先に決める
-    # AUPQ35/78 の自然な縦横比を維持しつつ、左列幅は TKAISETU に揃える
+    # 2. 左列の幅基準を決める（TKAISETUの幅に統一）
     left_target_w = tkai.width if tkai else 1000
 
-    # 左列・上段: TKAISETU（自然サイズで表示）
+    # 左列の各コマ: left_target_w にリサイズ（縦横比維持）し、自然な高さのまま使う
+    # pad_to_height で右側に合わせるのではなく、左列の自然な高さを基準にする
     if tkai is not None:
         left_row1 = resize_to_width(tkai, left_target_w)
     else:
         errors.append("Layout5: TKAISETU missing (JMA direct)")
-        left_row1 = None
+        left_row1 = Image.new("RGB", (left_target_w, 800), "white")
 
-    # 左列・中段: AUPQ35（縦横比を保ってリサイズ）
     if aupq35 is not None:
         left_row2 = resize_to_width(aupq35, left_target_w)
     else:
         errors.append("Layout5: AUPQ35 missing (JMA fallback used blank)")
-        left_row2 = None
+        left_row2 = Image.new("RGB", (left_target_w, 800), "white")
 
-    # 左列・下段: AUPQ78（縦横比を保ってリサイズ）
     if aupq78 is not None:
         left_row3 = resize_to_width(aupq78, left_target_w)
     else:
         errors.append("Layout5: AUPQ78 missing (JMA fallback used blank)")
-        left_row3 = None
+        left_row3 = Image.new("RGB", (left_target_w, 800), "white")
 
-    # 各段の「基準高さ」を左列から決定する（右側の各段はこの高さに合わせる）
-    row1_h = left_row1.height if left_row1 is not None else 800
-    row2_h = left_row2.height if left_row2 is not None else 800
-    row3_h = left_row3.height if left_row3 is not None else 800
+    # 各段の高さを左列から確定（右側をこれに合わせる）
+    row1_h = left_row1.height
+    row2_h = left_row2.height
+    row3_h = left_row3.height
 
-    # 左列の欠損コマは空白で補完
-    if left_row1 is None:
-        left_row1 = Image.new("RGB", (left_target_w, row1_h), "white")
-    if left_row2 is None:
-        left_row2 = Image.new("RGB", (left_target_w, row2_h), "white")
-    if left_row3 is None:
-        left_row3 = Image.new("RGB", (left_target_w, row3_h), "white")
-
-    # 3. 右側ブロックの構築（各段の高さを左列に合わせて同期）
+    # 3. 右側ブロックの構築（各段を左列の高さに揃える）
     # 右側・上段（ASAS / FSAS24 / FSAS48）
     top_parts = [asas, fsas24, fsas48]
     candidates_top = [p.width for p in top_parts if p is not None]
@@ -566,28 +556,19 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
             mid_resized.append(Image.new("RGB", (col_w_mid, row2_h), "white"))
     mid_canvas = combine_horizontal(mid_resized, gap=LAYOUT_GAP, valign="top")
 
-    # 右側の総幅を計算
+    # 右側の総幅を確定
     right_w = max(
         top_canvas.width if top_canvas else col_w_top * 3,
         mid_canvas.width if mid_canvas else col_w_mid * 3,
     )
 
-    # 右側・下段（FXJP854）：右側幅に合わせてリサイズ
+    # 右側・下段（FXJP854）：右側幅にリサイズし、左列下段の高さに揃える
     if fxjp854 is not None:
         fxjp854 = resize_to_width(fxjp854, right_w)
-        # 高さが左列下段と大きく乖離する場合は pad_to_height で補正
-        if abs(fxjp854.height - row3_h) > 100:
-            fxjp854 = pad_to_height(fxjp854, row3_h)
+        fxjp854 = pad_to_height(fxjp854, row3_h)
     else:
         errors.append("Layout5: FXJP854 missing")
         fxjp854 = Image.new("RGB", (right_w, row3_h), "white")
-
-    # left_row3 と fxjp854 の高さを最終同期
-    final_row3_h = max(left_row3.height, fxjp854.height)
-    if left_row3.height != final_row3_h:
-        left_row3 = pad_to_height(left_row3, final_row3_h)
-    if fxjp854.height != final_row3_h:
-        fxjp854 = pad_to_height(fxjp854, final_row3_h)
 
     # 左列を縦結合
     left_canvas = combine_vertical([left_row1, left_row2, left_row3], gap=LAYOUT_GAP)
@@ -618,16 +599,18 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
 
 
 def pad_to_height(img: Image.Image, target_h: int) -> Image.Image:
-    """画像の縦横比を崩さず、指定された高さのキャンバスの「中央」に配置して余白を補正する"""
+    """
+    画像の幅・縦横比を一切変えず、上端に揃えて白余白で高さだけを target_h に揃える。
+    target_h が画像より小さい場合は上から target_h だけクロップする。
+    """
     img = img.convert("RGB")
     if img.height == target_h:
         return img
-    
-    # ターゲットの高さに合わせるリサイズ
-    scale = target_h / img.height
-    new_w = max(1, int(img.width * scale))
-    resized = img.resize((new_w, target_h), Image.LANCZOS)
-    return resized
+    if img.height > target_h:
+        return img.crop((0, 0, img.width, target_h))
+    canvas = Image.new("RGB", (img.width, target_h), "white")
+    canvas.paste(img, (0, 0))
+    return canvas
 
 
 # =============================================================================
