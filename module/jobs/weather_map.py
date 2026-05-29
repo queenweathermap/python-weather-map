@@ -209,48 +209,48 @@ def fetch_jma_numeric_pdf_pages(code: str, cycle: str) -> List[Image.Image]:
     気象庁の数値予報天気図PDFを取得して全ページのPIL Imageリストを返す。
       code : 'aupq35' / 'aupq78'
       cycle: '00' / '12'
+
+    指定された cycle で取得できなかった場合は、
+    反対側の cycle も試す。
+      例: cycle='00' → 00 → 12
+          cycle='12' → 12 → 00
     """
     code = code.lower().strip()
-    cycle = cycle.strip()
-    url = f"{JMA_NUMERIC_BASE_URL}/{code}_{cycle}.pdf"
+    preferred_cycle = cycle.strip()
 
-    try:
-        r = requests.get(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0",
-                "Accept": "application/pdf,*/*",
-            },
-            timeout=60,
-            allow_redirects=True,
-        )
-        ct = (r.headers.get("Content-Type") or "").lower()
+    if preferred_cycle not in ("00", "12"):
+        preferred_cycle = "00"
 
-        if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
-            print(f"[OK] JMA {code}_{cycle}: {url}")
-            return [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+    fallback_cycle = "12" if preferred_cycle == "00" else "00"
+    cycles = [preferred_cycle, fallback_cycle]
 
-        print(f"[NG] JMA {code}_{cycle}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
-    except Exception as e:
-        print(f"[ERR] JMA {code}_{cycle}: {e}")
+    for cyc in cycles:
+        url = f"{JMA_NUMERIC_BASE_URL}/{code}_{cyc}.pdf"
 
+        try:
+            r = requests.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0",
+                    "Accept": "application/pdf,*/*",
+                },
+                timeout=60,
+                allow_redirects=True,
+            )
+            ct = (r.headers.get("Content-Type") or "").lower()
+
+            if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
+                pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+                print(f"[OK] JMA {code}_{cyc}: pages={len(pages)} URL={url}")
+                return pages
+
+            print(f"[NG] JMA {code}_{cyc}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
+
+        except Exception as e:
+            print(f"[ERR] JMA {code}_{cyc}: {e}")
+
+    print(f"[NG] JMA {code}: both cycles failed ({preferred_cycle}, {fallback_cycle})")
     return []
-
-
-def fetch_image_content(url: str) -> Optional[bytes]:
-    try:
-        r = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0"},
-            timeout=30,
-        )
-        if r.status_code == 200:
-            return r.content
-        print(f"[NG] image HTTP {r.status_code}: {url}")
-    except Exception as e:
-        print(f"[ERR] image fetch: {e} ({url})")
-
-    return None
 
 
 # =============================================================================
