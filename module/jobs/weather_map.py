@@ -252,6 +252,32 @@ def fetch_jma_numeric_pdf_pages(code: str, cycle: str) -> List[Image.Image]:
     print(f"[NG] JMA {code}: both cycles failed ({preferred_cycle}, {fallback_cycle})")
     return []
 
+def fetch_image_content(url: str) -> Optional[bytes]:
+    """
+    エマグラムなど、PDFではない画像ファイルを取得する。
+    """
+    try:
+        r = requests.get(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0",
+                "Accept": "image/*,*/*",
+            },
+            timeout=30,
+            allow_redirects=True,
+        )
+
+        if r.status_code == 200 and r.content:
+            print(f"[OK] image fetch: {url}")
+            return r.content
+
+        print(f"[NG] image HTTP {r.status_code}: {url}")
+
+    except Exception as e:
+        print(f"[ERR] image fetch: {e} ({url})")
+
+    return None
+
 
 # =============================================================================
 # 共通画像処理
