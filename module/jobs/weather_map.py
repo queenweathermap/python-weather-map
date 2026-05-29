@@ -3,7 +3,7 @@
 # module/jobs/weather_map.py
 #
 # Weathercaster / JMA Weather Map
-# Custom Layout PNG Version / 5 outputs explicit / layout5 widened / layout5 widened
+# Custom Layout PNG Version / 5 outputs explicit / layout5 widened
 #
 # 出力は必ず次の5枚を基本にする:
 #   ① 01_EMAGRAM.png
@@ -240,18 +240,6 @@ def get_first_page_or_none(pages: List[Image.Image]) -> Optional[Image.Image]:
     return pages[0] if pages else None
 
 
-def fetch_first_available_first_page(session: requests.Session, names: List[str]) -> Optional[Image.Image]:
-    """
-    候補名を順番に試して最初に取れたPDFの1ページ目を返す。
-    例: UPPQ78 / UPQ78 の揺れ吸収用。
-    """
-    for name in names:
-        pages = fetch_pdf_pages(session, name)
-        if pages:
-            print(f"[OK] fetched alias source: {name}.pdf")
-            return pages[0]
-    return None
-
 
 def combine_vertical(images: List[Image.Image], *, gap: int = 0) -> Optional[Image.Image]:
     valid = [im.convert("RGB") for im in images if im is not None]
@@ -399,16 +387,17 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     aupq78 = get_first_page_or_none(fetch_pdf_pages(session, "AUPQ78"))
 
     left_parts: List[Image.Image] = []
+    
     if tkai is not None:
         left_parts.append(tkai)
     else:
         errors.append("Layout5: TKAISETU missing")
-
+    
     if aupq35 is not None:
         left_parts.append(aupq35)
     else:
         errors.append("Layout5: AUPQ35 missing")
-
+    
     if aupq78 is not None:
         left_parts.append(aupq78)
     else:
