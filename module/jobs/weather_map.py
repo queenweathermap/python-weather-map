@@ -418,49 +418,61 @@ def normalize_row_to_columns(images: List[Optional[Image.Image]], col_w: int, *,
 # =============================================================================
 # 特殊画像生成関数
 # =============================================================================
-def process_fxjp854_fit(pages: List[Image.Image], target_w: int, *, gap: int = 0) -> Optional[Image.Image]:
+def process_fxjp854_fit(
+    pages: List[Image.Image],
+    target_w: int,
+    target_h: Optional[int] = None,
+    *,
+    gap: int = 0,
+) -> Optional[Image.Image]:
     """
-    FXJP854 を target_w 幅に収まるよう各コマを等幅で横一列に並べる。
+    FXJP854 は「1ページ目を上下に切断 → 左右に横並び → 中央配置」で作る。
 
-    ページ数に応じた処理:
-      4ページ以上 → 先頭4ページを横一列
-      2〜3ページ  → 全ページを横一列
-      1ページ     → 上下2分割して横一列
-
-    各コマの幅 = (target_w - gap × (n-1)) / n に等幅リサイズ（縦横比維持）。
-    高さは最大コマに合わせ、各コマを上下中央揃えで配置。
+    重要:
+    - PDFが複数ページに変換されても、先頭ページだけを使う。
+    - 4ページを横並びにはしない。
+    - target_w に収まるように縮小する。
+    - target_h が指定された場合は、その高さにも収まるように縮小し、
+      白いキャンバスの中央に配置する。
     """
     if not pages:
         return None
 
-    n = len(pages)
-    if n == 1:
-        img = pages[0].convert("RGB")
-        w, h = img.size
-        mid_y = h // 2
-        parts: List[Image.Image] = [
-            img.crop((0, 0, w, mid_y)),
-            img.crop((0, mid_y, w, h)),
-        ]
-    else:
-        parts = [p.convert("RGB") for p in pages[:4]]
+    img = pages[0].convert("RGB")
+    w, h = img.size
+    mid_y = h // 2
 
-    count = len(parts)
-    cell_w = max(1, (target_w - gap * (count - 1)) // count)
+    upper = img.crop((0, 0, w, mid_y))
+    lower = img.crop((0, mid_y, w, h))
 
-    resized = [resize_to_width(p, cell_w) for p in parts]
+    joined = combine_horizontal([upper, lower], gap=gap, valign="top")
+    if joined is None:
+        return None
 
-    max_h = max(r.height for r in resized)
-    centered: List[Image.Image] = []
-    for r in resized:
-        if r.height == max_h:
-            centered.append(r)
-        else:
-            canvas = Image.new("RGB", (r.width, max_h), "white")
-            canvas.paste(r, (0, (max_h - r.height) // 2))
-            centered.append(canvas)
+    # 幅・高さの上限に収まるように、縦横比維持で縮小する。
+    scale = 1.0
+    if target_w and joined.width > target_w:
+        scale = min(scale, target_w / joined.width)
+    if target_h and joined.height > target_h:
+        scale = min(scale, target_h / joined.height)
 
-    return combine_horizontal(centered, gap=gap, valign="top")
+    if scale < 1.0:
+        new_w = max(1, int(joined.width * scale))
+        new_h = max(1, int(joined.height * scale))
+        joined = joined.resize((new_w, new_h), Image.LANCZOS)
+
+    # target_h がある場合は、右側3列エリアの中で中央配置した完成行として返す。
+    if target_h:
+        canvas_w = max(target_w, joined.width)
+        canvas_h = max(target_h, joined.height)
+        canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
+        x = (canvas_w - joined.width) // 2
+        y = (canvas_h - joined.height) // 2
+        canvas.paste(joined, (x, y))
+        return canvas
+
+    return joined
+
 
 
 def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
@@ -594,10 +606,13 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     )
 
     if fxjp854_raw:
-        # right_w 確定後に等幅分割・縦横比維持でリサイズして横並び
-        fxjp854 = process_fxjp854_fit(fxjp854_raw, right_w, gap=LAYOUT_GAP)
-        if fxjp854 is not None:
-            fxjp854 = pad_to_height(fxjp854, row3_h)
+        # FXJP854は「上下切断→横並び」。右側3列幅・左列3段目高さの中で中央配置する。
+        fxjp854 = process_fxjp854_fit(
+            fxjp854_raw,
+            right_w,
+            target_h=row3_h,
+            gap=LAYOUT_GAP,
+        )
     else:
         errors.append("Layout5: FXJP854 missing")
         fxjp854 = None
@@ -648,14 +663,17 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
 
 def pad_to_height(img: Image.Image, target_h: int) -> Image.Image:
     """
-    画像の幅・縦横比を一切変えず、上端に揃えて白余白で高さだけを target_h に揃える。
-    target_h が画像より小さい場合は上から target_h だけクロップする。
+    画像を白余白で target_h にそろえる。
+    target_h より高い場合はクロップせず、縦横比維持で縮小する。
     """
     img = img.convert("RGB")
+    if img.height > target_h:
+        new_w = max(1, int(img.width * (target_h / img.height)))
+        img = img.resize((new_w, target_h), Image.LANCZOS)
+
     if img.height == target_h:
         return img
-    if img.height > target_h:
-        return img.crop((0, 0, img.width, target_h))
+
     canvas = Image.new("RGB", (img.width, target_h), "white")
     canvas.paste(img, (0, 0))
     return canvas
