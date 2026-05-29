@@ -45,6 +45,10 @@ from module.utils.discord_utils import (
 # =============================================================================
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
 JMA_NUMERIC_BASE_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap"
+JMA_TKAISETU_URL = os.environ.get(
+    "JMA_TKAISETU_URL",
+    "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
+).strip()
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
@@ -252,6 +256,36 @@ def fetch_jma_numeric_pdf_pages(code: str, cycle: str) -> List[Image.Image]:
     print(f"[NG] JMA {code}: both cycles failed ({preferred_cycle}, {fallback_cycle})")
     return []
 
+def fetch_jma_direct_pdf_pages(url: str, label: str = "") -> List[Image.Image]:
+    """
+    認証不要の気象庁URLから直接PDFを取得して PIL Image リストを返す。
+    TKAISETU など WCN 経由ではなく JMA 直取得するものに使う。
+    """
+    try:
+        r = requests.get(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0",
+                "Accept": "application/pdf,*/*",
+            },
+            timeout=60,
+            allow_redirects=True,
+        )
+        ct = (r.headers.get("Content-Type") or "").lower()
+
+        if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
+            pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+            print(f"[OK] JMA direct {label}: pages={len(pages)} URL={url}")
+            return pages
+
+        print(f"[NG] JMA direct {label}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
+
+    except Exception as e:
+        print(f"[ERR] JMA direct {label}: {e}")
+
+    return []
+
+
 def fetch_image_content(url: str) -> Optional[bytes]:
     """
     エマグラムなど、PDFではない画像ファイルを取得する。
@@ -439,7 +473,7 @@ def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Att
 def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ⑤ 全部入り（TeamSABOTENスタイル・タブレット天気図完全再現版）
-      左列: TKAISETU(WCN) / AUPQ35(JMA) / AUPQ78(JMA)
+      左列: TKAISETU(JMA直接) / AUPQ35(JMA) / AUPQ78(JMA)
       上段: ASAS / FSAS24 / FSAS48
       中段: COMP12 / COMP36 / COMP72
       下段: FXJP854（上下分割→横並び）
@@ -451,7 +485,8 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     print(f"[INFO] Layout5 JMA numeric cycle: {cycle}")
 
     # 1. 各パーツの読み込み
-    tkai = get_first_page_or_none(fetch_pdf_pages(session, "TKAISETU"))
+    # TKAISETU: WCN経由ではなく気象庁から直接取得
+    tkai = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_TKAISETU_URL, "TKAISETU"))
     aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
     aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
 
@@ -467,7 +502,6 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     fxjp854 = process_fxjp854_split(fxjp854_raw) if fxjp854_raw else None
 
     # 2. 左列の基準幅を先に決める
-    # AUPQ35/78 を左列に表示する際、TKAISETUに合わせて縮小するのではなく
     # AUPQ35/78 の自然な縦横比を維持しつつ、左列幅は TKAISETU に揃える
     left_target_w = tkai.width if tkai else 1000
 
@@ -475,7 +509,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     if tkai is not None:
         left_row1 = resize_to_width(tkai, left_target_w)
     else:
-        errors.append("Layout5: TKAISETU missing (WCN)")
+        errors.append("Layout5: TKAISETU missing (JMA direct)")
         left_row1 = None
 
     # 左列・中段: AUPQ35（縦横比を保ってリサイズ）
@@ -492,13 +526,12 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         errors.append("Layout5: AUPQ78 missing (JMA fallback used blank)")
         left_row3 = None
 
-    # 各段の「基準高さ」を左列から決定する
-    # 右側の各段はこの高さに合わせて pad_to_height する
+    # 各段の「基準高さ」を左列から決定する（右側の各段はこの高さに合わせる）
     row1_h = left_row1.height if left_row1 is not None else 800
     row2_h = left_row2.height if left_row2 is not None else 800
     row3_h = left_row3.height if left_row3 is not None else 800
 
-    # 左列の欠損コマは空白で補完（高さは隣接段から推定）
+    # 左列の欠損コマは空白で補完
     if left_row1 is None:
         left_row1 = Image.new("RGB", (left_target_w, row1_h), "white")
     if left_row2 is None:
@@ -511,7 +544,6 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     top_parts = [asas, fsas24, fsas48]
     candidates_top = [p.width for p in top_parts if p is not None]
     col_w_top = max(candidates_top) if candidates_top else 1200
-    # 各コマを左列の上段高さに合わせてリサイズしてから横結合
     top_resized = []
     for p in top_parts:
         if p is not None:
@@ -540,7 +572,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         mid_canvas.width if mid_canvas else col_w_mid * 3,
     )
 
-    # 右側・下段（FXJP854）：左列下段の高さに合わせてリサイズ
+    # 右側・下段（FXJP854）：右側幅に合わせてリサイズ
     if fxjp854 is not None:
         fxjp854 = resize_to_width(fxjp854, right_w)
         # 高さが左列下段と大きく乖離する場合は pad_to_height で補正
@@ -550,7 +582,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         errors.append("Layout5: FXJP854 missing")
         fxjp854 = Image.new("RGB", (right_w, row3_h), "white")
 
-    # left_row3 の高さを fxjp854 に最終同期（どちらかに合わせる）
+    # left_row3 と fxjp854 の高さを最終同期
     final_row3_h = max(left_row3.height, fxjp854.height)
     if left_row3.height != final_row3_h:
         left_row3 = pad_to_height(left_row3, final_row3_h)
