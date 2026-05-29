@@ -466,68 +466,98 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     fxjp854_raw = fetch_pdf_pages(session, "FXJP854")
     fxjp854 = process_fxjp854_split(fxjp854_raw) if fxjp854_raw else None
 
-    # 2. 右側ブロックの構築と、各段の「基準高さ」の決定
-    # 右側・上段
+    # 2. 左列の基準幅を先に決める
+    # AUPQ35/78 を左列に表示する際、TKAISETUに合わせて縮小するのではなく
+    # AUPQ35/78 の自然な縦横比を維持しつつ、左列幅は TKAISETU に揃える
+    left_target_w = tkai.width if tkai else 1000
+
+    # 左列・上段: TKAISETU（自然サイズで表示）
+    if tkai is not None:
+        left_row1 = resize_to_width(tkai, left_target_w)
+    else:
+        errors.append("Layout5: TKAISETU missing (WCN)")
+        left_row1 = None
+
+    # 左列・中段: AUPQ35（縦横比を保ってリサイズ）
+    if aupq35 is not None:
+        left_row2 = resize_to_width(aupq35, left_target_w)
+    else:
+        errors.append("Layout5: AUPQ35 missing (JMA fallback used blank)")
+        left_row2 = None
+
+    # 左列・下段: AUPQ78（縦横比を保ってリサイズ）
+    if aupq78 is not None:
+        left_row3 = resize_to_width(aupq78, left_target_w)
+    else:
+        errors.append("Layout5: AUPQ78 missing (JMA fallback used blank)")
+        left_row3 = None
+
+    # 各段の「基準高さ」を左列から決定する
+    # 右側の各段はこの高さに合わせて pad_to_height する
+    row1_h = left_row1.height if left_row1 is not None else 800
+    row2_h = left_row2.height if left_row2 is not None else 800
+    row3_h = left_row3.height if left_row3 is not None else 800
+
+    # 左列の欠損コマは空白で補完（高さは隣接段から推定）
+    if left_row1 is None:
+        left_row1 = Image.new("RGB", (left_target_w, row1_h), "white")
+    if left_row2 is None:
+        left_row2 = Image.new("RGB", (left_target_w, row2_h), "white")
+    if left_row3 is None:
+        left_row3 = Image.new("RGB", (left_target_w, row3_h), "white")
+
+    # 3. 右側ブロックの構築（各段の高さを左列に合わせて同期）
+    # 右側・上段（ASAS / FSAS24 / FSAS48）
     top_parts = [asas, fsas24, fsas48]
     candidates_top = [p.width for p in top_parts if p is not None]
-    col_w_top = max(candidates_top) if candidates_top else 1200  # デフォルト幅
-    top_canvas = normalize_row_to_columns(top_parts, col_w_top, gap=LAYOUT_GAP)
-    top_height = top_canvas.height if top_canvas else 800
+    col_w_top = max(candidates_top) if candidates_top else 1200
+    # 各コマを左列の上段高さに合わせてリサイズしてから横結合
+    top_resized = []
+    for p in top_parts:
+        if p is not None:
+            scaled = resize_to_width(p, col_w_top)
+            top_resized.append(pad_to_height(scaled, row1_h))
+        else:
+            top_resized.append(Image.new("RGB", (col_w_top, row1_h), "white"))
+    top_canvas = combine_horizontal(top_resized, gap=LAYOUT_GAP, valign="top")
 
-    # 右側・中段
+    # 右側・中段（COMP12 / COMP36 / COMP72）
     mid_parts = [comp12, comp36, comp72]
     candidates_mid = [p.width for p in mid_parts if p is not None]
     col_w_mid = max(candidates_mid) if candidates_mid else 1200
-    mid_canvas = normalize_row_to_columns(mid_parts, col_w_mid, gap=LAYOUT_GAP)
-    mid_height = mid_canvas.height if mid_canvas else 800
+    mid_resized = []
+    for p in mid_parts:
+        if p is not None:
+            scaled = resize_to_width(p, col_w_mid)
+            mid_resized.append(pad_to_height(scaled, row2_h))
+        else:
+            mid_resized.append(Image.new("RGB", (col_w_mid, row2_h), "white"))
+    mid_canvas = combine_horizontal(mid_resized, gap=LAYOUT_GAP, valign="top")
 
     # 右側の総幅を計算
-    right_w = max(col_w_top, col_w_mid) * 3 + LAYOUT_GAP * 2
+    right_w = max(
+        top_canvas.width if top_canvas else col_w_top * 3,
+        mid_canvas.width if mid_canvas else col_w_mid * 3,
+    )
 
-    # 右側・下段 (FXJP854) のリサイズ調整
+    # 右側・下段（FXJP854）：左列下段の高さに合わせてリサイズ
     if fxjp854 is not None:
-        if fxjp854.width > right_w:
-            fxjp854 = resize_to_width(fxjp854, right_w)
-        elif fxjp854.width < right_w:
-            # 幅が狭い場合は中央配置用の余白を持たせる
-            fxjp854 = pad_to_cell_width(fxjp854, right_w)
+        fxjp854 = resize_to_width(fxjp854, right_w)
+        # 高さが左列下段と大きく乖離する場合は pad_to_height で補正
+        if abs(fxjp854.height - row3_h) > 100:
+            fxjp854 = pad_to_height(fxjp854, row3_h)
     else:
         errors.append("Layout5: FXJP854 missing")
-        # 代替の白画像
-        fxjp854 = Image.new("RGB", (right_w, 600), "white")
-    
-    bottom_height = fxjp854.height
+        fxjp854 = Image.new("RGB", (right_w, row3_h), "white")
 
-    # 3. 【重要】JMA（AUPQ35/78）取得失敗時のガード ＆ 左列の高さ完全同期化
-    # 左列の目標幅を決める（TKAISETUを基準、なければデフォルト）
-    left_target_w = tkai.width if tkai else 1000
+    # left_row3 の高さを fxjp854 に最終同期（どちらかに合わせる）
+    final_row3_h = max(left_row3.height, fxjp854.height)
+    if left_row3.height != final_row3_h:
+        left_row3 = pad_to_height(left_row3, final_row3_h)
+    if fxjp854.height != final_row3_h:
+        fxjp854 = pad_to_height(fxjp854, final_row3_h)
 
-    # 上段に対応する TKAISETU
-    if tkai is not None:
-        left_row1 = resize_to_width(tkai, left_target_w)
-        # 高さを右側上段に揃える（足りない場合は上下に余白）
-        left_row1 = pad_to_height(left_row1, top_height)
-    else:
-        errors.append("Layout5: TKAISETU missing (WCN)")
-        left_row1 = Image.new("RGB", (left_target_w, top_height), "white")
-
-    # 中段に対応する AUPQ35
-    if aupq35 is not None:
-        left_row2 = resize_to_width(aupq35, left_target_w)
-        left_row2 = pad_to_height(left_row2, mid_height)
-    else:
-        errors.append(f"Layout5: AUPQ35 missing (JMA fallback used blank)")
-        left_row2 = Image.new("RGB", (left_target_w, mid_height), "white")
-
-    # 下段に対応する AUPQ78
-    if aupq78 is not None:
-        left_row3 = resize_to_width(aupq78, left_target_w)
-        left_row3 = pad_to_height(left_row3, bottom_height)
-    else:
-        errors.append(f"Layout5: AUPQ78 missing (JMA fallback used blank)")
-        left_row3 = Image.new("RGB", (left_target_w, bottom_height), "white")
-
-    # 左列を隙間なくドッキング
+    # 左列を縦結合
     left_canvas = combine_vertical([left_row1, left_row2, left_row3], gap=LAYOUT_GAP)
 
     # 4. 右側ブロックを縦結合
