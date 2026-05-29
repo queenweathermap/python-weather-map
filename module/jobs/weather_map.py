@@ -3,14 +3,14 @@
 # module/jobs/weather_map.py
 #
 # Weathercaster / JMA Weather Map
-# Custom Layout PNG Version / 5 outputs explicit / layout5 widened
+# Custom Layout PNG Version / 5 outputs explicit / layout5 widened / JMA-left-column / JMA-left-column
 #
 # 出力は必ず次の5枚を基本にする:
 #   ① 01_EMAGRAM.png
 #   ② 02_AXJP140.png
 #   ③ 03_AUPA20.png
 #   ④ 04_LAYOUT_4_WEEKLY.png
-#   ⑤ 05_LAYOUT_5_DASHBOARD.png
+#   ⑤ 05_LAYOUT_5_DASHBOARD.png  ※左列AUPQ35/AUPQ78はJMA直取得
 # =============================================================================
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ from module.utils.discord_utils import (
 # 基本設定
 # =============================================================================
 BASE_URL = "https://www.weathercaster.jp/web/member_only/tenkizu"
+JMA_NUMERIC_BASE_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap"
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
@@ -154,6 +155,15 @@ def issue_base_jst() -> datetime:
     return base
 
 
+def jma_cycle_suffix(issue_dt_jst: datetime) -> str:
+    """
+    JMA数値予報天気図の00/12を決める。
+      09:00 JST初期値 → 00UTC → _00
+      21:00 JST初期値 → 12UTC → _12
+    """
+    return "00" if issue_dt_jst.hour == 9 else "12"
+
+
 def notion_page_url(page_id: str) -> str:
     clean = (page_id or "").replace("-", "")
     return f"https://www.notion.so/{clean}" if clean else ""
@@ -190,6 +200,39 @@ def fetch_pdf_pages(session: requests.Session, name: str) -> List[Image.Image]:
         print(f"[NG] {name}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
     except Exception as e:
         print(f"[ERR] fetch {name}: {e}")
+
+    return []
+
+
+def fetch_jma_numeric_pdf_pages(code: str, cycle: str) -> List[Image.Image]:
+    """
+    気象庁の数値予報天気図PDFを取得して全ページのPIL Imageリストを返す。
+      code : 'aupq35' / 'aupq78'
+      cycle: '00' / '12'
+    """
+    code = code.lower().strip()
+    cycle = cycle.strip()
+    url = f"{JMA_NUMERIC_BASE_URL}/{code}_{cycle}.pdf"
+
+    try:
+        r = requests.get(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0",
+                "Accept": "application/pdf,*/*",
+            },
+            timeout=60,
+            allow_redirects=True,
+        )
+        ct = (r.headers.get("Content-Type") or "").lower()
+
+        if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
+            print(f"[OK] JMA {code}_{cycle}: {url}")
+            return [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+
+        print(f"[NG] JMA {code}_{cycle}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
+    except Exception as e:
+        print(f"[ERR] JMA {code}_{cycle}: {e}")
 
     return []
 
@@ -370,38 +413,44 @@ def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Att
 def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ⑤ 全部入り
-      左列: TKAISETU / AUPQ35 / AUPQ78
+      左列: TKAISETU(WCN) / AUPQ35(JMA) / AUPQ78(JMA)
       上段: ASAS / FSAS24 / FSAS48
       中段: COMP12 / COMP36 / COMP72
       下段: FXJP854（上下分割→横並び→2〜4列エリアの中央配置）
 
-    メモ:
-    - ASAS/FSAS24/FSAS48 は縮小して合わせるのではなく、セル幅を広げて合わせる。
-      画像全体が縦長になってもよい、という要望に合わせた。
+    方針:
+    - 左列のAUPQ35/AUPQ78だけ気象庁から直接取得する。
+    - ASAS/FSAS24/FSAS48 は縮小して合わせず、セル幅を広げて合わせる。
+    - FXJP854 は右側3列エリアの中央に配置する。
     """
-    print("-> Building Layout 5 (Dashboard / widened top row)")
+    print("-> Building Layout 5 (Dashboard / left column uses JMA AUPQ35 AUPQ78)")
+
+    issue_dt_jst = issue_base_jst()
+    cycle = jma_cycle_suffix(issue_dt_jst)
+    print(f"[INFO] Layout5 JMA numeric cycle: {cycle}")
 
     # 左列
+    # TKAISETU はWCN、AUPQ35/AUPQ78 はJMAから取得
     tkai = get_first_page_or_none(fetch_pdf_pages(session, "TKAISETU"))
-    aupq35 = get_first_page_or_none(fetch_pdf_pages(session, "AUPQ35"))
-    aupq78 = get_first_page_or_none(fetch_pdf_pages(session, "AUPQ78"))
+    aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
+    aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
 
     left_parts: List[Image.Image] = []
-    
+
     if tkai is not None:
         left_parts.append(tkai)
     else:
-        errors.append("Layout5: TKAISETU missing")
-    
+        errors.append("Layout5: TKAISETU missing (WCN)")
+
     if aupq35 is not None:
         left_parts.append(aupq35)
     else:
-        errors.append("Layout5: AUPQ35 missing")
-    
+        errors.append(f"Layout5: AUPQ35 missing (JMA cycle={cycle})")
+
     if aupq78 is not None:
         left_parts.append(aupq78)
     else:
-        errors.append("Layout5: AUPQ78 missing")
+        errors.append(f"Layout5: AUPQ78 missing (JMA cycle={cycle})")
 
     left_canvas = combine_vertical(left_parts, gap=LAYOUT_GAP)
 
@@ -435,7 +484,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     if fxjp854 is None:
         errors.append("Layout5: FXJP854 missing")
     elif fxjp854.width > right_w:
-        # FX は3列エリアより広い場合のみ縮小。狭い場合は中央配置だけ行う。
+        # FXは3列エリアより広い場合のみ縮小。狭い場合は中央配置だけ行う。
         fxjp854 = resize_to_width(fxjp854, right_w)
 
     valid_rows = [row for row in [top_canvas, mid_canvas, fxjp854] if row is not None]
@@ -456,6 +505,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
 
     final_w = left_canvas.width + LAYOUT_GAP + right_canvas.width
     final_h = max(left_canvas.height, right_canvas.height)
+
     final_canvas = Image.new("RGB", (final_w, final_h), "white")
     final_canvas.paste(left_canvas, (0, 0))
     final_canvas.paste(right_canvas, (left_canvas.width + LAYOUT_GAP, 0))
