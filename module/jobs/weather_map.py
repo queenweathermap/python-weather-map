@@ -69,6 +69,7 @@ WEATHERCASTER_PASS = os.environ.get("WEATHERCASTER_PASS", "").strip()
 
 MAIL_ENABLE = os.environ.get("MAIL_ENABLE", "0").lower() in ("1", "true", "yes", "on")
 MAIL_SLACK_MODE = os.environ.get("MAIL_SLACK_MODE", "off").strip().lower()
+DISCORD_UPLOAD_AS_FILE = os.environ.get("DISCORD_UPLOAD_AS_FILE", "1").lower() in ("1", "true", "yes", "on")
 
 Attachment = Tuple[str, bytes, str]
 
@@ -115,6 +116,25 @@ def post_discord_text(content: str) -> None:
         requests.post(discord_jma_webhook_url(), json={"content": content}, timeout=20)
     except Exception as e:
         print(f"[WARN] Discord text send failed: {e}")
+
+
+def post_discord_file_image(webhook_url: str, title: str, image_path: str) -> None:
+    """
+    Discord webhook に画像そのものを添付して送る。
+    外部URL埋め込みよりも、元画像の高解像度を保ったまま開きやすい。
+    """
+    with open(image_path, "rb") as f:
+        payload = {
+            "content": title,
+            "allowed_mentions": {"parse": []},
+        }
+        r = requests.post(
+            webhook_url,
+            data={"payload_json": __import__("json").dumps(payload, ensure_ascii=False)},
+            files={"file": (os.path.basename(image_path), f, "image/png")},
+            timeout=120,
+        )
+        r.raise_for_status()
 
 
 EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", "yes", "on")
@@ -894,25 +914,18 @@ def notify_mail_outputs(
     rjtd: str,
     attachments: List[Attachment],
     errors: List[str],
+    all_urls: Optional[List[str]] = None,
+    rep_url: Optional[str] = None,
+    notion_url: str = "",
 ) -> None:
     """
-    生成済みPNG 5枚をメール添付で送信する。
-    mail_utils.py の ZIP自動化を効かせるため、attachment_blobs ではなく
-    OUTPUT_DIR に書き出したファイルパス attachment_paths で渡す。
+    メール通知を送信する。
+
+    高解像度PNG 5枚は Gmail の送信上限を超えやすいため、
+    NotionページURLがある場合は添付せず、本文にNotionリンクを載せる。
+    Notion URL が無い場合は R2 URL、それも無い場合だけ添付送信にする。
     """
     if not MAIL_ENABLE:
-        return
-
-    paths: List[str] = []
-    for fname, _data, _mime in attachments:
-        path = os.path.join(OUTPUT_DIR, fname)
-        if os.path.exists(path):
-            paths.append(path)
-        else:
-            print(f"[WARN] mail attachment file missing: {path}")
-
-    if not paths:
-        print("[WARN] mail skipped: no attachment files")
         return
 
     init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
@@ -923,10 +936,77 @@ def notify_mail_outputs(
         "",
         f"初期時刻: {init_jst}",
         f"RJTD: {rjtd}",
-        f"添付数: {len(paths)}",
         "",
-        "添付:",
     ]
+
+    # Notion URL がある場合は、添付せず Notionページリンクだけ送る。
+    # iPadではこのリンクを開けば、Notion上の高解像度画像を確認できる。
+    if notion_url:
+        body_lines.extend([
+            "Notionページ:",
+            notion_url,
+        ])
+
+        if errors:
+            body_lines.extend(["", "WARN / ERROR:"])
+            body_lines.extend([f"- {e}" for e in errors])
+
+        try:
+            mid = send_mail(
+                subject=subject,
+                body="\\n".join(body_lines),
+                attachment_paths=[],
+                slack_mode=MAIL_SLACK_MODE,
+            )
+            print(f"[OK] mail sent with Notion link: {mid}")
+        except Exception as e:
+            msg = f"Mail failed: {type(e).__name__}: {e}"
+            print(f"[WARN] {msg}")
+            errors.append(msg)
+        return
+
+    # Notion URL が無い場合は、R2 URL を本文に入れる。
+    if all_urls:
+        body_lines.append("画像リンク:")
+        for idx, url in enumerate(all_urls):
+            title = OUTPUT_TITLES[idx] if idx < len(OUTPUT_TITLES) else f"資料 {idx + 1}"
+            body_lines.append(f"- {title}: {url}")
+
+        if rep_url:
+            body_lines.extend(["", f"代表画像: {rep_url}"])
+
+        if errors:
+            body_lines.extend(["", "WARN / ERROR:"])
+            body_lines.extend([f"- {e}" for e in errors])
+
+        try:
+            mid = send_mail(
+                subject=subject,
+                body="\\n".join(body_lines),
+                attachment_paths=[],
+                slack_mode=MAIL_SLACK_MODE,
+            )
+            print(f"[OK] mail sent with R2 links: {mid}")
+        except Exception as e:
+            msg = f"Mail failed: {type(e).__name__}: {e}"
+            print(f"[WARN] {msg}")
+            errors.append(msg)
+        return
+
+    # Notion URL / R2 URL がどちらも無い場合だけ添付送信にフォールバックする。
+    paths: List[str] = []
+    for fname, _data, _mime in attachments:
+        path = os.path.join(OUTPUT_DIR, fname)
+        if os.path.exists(path):
+            paths.append(path)
+        else:
+            print(f"[WARN] mail attachment file missing: {path}")
+
+    if not paths:
+        print("[WARN] mail skipped: no attachment files or URLs")
+        return
+
+    body_lines.append("添付:")
     body_lines.extend([f"- {os.path.basename(p)}" for p in paths])
 
     if errors:
@@ -936,18 +1016,15 @@ def notify_mail_outputs(
     try:
         mid = send_mail(
             subject=subject,
-            body="\n".join(body_lines),
+            body="\\n".join(body_lines),
             attachment_paths=paths,
             slack_mode=MAIL_SLACK_MODE,
         )
-        print(f"[OK] mail sent: {mid}")
+        print(f"[OK] mail sent with attachments: {mid}")
     except Exception as e:
-        # メール失敗で全体処理を止めない。R2/Notion/Discord は継続する。
         msg = f"Mail failed: {type(e).__name__}: {e}"
         print(f"[WARN] {msg}")
         errors.append(msg)
-
-
 # =============================================================================
 # R2 / Notion / Discord 連携
 # =============================================================================
@@ -1030,12 +1107,36 @@ def discord_links_text() -> str:
 
 
 def notify_discord_images(*, all_urls: List[str], rjtd: str, issue_dt_jst: datetime) -> None:
-    if not discord_jma_enabled() or not all_urls:
+    if not discord_jma_enabled():
         return
 
     init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
 
-    # 5枚を1メッセージでギャラリー表示にせず、1枚ずつ順番に投稿する
+    # 高解像度を優先したいので、既定では外部URL埋め込みではなく
+    # 生成PNGそのものをDiscordへ添付する。
+    if DISCORD_UPLOAD_AS_FILE:
+        for idx, filename in enumerate(OUTPUT_FILENAMES):
+            title = OUTPUT_TITLES[idx] if idx < len(OUTPUT_TITLES) else f"資料 {idx + 1}"
+            image_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
+            if not os.path.exists(image_path):
+                print(f"[WARN] Discord file missing: {image_path}")
+                continue
+
+            try:
+                post_discord_file_image(
+                    webhook_url=discord_jma_webhook_url(),
+                    title=f"{init_jst} / {title}",
+                    image_path=image_path,
+                )
+            except Exception as e:
+                print(f"[WARN] Discord file upload failed: {image_path} / {e}")
+        post_discord_text(discord_links_text())
+        return
+
+    # 旧方式: URL埋め込み
+    if not all_urls:
+        return
+
     for idx, url in enumerate(all_urls):
         title = OUTPUT_TITLES[idx] if idx < len(OUTPUT_TITLES) else f"資料 {idx + 1}"
         post_discord_item_image_urls(
@@ -1048,7 +1149,6 @@ def notify_discord_images(*, all_urls: List[str], rjtd: str, issue_dt_jst: datet
         )
 
     post_discord_text(discord_links_text())
-
 
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
     if not discord_jma_enabled():
@@ -1076,17 +1176,6 @@ def main() -> None:
         run_prefix = f"{R2_PREFIX}/{day}/RJTD_{rjtd}"
 
         images, errors = build_outputs()
-
-        # OUTPUT_DIR の一時PNGが存在しているうちにメール送信する。
-        # 高解像度PNG 5枚は重くなりやすいため、mail_utils.py 側で ZIP 化できるよう
-        # attachment_paths で送る。
-        notify_mail_outputs(
-            issue_dt_jst=issue_dt_jst,
-            rjtd=rjtd,
-            attachments=images,
-            errors=errors,
-        )
-
         all_urls, rep_url = upload_to_r2(run_prefix, images)
 
         page_id = notion_write_db(
@@ -1098,8 +1187,23 @@ def main() -> None:
             errors=errors,
         )
 
-        if page_id:
-            print(f"[OK] Notion URL: {notion_page_url(page_id)}")
+        notion_url = notion_page_url(page_id) if page_id else ""
+        if notion_url:
+            print(f"[OK] Notion URL: {notion_url}")
+
+        # 高解像度PNG 5枚は Gmail の添付上限を超えやすいので、
+        # メールには添付せず、Notionページリンクを送る。
+        # Notion URL が作れなかった場合のみ R2 URL、
+        # それも無い場合は添付送信にフォールバックする。
+        notify_mail_outputs(
+            issue_dt_jst=issue_dt_jst,
+            rjtd=rjtd,
+            attachments=images,
+            errors=errors,
+            all_urls=all_urls,
+            rep_url=rep_url,
+            notion_url=notion_url,
+        )
 
         try:
             notify_discord_images(all_urls=all_urls, rjtd=rjtd, issue_dt_jst=issue_dt_jst)
