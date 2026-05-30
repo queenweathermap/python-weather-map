@@ -386,13 +386,14 @@ def resize_to_width(img: Image.Image, target_w: int) -> Image.Image:
     target_h = max(1, int(img.height * (target_w / img.width)))
     return img.resize((target_w, target_h), Image.LANCZOS)
 
-def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int) -> Image.Image:
+def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "center") -> Image.Image:
     """
-    画像を指定セル内に収め、白背景のセル中央に配置する。
+    画像を指定セル内に収め、白背景セルに配置する。
     縦横比は維持する。
     - 幅が足りない画像は拡大
     - 高さがはみ出る場合は高さ優先で縮小
     - 最終的に cell_w x cell_h の固定セルを返す
+    - valign="top" のときは上寄せ、既定は中央配置
     """
     img = img.convert("RGB")
 
@@ -408,10 +409,26 @@ def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int) -> Image.Image:
 
     canvas = Image.new("RGB", (cell_w, cell_h), "white")
     x = (cell_w - new_w) // 2
-    y = (cell_h - new_h) // 2
+    if valign == "top":
+        y = 0
+    else:
+        y = (cell_h - new_h) // 2
     canvas.paste(resized, (x, y))
 
     return canvas
+
+
+def resize_to_width_top(img: Image.Image, target_w: int) -> Image.Image:
+    """
+    縦横比を保ったまま指定幅まで拡大・縮小する。
+    中段COMP系のように『画像の左右端をそろえたい』場合に使う。
+    返り値は余白なしの実画像サイズ。
+    """
+    img = img.convert("RGB")
+    if target_w <= 0 or img.width <= 0:
+        return img
+    target_h = max(1, int(img.height * (target_w / img.width)))
+    return img.resize((target_w, target_h), Image.LANCZOS)
 
 
 def pad_to_cell_width(img: Image.Image, cell_w: int, *, valign: str = "top") -> Image.Image:
@@ -488,13 +505,13 @@ def process_fxjp854_fit(
         new_h = max(1, int(joined.height * scale))
         joined = joined.resize((new_w, new_h), Image.LANCZOS)
 
-    # target_h がある場合は、右側3列エリアの中で中央配置した完成行として返す。
+    # target_h がある場合は、右側3列エリアの中で上揃えで返す。
     if target_h:
         canvas_w = max(target_w, joined.width)
         canvas_h = max(target_h, joined.height)
         canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
         x = (canvas_w - joined.width) // 2
-        y = (canvas_h - joined.height) // 2
+        y = 0
         canvas.paste(joined, (x, y))
         return canvas
 
@@ -621,7 +638,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     top_cells: List[Image.Image] = []
     for p in top_parts:
         if p is not None:
-            top_cells.append(fit_to_cell(p, right_col_w, row1_h))
+            top_cells.append(fit_to_cell(p, right_col_w, row1_h, valign="top"))
         else:
             top_cells.append(Image.new("RGB", (right_col_w, row1_h), "white"))
 
@@ -629,12 +646,13 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
 
     # -------------------------------------------------------------------------
     # 5. 右側・中段（COMP12 / COMP36 / COMP72）
-    #    上段と同じ right_col_w に拡大して横幅をそろえる
+    #    各画像を right_col_w いっぱいまで拡大して、画像の左右端を上段とそろえる。
+    #    高さは row2_h に押し込めず、実画像の高さを活かす。
     # -------------------------------------------------------------------------
     mid_cells: List[Image.Image] = []
     for p in mid_parts:
         if p is not None:
-            mid_cells.append(fit_to_cell(p, right_col_w, row2_h))
+            mid_cells.append(resize_to_width_top(p, right_col_w))
         else:
             mid_cells.append(Image.new("RGB", (right_col_w, row2_h), "white"))
 
