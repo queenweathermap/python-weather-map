@@ -265,19 +265,6 @@ def post_discord(urls, errors, notion_url=""):
             init_jst="",
         )
 
-    # Notionページ
-    if notion_url:
-        try:
-            requests.post(
-                discord_url(),
-                json={
-                    "content": f"📘 Notionページ\n{notion_url}"
-                },
-                timeout=10,
-            )
-        except Exception as e:
-            print(e)
-
     # ポータル（テキスト）
     try:
         requests.post(
@@ -294,7 +281,7 @@ def post_discord(urls, errors, notion_url=""):
     post_discord_complete(
         webhook_url=discord_url(),
         category="Guidance",
-        notion_url=notion_url,
+        notion_url="",
         attach_count=len(urls),
         errors=errors,
     )
