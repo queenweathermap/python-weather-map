@@ -58,6 +58,7 @@ PDF_DPI = int(os.environ.get("PDF_DPI", os.environ.get("JPEG_DPI", "220")))
 PNG_OPTIMIZE = os.environ.get("PNG_OPTIMIZE", "1").lower() in ("1", "true", "yes", "on")
 LAYOUT_GAP = int(os.environ.get("LAYOUT_GAP", "24"))
 LAYOUT5_TRIM_PAD = int(os.environ.get("LAYOUT5_TRIM_PAD", "8"))
+LAYOUT5_FINAL_PAD = int(os.environ.get("LAYOUT5_FINAL_PAD", "6"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
@@ -489,6 +490,15 @@ def prepare_comp_panel(img: Image.Image, target_w: int) -> Image.Image:
     return resize_to_width_top(trimmed, target_w)
 
 
+def prepare_left_panel(img: Image.Image, target_w: int) -> Image.Image:
+    """
+    左列AUPQ系の外周余白を少し整理してから、左列幅にそろえる。
+    これにより右側との段高差を減らし、Discordで見えていた締まった形に近づける。
+    """
+    trimmed = trim_white_margins(img, pad=LAYOUT5_TRIM_PAD)
+    return resize_to_width(trimmed, target_w)
+
+
 def pad_to_cell_width(img: Image.Image, cell_w: int, *, valign: str = "top") -> Image.Image:
     """
     画像自体は拡大縮小せず、セル幅だけをそろえる。
@@ -651,8 +661,8 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     left_target_w = tkai.width if tkai else 1000
 
     left_row1 = resize_to_width(tkai, left_target_w) if tkai is not None else None
-    left_row2 = resize_to_width(aupq35, left_target_w) if aupq35 is not None else None
-    left_row3 = resize_to_width(aupq78, left_target_w) if aupq78 is not None else None
+    left_row2 = prepare_left_panel(aupq35, left_target_w) if aupq35 is not None else None
+    left_row3 = prepare_left_panel(aupq78, left_target_w) if aupq78 is not None else None
 
     if left_row1 is None:
         errors.append("Layout5: TKAISETU missing (JMA direct)")
@@ -774,6 +784,9 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     final_canvas = Image.new("RGB", (final_w, final_h), "white")
     final_canvas.paste(left_canvas, (0, 0))
     final_canvas.paste(right_canvas, (left_canvas.width + LAYOUT_GAP, 0))
+
+    # 仕上げに外周の余白を少しだけ整理して、Discordで見えていた締まった形に寄せる。
+    final_canvas = trim_white_margins(final_canvas, pad=LAYOUT5_FINAL_PAD)
 
     return pil_to_attachment(final_canvas, "LAYOUT_5_DASHBOARD")
 
