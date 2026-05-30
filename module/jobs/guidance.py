@@ -138,11 +138,11 @@ def capture():
                     errors.append(f"{label}: authentication failed")
                     continue
 
-                png = page.screenshot(full_page=True)
-                jpg = png_to_jpg(png)
+                # PNGのまま保存する。細かい文字・罫線を読む用途ではJPEGより劣化しにくい。
+                png = page.screenshot(full_page=True, type="png")
 
-                fname = f"{name}.jpg"
-                atts.append((fname, jpg, "image/jpeg"))
+                fname = f"{name}.png"
+                atts.append((fname, png, "image/png"))
 
             except Exception as e:
                 errors.append(f"{label}: {e}")
@@ -278,6 +278,7 @@ def post_discord(urls, errors, notion_url=""):
         print(e)
 
     # 完了
+    # Discordは速報・確認用に統一するため、Notionリンクは出さない。
     post_discord_complete(
         webhook_url=discord_url(),
         category="Guidance",
@@ -285,6 +286,7 @@ def post_discord(urls, errors, notion_url=""):
         attach_count=len(urls),
         errors=errors,
     )
+
 
 # =============================================================================
 # main
