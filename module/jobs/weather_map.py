@@ -954,7 +954,7 @@ def notify_mail_outputs(
         try:
             mid = send_mail(
                 subject=subject,
-                body="\\n".join(body_lines),
+                body="\n".join(body_lines),
                 attachment_paths=[],
                 slack_mode=MAIL_SLACK_MODE,
             )
@@ -982,7 +982,7 @@ def notify_mail_outputs(
         try:
             mid = send_mail(
                 subject=subject,
-                body="\\n".join(body_lines),
+                body="\n".join(body_lines),
                 attachment_paths=[],
                 slack_mode=MAIL_SLACK_MODE,
             )
@@ -1016,7 +1016,7 @@ def notify_mail_outputs(
     try:
         mid = send_mail(
             subject=subject,
-            body="\\n".join(body_lines),
+            body="\n".join(body_lines),
             attachment_paths=paths,
             slack_mode=MAIL_SLACK_MODE,
         )
