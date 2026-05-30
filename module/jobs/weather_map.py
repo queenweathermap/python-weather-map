@@ -659,7 +659,18 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         fxjp854 = Image.new("RGB", (right_w, row3_h), "white")
 
     # -------------------------------------------------------------------------
-    # 7. 右側ブロックを縦結合（中央揃えで貼り付け）
+    # 7. 左列3段目と FXJP854 の高さを最終同期し、左列を縦結合
+    # -------------------------------------------------------------------------
+    final_row3_h = max(left_row3.height, fxjp854.height)
+    if left_row3.height != final_row3_h:
+        left_row3 = pad_to_height(left_row3, final_row3_h)
+    if fxjp854.height != final_row3_h:
+        fxjp854 = pad_to_height(fxjp854, final_row3_h)
+
+    left_canvas = combine_vertical([left_row1, left_row2, left_row3], gap=LAYOUT_GAP)
+
+    # -------------------------------------------------------------------------
+    # 8. 右側ブロックを縦結合（中央揃えで貼り付け）
     # -------------------------------------------------------------------------
     valid_rows = [row for row in [top_canvas, mid_canvas, fxjp854] if row is not None]
     right_h = sum(row.height for row in valid_rows) + LAYOUT_GAP * max(0, len(valid_rows) - 1)
@@ -672,7 +683,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         y += row.height + LAYOUT_GAP
 
     # -------------------------------------------------------------------------
-    # 8. 左列と右側ブロックの最終マージ
+    # 9. 左列と右側ブロックの最終マージ
     # -------------------------------------------------------------------------
     if left_canvas is None:
         return pil_to_attachment(right_canvas, "LAYOUT_5_DASHBOARD")
