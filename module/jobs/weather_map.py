@@ -581,14 +581,13 @@ def process_fxjp854_fit(
     gap: int = 0,
 ) -> Optional[Image.Image]:
     """
-    FXJP854 は「1ページ目を上下に切断 → 左右に横並び → 中央配置」で作る。
+    FXJP854 は「1ページ目を上下に切断 → 左右に横並び」で作る。
 
-    重要:
-    - PDFが複数ページに変換されても、先頭ページだけを使う。
-    - 4ページを横並びにはしない。
-    - target_w に収まるように縮小する。
-    - target_h が指定された場合は、その高さにも収まるように縮小し、
-      白いキャンバスの中央に配置する。
+    調整方針:
+    - 上下分割した各画像は外周の白余白をできるだけ除去する。
+    - 横並び後も上下の白余白をできるだけ除去する。
+    - target_h が指定された場合でも縦中央には置かず、上揃えで配置する。
+      これにより、2段目との間の無駄な余白をなくし、左列3段目とも上端をそろえやすくする。
     """
     if not pages:
         return None
@@ -600,9 +599,16 @@ def process_fxjp854_fit(
     upper = img.crop((0, 0, w, mid_y))
     lower = img.crop((0, mid_y, w, h))
 
+    # それぞれの白余白を削ってから横並びにする
+    upper = trim_white_margins(upper, pad=0)
+    lower = trim_white_margins(lower, pad=0)
+
     joined = combine_horizontal([upper, lower], gap=gap, valign="top")
     if joined is None:
         return None
+
+    # 横結合後も上下左右の白余白を削る
+    joined = trim_white_margins(joined, pad=0)
 
     # 幅・高さの上限に収まるように、縦横比維持で縮小する。
     scale = 1.0
@@ -616,18 +622,16 @@ def process_fxjp854_fit(
         new_h = max(1, int(joined.height * scale))
         joined = joined.resize((new_w, new_h), Image.LANCZOS)
 
-    # target_h がある場合は、右側3列エリアの中で中央配置した完成行として返す。
     if target_h:
         canvas_w = max(target_w, joined.width)
         canvas_h = max(target_h, joined.height)
         canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
         x = (canvas_w - joined.width) // 2
-        y = (canvas_h - joined.height) // 2
+        y = 0
         canvas.paste(joined, (x, y))
         return canvas
 
     return joined
-
 
 
 def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
@@ -801,15 +805,23 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     # -------------------------------------------------------------------------
     # 8. 右側ブロックを縦結合（中央揃えで貼り付け）
     # -------------------------------------------------------------------------
-    valid_rows = [row for row in [top_canvas, mid_canvas, fxjp854] if row is not None]
-    right_h = sum(row.height for row in valid_rows) + LAYOUT_GAP * max(0, len(valid_rows) - 1)
+    # 上段→中段の間だけ通常ギャップを入れ、中段→下段(FXJP854)は密着させる。
+    rows_with_gap = [
+        (top_canvas, LAYOUT_GAP),
+        (mid_canvas, 0),
+        (fxjp854, 0),
+    ]
+    valid_rows = [(row, gap_after) for row, gap_after in rows_with_gap if row is not None]
+    right_h = sum(row.height + gap_after for row, gap_after in valid_rows)
+    if valid_rows:
+        right_h -= valid_rows[-1][1]
     right_canvas = Image.new("RGB", (right_w, right_h), "white")
 
     y = 0
-    for row in valid_rows:
+    for row, gap_after in valid_rows:
         x = (right_w - row.width) // 2
         right_canvas.paste(row, (x, y))
-        y += row.height + LAYOUT_GAP
+        y += row.height + gap_after
 
     # -------------------------------------------------------------------------
     # 9. 左列と右側ブロックの最終マージ
