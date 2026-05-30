@@ -32,6 +32,7 @@ from module.utils.notion_utils import (
     notion_enabled,
     create_db_row,
     append_images,
+    append_imported_images_from_urls,
     append_heading,
     append_bookmark,
 )
@@ -61,6 +62,10 @@ LAYOUT_GAP = int(os.environ.get("LAYOUT_GAP", "24"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
+
+NOTION_IMPORT_IMAGES = os.environ.get("NOTION_IMPORT_IMAGES", "0").lower() in ("1", "true", "yes", "on")
+NOTION_IMPORT_TIMEOUT_SECONDS = int(os.environ.get("NOTION_IMPORT_TIMEOUT_SECONDS", "180"))
+NOTION_IMPORT_POLL_SECONDS = float(os.environ.get("NOTION_IMPORT_POLL_SECONDS", "2.0"))
 
 WEATHERCASTER_USER = os.environ.get("WEATHERCASTER_USER", "").strip()
 WEATHERCASTER_PASS = os.environ.get("WEATHERCASTER_PASS", "").strip()
@@ -892,9 +897,29 @@ def notion_write_db(
 
     try:
         if all_urls:
-            append_images(page_id, all_urls, chunk=30)
+            if NOTION_IMPORT_IMAGES:
+                items = []
+                for idx, url in enumerate(all_urls):
+                    fname = f"{OUTPUT_FILENAMES[idx]}.png" if idx < len(OUTPUT_FILENAMES) else f"image_{idx + 1}.png"
+                    items.append((fname, url, "image/png"))
+
+                append_imported_images_from_urls(
+                    page_id,
+                    items,
+                    chunk=10,
+                    timeout_seconds=NOTION_IMPORT_TIMEOUT_SECONDS,
+                    poll_seconds=NOTION_IMPORT_POLL_SECONDS,
+                )
+            else:
+                append_images(page_id, all_urls, chunk=30)
     except Exception as e:
-        print(f"[WARN] append_images failed: {e}")
+        print(f"[WARN] Notion image append/import failed: {e}")
+        # 移行中の安全策: Notion取り込みに失敗したら従来の外部URL埋め込みへ戻す
+        try:
+            if all_urls:
+                append_images(page_id, all_urls, chunk=30)
+        except Exception as e2:
+            print(f"[WARN] append_images fallback failed: {e2}")
 
     return page_id
 
