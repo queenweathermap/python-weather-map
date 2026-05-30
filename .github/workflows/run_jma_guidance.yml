@@ -62,9 +62,10 @@ jobs:
       # ------------------------------------------------------------
       # スクリーンショット設定
       # ------------------------------------------------------------
-      GUIDANCE_VIEWPORT_WIDTH: "1200"
-      GUIDANCE_VIEWPORT_HEIGHT: "900"
+      GUIDANCE_VIEWPORT_WIDTH: "1600"
+      GUIDANCE_VIEWPORT_HEIGHT: "1200"
       GUIDANCE_WAIT_MS: "2500"
+      # PNG保存のため通常は未使用。JPEGへ戻す場合のみ使用。
       JPEG_QUALITY: "90"
 
     steps:
