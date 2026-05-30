@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 import requests
 
@@ -283,6 +283,162 @@ def set_page_cover(page_id: str, image_url: str) -> None:
     payload = {"cover": {"type": "external", "external": {"url": image_url}}}
     r = requests.patch(f"{API_BASE}/pages/{page_id}", headers=_headers(), json=payload, timeout=60)
     r.raise_for_status()
+
+
+# -----------------------------------------------------------------------------
+# Notion File Upload API
+# -----------------------------------------------------------------------------
+def create_file_upload_from_url(
+    url: str,
+    *,
+    filename: str = "",
+    content_type: str = "image/png",
+) -> str:
+    """
+    外部URL上のファイルをNotion管理ストレージへ取り込むための
+    File Uploadオブジェクトを作成する。
+    R2を一時置き場にしてNotionへ移行する運用で使う。
+    """
+    if not notion_enabled():
+        return ""
+
+    url = (url or "").strip()
+    if not url:
+        return ""
+
+    payload: Dict[str, Any] = {
+        "mode": "external_url",
+        "external_url": url,
+    }
+    if filename:
+        payload["filename"] = filename
+    if content_type:
+        payload["content_type"] = content_type
+
+    r = requests.post(f"{API_BASE}/file_uploads", headers=_headers(), json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()["id"]
+
+
+def retrieve_file_upload(file_upload_id: str) -> Dict[str, Any]:
+    if not notion_enabled():
+        return {}
+
+    r = requests.get(f"{API_BASE}/file_uploads/{file_upload_id}", headers=_headers(), timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+
+def wait_file_upload_uploaded(
+    file_upload_id: str,
+    *,
+    timeout_seconds: int = 180,
+    poll_seconds: float = 2.0,
+) -> Dict[str, Any]:
+    """
+    external_url import は非同期なので uploaded / failed まで待つ。
+    """
+    deadline = time.time() + timeout_seconds
+    last: Dict[str, Any] = {}
+
+    while time.time() < deadline:
+        last = retrieve_file_upload(file_upload_id)
+        status = (last.get("status") or "").lower()
+
+        if status == "uploaded":
+            return last
+        if status in ("failed", "expired"):
+            raise RuntimeError(f"Notion file_upload {file_upload_id} status={status}: {last}")
+
+        time.sleep(poll_seconds)
+
+    raise TimeoutError(f"Notion file_upload timeout: id={file_upload_id} last={last}")
+
+
+def append_uploaded_images(
+    page_or_block_id: str,
+    upload_ids: List[str],
+    *,
+    captions: Optional[List[str]] = None,
+    chunk: int = 10,
+) -> None:
+    """
+    Notion管理ストレージに取り込み済みの file_upload を画像ブロックとして追加する。
+    """
+    if not notion_enabled():
+        return
+
+    upload_ids = [u for u in (upload_ids or []) if u]
+    if not upload_ids:
+        return
+
+    captions = captions or []
+
+    for i in range(0, len(upload_ids), chunk):
+        part = upload_ids[i:i + chunk]
+        children: List[dict] = []
+
+        for j, upload_id in enumerate(part):
+            cap = captions[i + j] if i + j < len(captions) else ""
+            block: Dict[str, Any] = {
+                "object": "block",
+                "type": "image",
+                "image": {
+                    "type": "file_upload",
+                    "file_upload": {"id": upload_id},
+                },
+            }
+            if cap:
+                block["image"]["caption"] = [{"type": "text", "text": {"content": cap}}]
+            children.append(block)
+
+        _append_children_with_retry(
+            page_or_block_id,
+            children,
+            label=f"uploaded_images[{i}:{i + len(part)}]",
+        )
+
+
+def append_imported_images_from_urls(
+    page_or_block_id: str,
+    items: List[Tuple[str, str, str]],
+    *,
+    chunk: int = 10,
+    timeout_seconds: int = 180,
+    poll_seconds: float = 2.0,
+) -> None:
+    """
+    R2などの外部URL画像をNotion管理ストレージに取り込んでから、
+    file_upload画像ブロックとしてページに追加する。
+
+    items: [(filename, url, content_type), ...]
+    """
+    if not notion_enabled():
+        return
+
+    upload_ids: List[str] = []
+    captions: List[str] = []
+
+    for filename, url, content_type in items:
+        url = (url or "").strip()
+        if not url:
+            continue
+
+        print(f"[NOTION] import image from URL: {filename} {url}")
+        upload_id = create_file_upload_from_url(
+            url,
+            filename=filename,
+            content_type=content_type or "image/png",
+        )
+        wait_file_upload_uploaded(
+            upload_id,
+            timeout_seconds=timeout_seconds,
+            poll_seconds=poll_seconds,
+        )
+        upload_ids.append(upload_id)
+        captions.append(filename)
+
+    append_uploaded_images(page_or_block_id, upload_ids, captions=captions, chunk=chunk)
 
 
 # -----------------------------------------------------------------------------
