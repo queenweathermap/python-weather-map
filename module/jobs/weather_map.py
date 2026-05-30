@@ -386,6 +386,33 @@ def resize_to_width(img: Image.Image, target_w: int) -> Image.Image:
     target_h = max(1, int(img.height * (target_w / img.width)))
     return img.resize((target_w, target_h), Image.LANCZOS)
 
+def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int) -> Image.Image:
+    """
+    画像を指定セル内に収め、白背景のセル中央に配置する。
+    縦横比は維持する。
+    - 幅が足りない画像は拡大
+    - 高さがはみ出る場合は高さ優先で縮小
+    - 最終的に cell_w x cell_h の固定セルを返す
+    """
+    img = img.convert("RGB")
+
+    if img.width <= 0 or img.height <= 0:
+        return Image.new("RGB", (cell_w, cell_h), "white")
+
+    scale = min(cell_w / img.width, cell_h / img.height)
+
+    new_w = max(1, int(img.width * scale))
+    new_h = max(1, int(img.height * scale))
+
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+    canvas = Image.new("RGB", (cell_w, cell_h), "white")
+    x = (cell_w - new_w) // 2
+    y = (cell_h - new_h) // 2
+    canvas.paste(resized, (x, y))
+
+    return canvas
+
 
 def pad_to_cell_width(img: Image.Image, cell_w: int, *, valign: str = "top") -> Image.Image:
     """
@@ -568,43 +595,54 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         left_row3 = Image.new("RGB", (left_target_w, row3_h), "white")
 
     # -------------------------------------------------------------------------
-    # 3. 右側・上段（ASAS / FSAS24 / FSAS48）: 左列上段の高さに揃えて3列横並び
+    # 3. 右側3列の共通セル幅を決める
+    #    上段 ASAS/FSAS24/FSAS48 と
+    #    中段 COMP12/COMP36/COMP72 の横幅を完全にそろえる
     # -------------------------------------------------------------------------
     top_parts = [asas, fsas24, fsas48]
-    candidates_top = [p.width for p in top_parts if p is not None]
-    col_w_top = max(candidates_top) if candidates_top else 1200
-    top_resized = []
+    mid_parts = [comp12, comp36, comp72]
+
+    top_widths = [p.width for p in top_parts if p is not None]
+    mid_widths = [p.width for p in mid_parts if p is not None]
+
+    # 基本は上段の幅を基準にする。
+    # ただし中段にもっと大きい画像がある場合も崩れないよう max にする。
+    right_col_w = max(top_widths + mid_widths) if (top_widths or mid_widths) else 1200
+
+    # 右側全体の幅。上段・中段・下段すべてこの幅に合わせる。
+    right_w = right_col_w * 3 + LAYOUT_GAP * 2
+
+    print(f"[INFO] Layout5 right_col_w={right_col_w}, right_w={right_w}")
+
+    # -------------------------------------------------------------------------
+    # 4. 右側・上段（ASAS / FSAS24 / FSAS48）
+    #    3列固定セルで横並び
+    # -------------------------------------------------------------------------
+    top_cells: List[Image.Image] = []
     for p in top_parts:
         if p is not None:
-            scaled = resize_to_width(p, col_w_top)
-            top_resized.append(pad_to_height(scaled, row1_h))
+            top_cells.append(fit_to_cell(p, right_col_w, row1_h))
         else:
-            top_resized.append(Image.new("RGB", (col_w_top, row1_h), "white"))
-    top_canvas = combine_horizontal(top_resized, gap=LAYOUT_GAP, valign="top")
+            top_cells.append(Image.new("RGB", (right_col_w, row1_h), "white"))
+
+    top_canvas = combine_horizontal(top_cells, gap=LAYOUT_GAP, valign="top")
 
     # -------------------------------------------------------------------------
-    # 4. 右側・中段（COMP12 / COMP36 / COMP72）: 左列中段の高さに揃えて3列横並び
+    # 5. 右側・中段（COMP12 / COMP36 / COMP72）
+    #    上段と同じ right_col_w に拡大して横幅をそろえる
     # -------------------------------------------------------------------------
-    mid_parts = [comp12, comp36, comp72]
-    candidates_mid = [p.width for p in mid_parts if p is not None]
-    col_w_mid = max(candidates_mid) if candidates_mid else 1200
-    mid_resized = []
+    mid_cells: List[Image.Image] = []
     for p in mid_parts:
         if p is not None:
-            scaled = resize_to_width(p, col_w_mid)
-            mid_resized.append(pad_to_height(scaled, row2_h))
+            mid_cells.append(fit_to_cell(p, right_col_w, row2_h))
         else:
-            mid_resized.append(Image.new("RGB", (col_w_mid, row2_h), "white"))
-    mid_canvas = combine_horizontal(mid_resized, gap=LAYOUT_GAP, valign="top")
+            mid_cells.append(Image.new("RGB", (right_col_w, row2_h), "white"))
+
+    mid_canvas = combine_horizontal(mid_cells, gap=LAYOUT_GAP, valign="top")
 
     # -------------------------------------------------------------------------
-    # 5. right_w を確定してから FXJP854 を組み立てる
+    # 6. FXJP854 を右側3列幅に合わせて組み立てる
     # -------------------------------------------------------------------------
-    right_w = max(
-        top_canvas.width if top_canvas else col_w_top * 3 + LAYOUT_GAP * 2,
-        mid_canvas.width if mid_canvas else col_w_mid * 3 + LAYOUT_GAP * 2,
-    )
-
     if fxjp854_raw:
         # FXJP854は「上下切断→横並び」。右側3列幅・左列3段目高さの中で中央配置する。
         fxjp854 = process_fxjp854_fit(
@@ -619,18 +657,6 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
 
     if fxjp854 is None:
         fxjp854 = Image.new("RGB", (right_w, row3_h), "white")
-
-    # left_row3 と fxjp854 の高さを最終同期
-    final_row3_h = max(left_row3.height, fxjp854.height)
-    if left_row3.height != final_row3_h:
-        left_row3 = pad_to_height(left_row3, final_row3_h)
-    if fxjp854.height != final_row3_h:
-        fxjp854 = pad_to_height(fxjp854, final_row3_h)
-
-    # -------------------------------------------------------------------------
-    # 6. 左列を縦結合
-    # -------------------------------------------------------------------------
-    left_canvas = combine_vertical([left_row1, left_row2, left_row3], gap=LAYOUT_GAP)
 
     # -------------------------------------------------------------------------
     # 7. 右側ブロックを縦結合（中央揃えで貼り付け）
