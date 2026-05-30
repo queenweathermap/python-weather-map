@@ -26,6 +26,8 @@ import requests
 from pdf2image import convert_from_bytes
 from PIL import Image
 
+from module.utils.mail_utils import send_mail
+
 from module.utils.r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
     notion_enabled,
