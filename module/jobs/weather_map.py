@@ -59,6 +59,7 @@ PDF_DPI = int(os.environ.get("PDF_DPI", os.environ.get("JPEG_DPI", "220")))
 
 PNG_OPTIMIZE = os.environ.get("PNG_OPTIMIZE", "1").lower() in ("1", "true", "yes", "on")
 LAYOUT_GAP = int(os.environ.get("LAYOUT_GAP", "24"))
+LAYOUT5_TRIM_PAD = int(os.environ.get("LAYOUT5_TRIM_PAD", "0"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
@@ -455,6 +456,90 @@ def resize_to_width(img: Image.Image, target_w: int) -> Image.Image:
         return img
     target_h = max(1, int(img.height * (target_w / img.width)))
     return img.resize((target_w, target_h), Image.LANCZOS)
+
+
+def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "center") -> Image.Image:
+    """
+    画像を指定セル内に収め、白背景セルに配置する。
+    縦横比は維持する。
+    上段ASAS/FSAS24/FSAS48の端をそろえるため、固定セルを返す。
+    """
+    img = img.convert("RGB")
+
+    if img.width <= 0 or img.height <= 0:
+        return Image.new("RGB", (cell_w, cell_h), "white")
+
+    scale = min(cell_w / img.width, cell_h / img.height)
+    new_w = max(1, int(img.width * scale))
+    new_h = max(1, int(img.height * scale))
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+    canvas = Image.new("RGB", (cell_w, cell_h), "white")
+    x = (cell_w - new_w) // 2
+    y = 0 if valign == "top" else (cell_h - new_h) // 2
+    canvas.paste(resized, (x, y))
+    return canvas
+
+
+def resize_to_width_top(img: Image.Image, target_w: int) -> Image.Image:
+    """縦横比を保ったまま指定幅まで拡大・縮小する。"""
+    img = img.convert("RGB")
+    if target_w <= 0 or img.width <= 0:
+        return img
+    target_h = max(1, int(img.height * (target_w / img.width)))
+    return img.resize((target_w, target_h), Image.LANCZOS)
+
+
+def trim_white_margins(img: Image.Image, *, threshold: int = 245, pad: int = 0) -> Image.Image:
+    """画像外周の白余白をできるだけ取り除く。"""
+    img = img.convert("RGB")
+    px = img.load()
+    w, h = img.size
+
+    left, right = 0, w - 1
+    top, bottom = 0, h - 1
+
+    def row_has_content(y: int) -> bool:
+        for x in range(w):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    def col_has_content(x: int) -> bool:
+        for y in range(h):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    while top < h and not row_has_content(top):
+        top += 1
+    while bottom >= 0 and not row_has_content(bottom):
+        bottom -= 1
+    while left < w and not col_has_content(left):
+        left += 1
+    while right >= 0 and not col_has_content(right):
+        right -= 1
+
+    if left > right or top > bottom:
+        return img
+
+    left = max(0, left - pad)
+    top = max(0, top - pad)
+    right = min(w - 1, right + pad)
+    bottom = min(h - 1, bottom + pad)
+
+    return img.crop((left, top, right + 1, bottom + 1))
+
+
+def prepare_comp_panel(img: Image.Image, target_w: int) -> Image.Image:
+    """
+    COMP12/36/72の外周余白を整理してから、上段セル幅いっぱいまで拡大する。
+    2段目を1.5倍程度に見せ、画像の端を上段3枚の端とそろえる。
+    """
+    trimmed = trim_white_margins(img, pad=LAYOUT5_TRIM_PAD)
+    return resize_to_width_top(trimmed, target_w)
 
 
 def pad_to_cell_width(img: Image.Image, cell_w: int, *, valign: str = "top") -> Image.Image:
