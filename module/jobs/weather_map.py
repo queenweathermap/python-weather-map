@@ -74,6 +74,15 @@ DISCORD_UPLOAD_AS_FILE = os.environ.get("DISCORD_UPLOAD_AS_FILE", "1").lower() i
 DISCORD_JPEG_QUALITY = int(os.environ.get("DISCORD_JPEG_QUALITY", "92"))
 DISCORD_MAX_UPLOAD_MB = float(os.environ.get("DISCORD_MAX_UPLOAD_MB", "8"))
 
+# 4枚目・5枚目の結合画像は、Discordへ本体をアップロードせず、
+# 小さいサムネイルだけ添付し、高解像度PNG本体はR2 URLを開く。
+DISCORD_R2_PNG_LINK_FILENAMES = {
+    "04_LAYOUT_4_WEEKLY",
+    "05_LAYOUT_5_DASHBOARD",
+}
+DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
+DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "84"))
+
 Attachment = Tuple[str, bytes, str]
 
 OUTPUT_TITLES = [
@@ -185,6 +194,35 @@ def post_discord_file_image(webhook_url: str, title: str, image_path: str, mime:
             timeout=180,
         )
         r.raise_for_status()
+
+
+def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
+    """
+    4・5枚目用の小さい確認サムネイルを作る。
+    本体の高解像度PNGはR2 URLで開くため、ここではDiscord表示用だけ軽くする。
+    """
+    if not os.path.exists(src_path):
+        raise FileNotFoundError(src_path)
+
+    thumb_dir = os.path.join(OUTPUT_DIR, "_discord_thumb")
+    os.makedirs(thumb_dir, exist_ok=True)
+
+    stem = os.path.splitext(os.path.basename(src_path))[0]
+    out_path = os.path.join(thumb_dir, f"{stem}_thumb.jpg")
+
+    with Image.open(src_path) as im:
+        rgb = im.convert("RGB")
+        w, h = rgb.size
+        max_w = max(320, DISCORD_THUMB_MAX_WIDTH)
+
+        if w > max_w:
+            new_h = max(1, int(h * (max_w / w)))
+            rgb = rgb.resize((max_w, new_h), Image.Resampling.LANCZOS)
+
+        q = max(50, min(95, DISCORD_THUMB_JPEG_QUALITY))
+        rgb.save(out_path, format="JPEG", quality=q, optimize=True, progressive=True, subsampling=0)
+
+    return out_path, "image/jpeg"
 
 
 EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", "yes", "on")
@@ -943,9 +981,39 @@ def notify_discord_images(
 
     for idx, filename in enumerate(OUTPUT_FILENAMES):
         title = OUTPUT_TITLES[idx] if idx < len(OUTPUT_TITLES) else f"資料 {idx + 1}"
+        src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
 
+        # 4枚目・5枚目の結合画像は、JPG化した本体をDiscordへ上げない。
+        # Discordには小さいサムネイルだけ添付し、本文のR2 PNG URLを開いて解析する。
+        if filename in DISCORD_R2_PNG_LINK_FILENAMES:
+            if idx < len(all_urls) and all_urls[idx]:
+                highres_url = all_urls[idx]
+                content = (
+                    f"{init_jst} / {title}\\n"
+                    f"高解像度PNG（R2 / 30日保存）:\\n"
+                    f"{highres_url}"
+                )
+
+                if os.path.exists(src_path):
+                    try:
+                        thumb_path, thumb_mime = make_discord_thumbnail(src_path)
+                        post_discord_file_image(
+                            webhook_url=webhook_url,
+                            title=content,
+                            image_path=thumb_path,
+                            mime=thumb_mime,
+                        )
+                    except Exception as e:
+                        print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
+                        post_discord_text(content)
+                else:
+                    post_discord_text(content)
+                continue
+
+            print(f"[WARN] R2 PNG URL missing for {filename}; fallback to file upload")
+
+        # 1〜3枚目、またはR2 URLが無い場合は、従来どおりDiscordへファイル添付する。
         if DISCORD_UPLOAD_AS_FILE:
-            src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
             if os.path.exists(src_path):
                 try:
                     upload_path, mime = prepare_discord_upload_image(src_path)
@@ -959,6 +1027,7 @@ def notify_discord_images(
                 except Exception as e:
                     print(f"[WARN] Discord file upload failed: {src_path} / {e}")
 
+        # ファイル添付に失敗した場合は、R2 URL 埋め込みにフォールバックする。
         if idx < len(all_urls):
             try:
                 post_discord_item_image_urls(
@@ -978,7 +1047,7 @@ def notify_discord_images(
     if notion_url:
         summary_lines.extend(["**Notionページ**", notion_url, ""])
     summary_lines.append(discord_links_text())
-    post_discord_text("\n".join(summary_lines))
+    post_discord_text("\\n".join(summary_lines))
 
 
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
