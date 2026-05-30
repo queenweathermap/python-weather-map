@@ -26,8 +26,6 @@ import requests
 from pdf2image import convert_from_bytes
 from PIL import Image
 
-from module.utils.mail_utils import send_mail
-
 from module.utils.r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
     notion_enabled,
@@ -40,6 +38,7 @@ from module.utils.discord_utils import (
     post_discord_item_image_urls,
     post_discord_complete,
 )
+from module.utils.mail_utils import send_mail
 
 
 # =============================================================================
@@ -67,6 +66,9 @@ R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
 
 WEATHERCASTER_USER = os.environ.get("WEATHERCASTER_USER", "").strip()
 WEATHERCASTER_PASS = os.environ.get("WEATHERCASTER_PASS", "").strip()
+
+MAIL_ENABLE = os.environ.get("MAIL_ENABLE", "0").lower() in ("1", "true", "yes", "on")
+MAIL_SLACK_MODE = os.environ.get("MAIL_SLACK_MODE", "off").strip().lower()
 
 Attachment = Tuple[str, bytes, str]
 
@@ -884,6 +886,69 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
 
 
 # =============================================================================
+# Mail 連携
+# =============================================================================
+def notify_mail_outputs(
+    *,
+    issue_dt_jst: datetime,
+    rjtd: str,
+    attachments: List[Attachment],
+    errors: List[str],
+) -> None:
+    """
+    生成済みPNG 5枚をメール添付で送信する。
+    mail_utils.py の ZIP自動化を効かせるため、attachment_blobs ではなく
+    OUTPUT_DIR に書き出したファイルパス attachment_paths で渡す。
+    """
+    if not MAIL_ENABLE:
+        return
+
+    paths: List[str] = []
+    for fname, _data, _mime in attachments:
+        path = os.path.join(OUTPUT_DIR, fname)
+        if os.path.exists(path):
+            paths.append(path)
+        else:
+            print(f"[WARN] mail attachment file missing: {path}")
+
+    if not paths:
+        print("[WARN] mail skipped: no attachment files")
+        return
+
+    init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
+    subject = f"JMA Weather Map / {init_jst} / RJTD {rjtd}"
+
+    body_lines = [
+        "JMA Weather Map を送付します。",
+        "",
+        f"初期時刻: {init_jst}",
+        f"RJTD: {rjtd}",
+        f"添付数: {len(paths)}",
+        "",
+        "添付:",
+    ]
+    body_lines.extend([f"- {os.path.basename(p)}" for p in paths])
+
+    if errors:
+        body_lines.extend(["", "WARN / ERROR:"])
+        body_lines.extend([f"- {e}" for e in errors])
+
+    try:
+        mid = send_mail(
+            subject=subject,
+            body="\n".join(body_lines),
+            attachment_paths=paths,
+            slack_mode=MAIL_SLACK_MODE,
+        )
+        print(f"[OK] mail sent: {mid}")
+    except Exception as e:
+        # メール失敗で全体処理を止めない。R2/Notion/Discord は継続する。
+        msg = f"Mail failed: {type(e).__name__}: {e}"
+        print(f"[WARN] {msg}")
+        errors.append(msg)
+
+
+# =============================================================================
 # R2 / Notion / Discord 連携
 # =============================================================================
 def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Optional[str]]:
@@ -1011,6 +1076,17 @@ def main() -> None:
         run_prefix = f"{R2_PREFIX}/{day}/RJTD_{rjtd}"
 
         images, errors = build_outputs()
+
+        # OUTPUT_DIR の一時PNGが存在しているうちにメール送信する。
+        # 高解像度PNG 5枚は重くなりやすいため、mail_utils.py 側で ZIP 化できるよう
+        # attachment_paths で送る。
+        notify_mail_outputs(
+            issue_dt_jst=issue_dt_jst,
+            rjtd=rjtd,
+            attachments=images,
+            errors=errors,
+        )
+
         all_urls, rep_url = upload_to_r2(run_prefix, images)
 
         page_id = notion_write_db(
