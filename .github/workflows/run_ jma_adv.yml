@@ -38,6 +38,8 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
       R2_PREFIX: "adv-tgv"
+      R2_RETENTION_DAYS: "30"
+      R2_CLEANUP_DRY_RUN: "0"
 
       # ------------------------------------------------------------
       # Notion
@@ -45,6 +47,9 @@ jobs:
       NOTION_ENABLE: "1"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      NOTION_IMPORT_IMAGES: "1"
+      NOTION_IMPORT_TIMEOUT_SECONDS: "240"
+      NOTION_IMPORT_POLL_SECONDS: "2.0"
 
       NOTION_PROP_TITLE: "名前"
       NOTION_PROP_CATEGORY: "区分"
@@ -101,3 +106,8 @@ jobs:
       - name: Run ADV TGV
         run: |
           python scripts/jma_adv.py
+
+      - name: Cleanup old R2 objects
+        if: always()
+        run: |
+          python scripts/r2_cleanup.py
