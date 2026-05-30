@@ -57,6 +57,7 @@ PDF_DPI = int(os.environ.get("PDF_DPI", os.environ.get("JPEG_DPI", "220")))
 
 PNG_OPTIMIZE = os.environ.get("PNG_OPTIMIZE", "1").lower() in ("1", "true", "yes", "on")
 LAYOUT_GAP = int(os.environ.get("LAYOUT_GAP", "24"))
+LAYOUT5_TRIM_PAD = int(os.environ.get("LAYOUT5_TRIM_PAD", "8"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
@@ -431,6 +432,63 @@ def resize_to_width_top(img: Image.Image, target_w: int) -> Image.Image:
     return img.resize((target_w, target_h), Image.LANCZOS)
 
 
+def trim_white_margins(img: Image.Image, *, threshold: int = 245, pad: int = 0) -> Image.Image:
+    """
+    画像の外周にある白余白をできるだけ取り除く。
+    PDFを画像化した天気図で、描画本体を大きく見せたい時に使う。
+    """
+    img = img.convert("RGB")
+    px = img.load()
+    w, h = img.size
+
+    left = 0
+    right = w - 1
+    top = 0
+    bottom = h - 1
+
+    def row_has_content(y: int) -> bool:
+        for x in range(w):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    def col_has_content(x: int) -> bool:
+        for y in range(h):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    while top < h and not row_has_content(top):
+        top += 1
+    while bottom >= 0 and not row_has_content(bottom):
+        bottom -= 1
+    while left < w and not col_has_content(left):
+        left += 1
+    while right >= 0 and not col_has_content(right):
+        right -= 1
+
+    if left > right or top > bottom:
+        return img
+
+    left = max(0, left - pad)
+    top = max(0, top - pad)
+    right = min(w - 1, right + pad)
+    bottom = min(h - 1, bottom + pad)
+
+    return img.crop((left, top, right + 1, bottom + 1))
+
+
+def prepare_comp_panel(img: Image.Image, target_w: int) -> Image.Image:
+    """
+    COMP系の外周余白を整理してから、上段セル幅いっぱいまで拡大する。
+    体感的に 1.5 倍前後に見えるレイアウトを狙う。
+    """
+    trimmed = trim_white_margins(img, pad=LAYOUT5_TRIM_PAD)
+    return resize_to_width_top(trimmed, target_w)
+
+
 def pad_to_cell_width(img: Image.Image, cell_w: int, *, valign: str = "top") -> Image.Image:
     """
     画像自体は拡大縮小せず、セル幅だけをそろえる。
@@ -488,6 +546,10 @@ def process_fxjp854_fit(
 
     upper = img.crop((0, 0, w, mid_y))
     lower = img.crop((0, mid_y, w, h))
+
+    # 左右に並べた時の見た目を整えるため、各半分の外周余白を少し整理する。
+    upper = trim_white_margins(upper, pad=LAYOUT5_TRIM_PAD)
+    lower = trim_white_margins(lower, pad=LAYOUT5_TRIM_PAD)
 
     joined = combine_horizontal([upper, lower], gap=gap, valign="top")
     if joined is None:
@@ -652,7 +714,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     mid_cells: List[Image.Image] = []
     for p in mid_parts:
         if p is not None:
-            mid_cells.append(resize_to_width_top(p, right_col_w))
+            mid_cells.append(prepare_comp_panel(p, right_col_w))
         else:
             mid_cells.append(Image.new("RGB", (right_col_w, row2_h), "white"))
 
