@@ -65,6 +65,23 @@ jobs:
       SLACK_WEBHOOK_URL: ""
 
       # ------------------------------------------------------------
+      # Mail
+      # 5枚だけなのでメール添付も復活
+      # MAIL_ATTACH_AS_ZIP=1 にすると、5枚をZIPにまとめて送信
+      # ------------------------------------------------------------
+      MAIL_ENABLE: "1"
+      FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+      TO_EMAIL: ${{ secrets.TO_EMAIL }}
+      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      MAX_MAIL_SIZE_MB: "20"
+      MAIL_ATTACH_AS_ZIP: "1"
+      MAIL_SLACK_NOTIFY: "0"
+      MAIL_SLACK_MODE: "off"
+
+      # ------------------------------------------------------------
       # PDF / JPG設定
       # ------------------------------------------------------------
       JPEG_DPI: "200"
