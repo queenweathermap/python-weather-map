@@ -26,7 +26,8 @@
 #     GSM / 300hPa のGIFだけ投稿
 #
 # 役割分担:
-#   - R2 / Notion が正本
+#   - Notion が正本
+#   - R2 は30日保持の一時公開置き場
 #   - Discord は軽く見るためのビュー
 # =============================================================================
 
@@ -50,6 +51,7 @@ from module.utils.notion_utils import (
     append_bookmark,
     append_heading,
     append_images,
+    append_imported_images_from_urls,
     append_toggle,
     create_db_row,
     set_page_cover,
@@ -507,6 +509,74 @@ GUIDE_LINKS: List[Tuple[str, str]] = [
 
 
 # =============================================================================
+# Notion image import
+# =============================================================================
+
+def notion_import_images_enabled() -> bool:
+    """
+    Notionを正本にするため、R2の外部URLをNotion管理ストレージへ取り込む。
+    0の場合は従来どおり外部URL画像として埋め込む。
+    """
+    return env_bool("NOTION_IMPORT_IMAGES", "0")
+
+
+def notion_import_timeout_seconds() -> int:
+    return env_int("NOTION_IMPORT_TIMEOUT_SECONDS", 240)
+
+
+def notion_import_poll_seconds() -> float:
+    v = os.getenv("NOTION_IMPORT_POLL_SECONDS")
+    if v is None or v.strip() == "":
+        return 2.0
+    try:
+        return float(v.strip())
+    except Exception:
+        return 2.0
+
+
+def append_notion_images(
+    page_or_block_id: str,
+    urls: List[str],
+    *,
+    filenames: Optional[List[str]] = None,
+    content_type: str = "image/jpeg",
+    chunk: int = 30,
+) -> None:
+    """
+    Notion画像追加の共通入口。
+    NOTION_IMPORT_IMAGES=1 のときはNotion側へファイルを取り込む。
+    失敗した場合は従来の外部URL埋め込みへフォールバックする。
+    """
+    urls = [u for u in (urls or []) if u]
+    if not urls:
+        return
+
+    if notion_import_images_enabled():
+        items = []
+        for idx, url in enumerate(urls):
+            if filenames and idx < len(filenames) and filenames[idx]:
+                fname = filenames[idx]
+            else:
+                ext = ".gif" if content_type == "image/gif" else ".jpg"
+                fname = f"image_{idx + 1:03d}{ext}"
+            items.append((fname, url, content_type))
+
+        try:
+            append_imported_images_from_urls(
+                page_or_block_id,
+                items,
+                chunk=10,
+                timeout_seconds=notion_import_timeout_seconds(),
+                poll_seconds=notion_import_poll_seconds(),
+            )
+            return
+        except Exception as e:
+            print(f"[WARN] Notion import failed; fallback to external images: {e}")
+
+    append_images(page_or_block_id, urls, chunk=chunk)
+
+
+# =============================================================================
 # Discord
 # =============================================================================
 
@@ -600,6 +670,9 @@ def main() -> None:
     print(f"[DEBUG] ADV_GIF_ENABLE={gif_enable}")
     print(f"[DEBUG] ADV_GIF_DURATION_MS={gif_duration_ms}")
     print(f"[DEBUG] ADV_GIF_MAX_WIDTH={gif_max_width}")
+    print(f"[DEBUG] NOTION_IMPORT_IMAGES={os.getenv('NOTION_IMPORT_IMAGES','')}")
+    print(f"[DEBUG] NOTION_IMPORT_TIMEOUT_SECONDS={os.getenv('NOTION_IMPORT_TIMEOUT_SECONDS','')}")
+    print(f"[DEBUG] NOTION_IMPORT_POLL_SECONDS={os.getenv('NOTION_IMPORT_POLL_SECONDS','')}")
 
     groups = load_model_groups()
 
@@ -630,7 +703,7 @@ def main() -> None:
         title=title,
         category="ADV",
         init_jst_iso=init_jst_iso,
-        memo="DiscordはGIFのみ。NotionにはGIFと元画像JPGを保存。",
+        memo="DiscordはGIFのみ。NotionにはGIFと元画像JPGを保存。R2は30日保持の一時置き場。",
         rjtd=rjtd_for_title,
         prefix=run_prefix,
         r2_url="",
@@ -712,7 +785,10 @@ def main() -> None:
 
             if first_cover_url is None:
                 first_cover_url = original_urls[0]
-                set_page_cover(page_id, first_cover_url)
+                # NOTION_IMPORT_IMAGES=1 ではR2を30日後に消すため、
+                # R2 URLをページカバーにしない。
+                if not notion_import_images_enabled():
+                    set_page_cover(page_id, first_cover_url)
 
             # -----------------------------------------------------------------
             # 2. itemごとの時系列GIFを作成してR2へ保存
@@ -764,10 +840,24 @@ def main() -> None:
 
             if gif_urls:
                 append_heading(notion_parent, "GIF", level=3)
-                append_images(notion_parent, gif_urls, chunk=30)
+                gif_names = [f"{model_name}_{item.label.replace('/', '-')}_RJTD_{rjtd}.gif"]
+                append_notion_images(
+                    notion_parent,
+                    gif_urls,
+                    filenames=gif_names,
+                    content_type="image/gif",
+                    chunk=30,
+                )
 
             append_heading(notion_parent, "元画像", level=3)
-            append_images(notion_parent, original_urls, chunk=30)
+            original_names = [fn for fn, _blob, _mime in atts]
+            append_notion_images(
+                notion_parent,
+                original_urls,
+                filenames=original_names,
+                content_type="image/jpeg",
+                chunk=30,
+            )
 
             print(
                 f"[OK] R2+Notion: {model_name} {item.label} "
