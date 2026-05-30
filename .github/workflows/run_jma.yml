@@ -64,10 +64,14 @@ jobs:
       DISCORD_SLEEP_SEC: "1.0"
 
       # Discord高解像度投稿
-      # まずPNGをファイル添付。大きすぎる場合は、画素数を維持してJPEG化して投稿。
+      # 1〜3枚目はPNG添付を優先。
+      # 大きすぎる場合は、画素数を維持してJPEG化して投稿。
+      # 4〜5枚目は小さいサムネイルを添付し、高解像度PNG本体はR2リンクで開く。
       DISCORD_UPLOAD_AS_FILE: "1"
       DISCORD_MAX_UPLOAD_MB: "8"
       DISCORD_JPEG_QUALITY: "88"
+      DISCORD_THUMB_MAX_WIDTH: "1200"
+      DISCORD_THUMB_JPEG_QUALITY: "84"
 
       # ------------------------------------------------------------
       # Slackは停止
