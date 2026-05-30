@@ -3,10 +3,11 @@
 # module/jobs/guidance.py
 #
 # JMA Guidance:
-#   HTML → スクショ → JPG → R2 → Notion → Discord
+#   HTML → スクショ → JPG → R2一時保存 → Notion取り込み → Discord
 #
 # 方針:
 #   ・Notion = 正本
+#   ・R2 = 21日保存の一時置き場
 #   ・Discord = ビュー
 #   ・ポータルリンクはテキスト投稿
 # =============================================================================
@@ -33,6 +34,7 @@ from module.utils.notion_utils import (
     notion_enabled,
     create_db_row,
     append_images,
+    append_imported_images_from_urls,
     append_heading,
     append_bookmark,
 )
@@ -54,6 +56,10 @@ R2_PREFIX = os.environ.get("R2_PREFIX", "guidance")
 VIEWPORT_WIDTH = int(os.environ.get("GUIDANCE_VIEWPORT_WIDTH", "1200"))
 VIEWPORT_HEIGHT = int(os.environ.get("GUIDANCE_VIEWPORT_HEIGHT", "900"))
 WAIT_MS = int(os.environ.get("GUIDANCE_WAIT_MS", "2500"))
+
+NOTION_IMPORT_IMAGES = os.environ.get("NOTION_IMPORT_IMAGES", "0").lower() in ("1", "true", "yes", "on")
+NOTION_IMPORT_TIMEOUT_SECONDS = int(os.environ.get("NOTION_IMPORT_TIMEOUT_SECONDS", "180"))
+NOTION_IMPORT_POLL_SECONDS = float(os.environ.get("NOTION_IMPORT_POLL_SECONDS", "2.0"))
 
 Attachment = Tuple[str, bytes, str]
 
@@ -80,6 +86,12 @@ def png_to_jpg(png_bytes):
 
 def discord_url():
     return os.getenv("DISCORD_GUIDANCE_WEBHOOK_URL", "")
+
+
+def notion_page_url(page_id: str) -> str:
+    clean = (page_id or "").replace("-", "")
+    return f"https://www.notion.so/{clean}" if clean else ""
+
 
 # =============================================================================
 # スクショ
@@ -166,7 +178,7 @@ def upload(prefix, atts):
 # Notion
 # =============================================================================
 
-def write_notion(base_jst, prefix, urls, rep, errors):
+def write_notion(base_jst, prefix, urls, rep, errors, atts):
     if not notion_enabled():
         return None
 
@@ -191,9 +203,36 @@ def write_notion(base_jst, prefix, urls, rep, errors):
 
     try:
         append_heading(page_id, "ガイダンス画像", level=2)
-        append_images(page_id, urls)
-    except:
-        pass
+
+        if urls:
+            if NOTION_IMPORT_IMAGES:
+                items = []
+                for idx, url in enumerate(urls):
+                    if idx < len(atts):
+                        fname, _blob, mime = atts[idx]
+                    else:
+                        fname, mime = f"guidance_{idx + 1:02d}.jpg", "image/jpeg"
+                    items.append((fname, url, mime or "image/jpeg"))
+
+                append_imported_images_from_urls(
+                    page_id,
+                    items,
+                    chunk=10,
+                    timeout_seconds=NOTION_IMPORT_TIMEOUT_SECONDS,
+                    poll_seconds=NOTION_IMPORT_POLL_SECONDS,
+                )
+            else:
+                append_images(page_id, urls)
+
+    except Exception as e:
+        print(f"[WARN] Notion image import/append failed: {e}")
+
+        # 移行中の安全策: Notion取り込みに失敗した場合は従来の外部URL埋め込みへ戻す
+        try:
+            if urls:
+                append_images(page_id, urls)
+        except Exception as e2:
+            print(f"[WARN] Notion fallback append_images failed: {e2}")
 
     try:
         append_heading(page_id, "ガイダンス入口", level=2)
@@ -202,8 +241,8 @@ def write_notion(base_jst, prefix, urls, rep, errors):
             "https://www.jma.go.jp/bosai/advisor/",
             caption="気象庁 ガイダンス"
         )
-    except:
-        pass
+    except Exception as e:
+        print(f"[WARN] Notion bookmark failed: {e}")
 
     return page_id
 
@@ -211,21 +250,35 @@ def write_notion(base_jst, prefix, urls, rep, errors):
 # Discord
 # =============================================================================
 
-def post_discord(urls, errors):
+def post_discord(urls, errors, notion_url=""):
     if not discord_url():
         return
 
     # 画像
-    post_discord_item_image_urls(
-        webhook_url=discord_url(),
-        title="📊 ガイダンス",
-        image_urls=urls,
-        notion_url="",
-        rjtd="",
-        init_jst="",
-    )
+    if urls:
+        post_discord_item_image_urls(
+            webhook_url=discord_url(),
+            title="📊 ガイダンス",
+            image_urls=urls,
+            notion_url="",
+            rjtd="",
+            init_jst="",
+        )
 
-    # ★ ポータル（テキスト）
+    # Notionページ
+    if notion_url:
+        try:
+            requests.post(
+                discord_url(),
+                json={
+                    "content": f"📘 Notionページ\n{notion_url}"
+                },
+                timeout=10,
+            )
+        except Exception as e:
+            print(e)
+
+    # ポータル（テキスト）
     try:
         requests.post(
             discord_url(),
@@ -241,7 +294,7 @@ def post_discord(urls, errors):
     post_discord_complete(
         webhook_url=discord_url(),
         category="Guidance",
-        notion_url="",
+        notion_url=notion_url,
         attach_count=len(urls),
         errors=errors,
     )
@@ -258,8 +311,14 @@ def main():
 
     atts, errors = capture()
     urls, rep = upload(prefix, atts)
-    write_notion(base_jst, prefix, urls, rep, errors)
-    post_discord(urls, errors)
+
+    page_id = write_notion(base_jst, prefix, urls, rep, errors, atts)
+    notion_url = notion_page_url(page_id) if page_id else ""
+
+    if notion_url:
+        print(f"[OK] Notion URL: {notion_url}")
+
+    post_discord(urls, errors, notion_url=notion_url)
 
     print("=== Done ===")
 
