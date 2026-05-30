@@ -152,11 +152,87 @@ def post_discord_text_no_embed(content: str) -> None:
     r.raise_for_status()
 
 
+def post_discord_file_image(
+    webhook_url: str,
+    title: str,
+    image_path: str,
+    mime: str,
+    *,
+    suppress_embeds: bool = False,
+) -> None:
+    """
+    Discord webhook に画像ファイルを1枚添付して送る。
+    suppress_embeds=True の場合、本文中URLの自動プレビューを抑制する。
+    """
+    payload = {
+        "content": title,
+        "allowed_mentions": {"parse": []},
+    }
+    if suppress_embeds:
+        # Discord SUPPRESS_EMBEDS。
+        # 添付画像は表示し、本文URLの自動プレビューだけ抑制する。
+        payload["flags"] = 4
+
+    with open(image_path, "rb") as f:
+        r = requests.post(
+            webhook_url,
+            data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+            files={"file": (os.path.basename(image_path), f, mime)},
+            timeout=180,
+        )
+    r.raise_for_status()
+
+
+def prepare_discord_upload_image(src_path: str) -> Tuple[str, str]:
+    """
+    Discord添付用。
+    PNGが上限内ならそのまま、超える場合は画素数を維持してJPEG化する。
+    それでも大きい場合だけ段階的に品質を下げる。
+    """
+    max_bytes = max(1, DISCORD_MAX_UPLOAD_MB) * 1024 * 1024
+
+    if os.path.getsize(src_path) <= max_bytes:
+        ext = os.path.splitext(src_path)[1].lower()
+        if ext == ".png":
+            return src_path, "image/png"
+        if ext in (".jpg", ".jpeg"):
+            return src_path, "image/jpeg"
+        if ext == ".gif":
+            return src_path, "image/gif"
+
+    out_dir = os.path.join(OUTPUT_DIR, "_discord_upload")
+    os.makedirs(out_dir, exist_ok=True)
+
+    stem = os.path.splitext(os.path.basename(src_path))[0]
+    out_path = os.path.join(out_dir, f"{stem}_discord.jpg")
+
+    with Image.open(src_path) as im:
+        rgb = im.convert("RGB")
+        q = max(50, min(95, DISCORD_JPEG_QUALITY))
+
+        for _ in range(8):
+            rgb.save(out_path, format="JPEG", quality=q, optimize=True, progressive=True, subsampling=0)
+            if os.path.getsize(out_path) <= max_bytes:
+                return out_path, "image/jpeg"
+            q -= 7
+            if q < 50:
+                break
+
+        # 最後の手段。画素を少し落とす。
+        while os.path.getsize(out_path) > max_bytes and rgb.width > 1200:
+            new_w = int(rgb.width * 0.85)
+            new_h = max(1, int(rgb.height * (new_w / rgb.width)))
+            rgb = rgb.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            rgb.save(out_path, format="JPEG", quality=72, optimize=True, progressive=True, subsampling=0)
+
+    return out_path, "image/jpeg"
+
+
 
 def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
     """
-    4・5枚目用の小さい確認サムネイルを作る。
-    本体の高解像度PNGはR2 URLで開くため、ここではDiscord表示用だけ軽くする。
+    4・5枚目用の確認サムネイルを作る。
+    本体の高解像度PNGはR2 URLで開くため、Discord添付は軽量JPEGにする。
     """
     if not os.path.exists(src_path):
         raise FileNotFoundError(src_path)
@@ -170,16 +246,30 @@ def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
     with Image.open(src_path) as im:
         rgb = im.convert("RGB")
         w, h = rgb.size
-        max_w = max(320, DISCORD_THUMB_MAX_WIDTH)
 
+        max_w = max(480, DISCORD_THUMB_MAX_WIDTH)
         if w > max_w:
             new_h = max(1, int(h * (max_w / w)))
             rgb = rgb.resize((max_w, new_h), Image.Resampling.LANCZOS)
 
-        q = max(50, min(95, DISCORD_THUMB_JPEG_QUALITY))
-        rgb.save(out_path, format="JPEG", quality=q, optimize=True, progressive=True, subsampling=0)
+        q = max(50, min(92, DISCORD_THUMB_JPEG_QUALITY))
+        # サムネイルは必ず軽くする。本文のR2 URLから本体PNGを開く。
+        target_mb = max(1.0, DISCORD_MAX_UPLOAD_MB * 0.5)
+
+        for _ in range(7):
+            rgb.save(out_path, format="JPEG", quality=q, optimize=True, progressive=True, subsampling=0)
+            size_mb = os.path.getsize(out_path) / (1024 * 1024)
+            if size_mb <= target_mb:
+                break
+
+            q = max(50, q - 8)
+            if rgb.width > 900:
+                new_w = int(rgb.width * 0.82)
+                new_h = max(1, int(rgb.height * (new_w / rgb.width)))
+                rgb = rgb.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     return out_path, "image/jpeg"
+
 
 
 EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", "yes", "on")
@@ -1047,28 +1137,36 @@ def notify_discord_images(
         title = OUTPUT_TITLES[idx] if idx < len(OUTPUT_TITLES) else f"資料 {idx + 1}"
         src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
 
-        # 4枚目・5枚目の結合画像は、JPG化した本体をDiscordへ上げない。
-        # 1投稿目: 小さいサムネイルだけ添付
-        # 2投稿目: R2の高解像度PNG URLを文字で投稿（自動プレビュー抑制）
+        # 4枚目・5枚目の結合画像は、Discordには軽量サムネイルを1枚だけ添付する。
+        # 本文にR2の高解像度PNG URLを入れ、URLプレビューは抑制する。
+        # これで「サムネイル1枚 + その下にURL表記」になる。
         if filename in DISCORD_R2_PNG_LINK_FILENAMES:
             if idx < len(all_urls) and all_urls[idx]:
                 highres_url = all_urls[idx]
+                content = (
+                    f"{init_jst} / {title}\n"
+                    f"高解像度PNG（R2 / 30日保存）:\n"
+                    f"{highres_url}"
+                )
 
                 if os.path.exists(src_path):
                     try:
                         thumb_path, thumb_mime = make_discord_thumbnail(src_path)
+                        print(f"[INFO] Discord thumbnail: {thumb_path} size={os.path.getsize(thumb_path)} bytes")
                         post_discord_file_image(
                             webhook_url=webhook_url,
-                            title=f"{init_jst} / {title}",
+                            title=content,
                             image_path=thumb_path,
                             mime=thumb_mime,
+                            suppress_embeds=True,
                         )
                     except Exception as e:
                         print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
-
-                post_discord_text_no_embed(
-                    f"高解像度PNG（R2 / 30日保存）:\n{highres_url}"
-                )
+                        # 添付に失敗した場合だけ、R2 URLの自動プレビューに戻す。
+                        post_discord_text(content)
+                else:
+                    print(f"[WARN] Discord thumbnail source missing: {src_path}")
+                    post_discord_text(content)
                 continue
 
             print(f"[WARN] R2 PNG URL missing for {filename}; fallback to file upload")
