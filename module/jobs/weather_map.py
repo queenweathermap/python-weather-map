@@ -124,76 +124,32 @@ def discord_jma_enabled() -> bool:
 def post_discord_text(content: str) -> None:
     if not discord_jma_enabled():
         return
-    try:
-        requests.post(discord_jma_webhook_url(), json={"content": content}, timeout=20)
-    except Exception as e:
-        print(f"[WARN] Discord text send failed: {e}")
+    r = requests.post(
+        discord_jma_webhook_url(),
+        json={"content": content, "allowed_mentions": {"parse": []}},
+        timeout=60,
+    )
+    r.raise_for_status()
 
 
-def _discord_upload_limit_bytes() -> int:
-    return int(DISCORD_MAX_UPLOAD_MB * 1024 * 1024)
-
-
-def prepare_discord_upload_image(src_path: str) -> Tuple[str, str]:
+def post_discord_text_no_embed(content: str) -> None:
     """
-    Discord投稿用の画像を準備する。
-    高解像度は維持しつつ、PNGが重い場合はJPEG化してサイズを抑える。
+    URLは文字として表示しつつ、Discord側の自動プレビューを抑制する。
+    サムネイルを別添付する4・5枚目用。
     """
-    if not os.path.exists(src_path):
-        raise FileNotFoundError(src_path)
-
-    upload_dir = os.path.join(OUTPUT_DIR, "_discord_upload")
-    os.makedirs(upload_dir, exist_ok=True)
-
-    src_size = os.path.getsize(src_path)
-    limit = _discord_upload_limit_bytes()
-    if src_size <= limit:
-        return src_path, "image/png"
-
-    with Image.open(src_path) as im:
-        rgb = im.convert("RGB")
-        stem = os.path.splitext(os.path.basename(src_path))[0]
-
-        qualities = []
-        first_q = max(50, min(95, DISCORD_JPEG_QUALITY))
-        for q in [first_q, 88, 84, 80, 76, 72, 68, 64, 60, 56, 52]:
-            if q not in qualities:
-                qualities.append(q)
-
-        best_path = ""
-        best_size = None
-
-        for q in qualities:
-            out_path = os.path.join(upload_dir, f"{stem}_q{q}.jpg")
-            rgb.save(out_path, format="JPEG", quality=q, optimize=True, progressive=True, subsampling=0)
-
-            sz = os.path.getsize(out_path)
-            if best_size is None or sz < best_size:
-                best_size = sz
-                best_path = out_path
-
-            if sz <= limit:
-                return out_path, "image/jpeg"
-
-        return best_path, "image/jpeg"
-
-
-def post_discord_file_image(webhook_url: str, title: str, image_path: str, mime: str) -> None:
-    """
-    Discord webhook に画像ファイルそのものを添付して送る。
-    """
-    with open(image_path, "rb") as f:
-        payload = {
-            "content": title,
+    if not discord_jma_enabled():
+        return
+    r = requests.post(
+        discord_jma_webhook_url(),
+        json={
+            "content": content,
             "allowed_mentions": {"parse": []},
-        }
-        r = requests.post(
-            webhook_url,
-            data={"payload_json": json.dumps(payload, ensure_ascii=False)},
-            files={"file": (os.path.basename(image_path), f, mime)},
-            timeout=180,
-        )
-        r.raise_for_status()
+            "flags": 4,
+        },
+        timeout=60,
+    )
+    r.raise_for_status()
+
 
 
 def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
@@ -682,43 +638,55 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         left_row3 = Image.new("RGB", (left_target_w, row3_h), "white")
 
     # -------------------------------------------------------------------------
-    # 3. 右側・上段（ASAS / FSAS24 / FSAS48）: 左列上段の高さに揃えて3列横並び
+    # 3. 右側3列の共通セル幅を決める
+    #    上段 ASAS/FSAS24/FSAS48 と
+    #    中段 COMP12/COMP36/COMP72 の横幅を完全にそろえる
     # -------------------------------------------------------------------------
     top_parts = [asas, fsas24, fsas48]
-    candidates_top = [p.width for p in top_parts if p is not None]
-    col_w_top = max(candidates_top) if candidates_top else 1200
-    top_resized = []
+    mid_parts = [comp12, comp36, comp72]
+
+    top_widths = [p.width for p in top_parts if p is not None]
+    mid_widths = [p.width for p in mid_parts if p is not None]
+
+    # 基本は上段の幅を基準にする。
+    # ただし中段にもっと大きい画像がある場合も崩れないよう max にする。
+    right_col_w = max(top_widths + mid_widths) if (top_widths or mid_widths) else 1200
+
+    # 右側全体の幅。上段・中段・下段すべてこの幅に合わせる。
+    right_w = right_col_w * 3 + LAYOUT_GAP * 2
+
+    print(f"[INFO] Layout5 right_col_w={right_col_w}, right_w={right_w}")
+
+    # -------------------------------------------------------------------------
+    # 4. 右側・上段（ASAS / FSAS24 / FSAS48）
+    #    3列固定セルで横並び
+    # -------------------------------------------------------------------------
+    top_cells: List[Image.Image] = []
     for p in top_parts:
         if p is not None:
-            scaled = resize_to_width(p, col_w_top)
-            top_resized.append(pad_to_height(scaled, row1_h))
+            top_cells.append(fit_to_cell(p, right_col_w, row1_h, valign="top"))
         else:
-            top_resized.append(Image.new("RGB", (col_w_top, row1_h), "white"))
-    top_canvas = combine_horizontal(top_resized, gap=LAYOUT_GAP, valign="top")
+            top_cells.append(Image.new("RGB", (right_col_w, row1_h), "white"))
+
+    top_canvas = combine_horizontal(top_cells, gap=LAYOUT_GAP, valign="top")
 
     # -------------------------------------------------------------------------
-    # 4. 右側・中段（COMP12 / COMP36 / COMP72）: 左列中段の高さに揃えて3列横並び
+    # 5. 右側・中段（COMP12 / COMP36 / COMP72）
+    #    各画像を right_col_w いっぱいまで拡大して、画像の左右端を上段とそろえる。
+    #    高さは row2_h に押し込めず、実画像の高さを活かす。
     # -------------------------------------------------------------------------
-    mid_parts = [comp12, comp36, comp72]
-    candidates_mid = [p.width for p in mid_parts if p is not None]
-    col_w_mid = max(candidates_mid) if candidates_mid else 1200
-    mid_resized = []
+    mid_cells: List[Image.Image] = []
     for p in mid_parts:
         if p is not None:
-            scaled = resize_to_width(p, col_w_mid)
-            mid_resized.append(pad_to_height(scaled, row2_h))
+            mid_cells.append(prepare_comp_panel(p, right_col_w))
         else:
-            mid_resized.append(Image.new("RGB", (col_w_mid, row2_h), "white"))
-    mid_canvas = combine_horizontal(mid_resized, gap=LAYOUT_GAP, valign="top")
+            mid_cells.append(Image.new("RGB", (right_col_w, row2_h), "white"))
+
+    mid_canvas = combine_horizontal(mid_cells, gap=LAYOUT_GAP, valign="top")
 
     # -------------------------------------------------------------------------
-    # 5. right_w を確定してから FXJP854 を組み立てる
+    # 6. FXJP854 を右側3列幅に合わせて組み立てる
     # -------------------------------------------------------------------------
-    right_w = max(
-        top_canvas.width if top_canvas else col_w_top * 3 + LAYOUT_GAP * 2,
-        mid_canvas.width if mid_canvas else col_w_mid * 3 + LAYOUT_GAP * 2,
-    )
-
     if fxjp854_raw:
         # FXJP854は「上下切断→横並び」。右側3列幅・左列3段目高さの中で中央配置する。
         fxjp854 = process_fxjp854_fit(
@@ -734,20 +702,19 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     if fxjp854 is None:
         fxjp854 = Image.new("RGB", (right_w, row3_h), "white")
 
-    # left_row3 と fxjp854 の高さを最終同期
+    # -------------------------------------------------------------------------
+    # 7. 左列3段目と FXJP854 の高さを最終同期し、左列を縦結合
+    # -------------------------------------------------------------------------
     final_row3_h = max(left_row3.height, fxjp854.height)
     if left_row3.height != final_row3_h:
         left_row3 = pad_to_height(left_row3, final_row3_h)
     if fxjp854.height != final_row3_h:
         fxjp854 = pad_to_height(fxjp854, final_row3_h)
 
-    # -------------------------------------------------------------------------
-    # 6. 左列を縦結合
-    # -------------------------------------------------------------------------
     left_canvas = combine_vertical([left_row1, left_row2, left_row3], gap=LAYOUT_GAP)
 
     # -------------------------------------------------------------------------
-    # 7. 右側ブロックを縦結合（中央揃えで貼り付け）
+    # 8. 右側ブロックを縦結合（中央揃えで貼り付け）
     # -------------------------------------------------------------------------
     valid_rows = [row for row in [top_canvas, mid_canvas, fxjp854] if row is not None]
     right_h = sum(row.height for row in valid_rows) + LAYOUT_GAP * max(0, len(valid_rows) - 1)
@@ -760,7 +727,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         y += row.height + LAYOUT_GAP
 
     # -------------------------------------------------------------------------
-    # 8. 左列と右側ブロックの最終マージ
+    # 9. 左列と右側ブロックの最終マージ
     # -------------------------------------------------------------------------
     if left_canvas is None:
         return pil_to_attachment(right_canvas, "LAYOUT_5_DASHBOARD")
@@ -984,30 +951,27 @@ def notify_discord_images(
         src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
 
         # 4枚目・5枚目の結合画像は、JPG化した本体をDiscordへ上げない。
-        # Discordには小さいサムネイルだけ添付し、本文のR2 PNG URLを開いて解析する。
+        # 1投稿目: 小さいサムネイルだけ添付
+        # 2投稿目: R2の高解像度PNG URLを文字で投稿（自動プレビュー抑制）
         if filename in DISCORD_R2_PNG_LINK_FILENAMES:
             if idx < len(all_urls) and all_urls[idx]:
                 highres_url = all_urls[idx]
-                content = (
-                    f"{init_jst} / {title}\\n"
-                    f"高解像度PNG（R2 / 30日保存）:\\n"
-                    f"{highres_url}"
-                )
 
                 if os.path.exists(src_path):
                     try:
                         thumb_path, thumb_mime = make_discord_thumbnail(src_path)
                         post_discord_file_image(
                             webhook_url=webhook_url,
-                            title=content,
+                            title=f"{init_jst} / {title}",
                             image_path=thumb_path,
                             mime=thumb_mime,
                         )
                     except Exception as e:
                         print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
-                        post_discord_text(content)
-                else:
-                    post_discord_text(content)
+
+                post_discord_text_no_embed(
+                    f"高解像度PNG（R2 / 30日保存）:\n{highres_url}"
+                )
                 continue
 
             print(f"[WARN] R2 PNG URL missing for {filename}; fallback to file upload")
@@ -1043,11 +1007,8 @@ def notify_discord_images(
         else:
             print(f"[WARN] Discord post skipped: no file and no URL for {filename}")
 
-    summary_lines = []
-    if notion_url:
-        summary_lines.extend(["**Notionページ**", notion_url, ""])
-    summary_lines.append(discord_links_text())
-    post_discord_text("\\n".join(summary_lines))
+    # NotionリンクはDiscordへ出さない。必要な入口リンクだけ最後に出す。
+    post_discord_text(discord_links_text())
 
 
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
