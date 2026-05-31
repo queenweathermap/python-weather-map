@@ -623,6 +623,37 @@ def trim_white_margins(img: Image.Image, *, threshold: int = 245, pad: int = 0) 
     return img.crop((left, top, right + 1, bottom + 1))
 
 
+def trim_bottom_whitespace(img: Image.Image, *, threshold: int = 245, bottom_pad: int = 56) -> Image.Image:
+    """
+    下側の白余白だけを安全に少し詰める。
+    上側・左右のレイアウトは維持しつつ、最下部だけを控えめにトリムする。
+    """
+    img = img.convert("RGB")
+    px = img.load()
+    w, h = img.size
+
+    bottom = h - 1
+
+    def row_has_content(y: int) -> bool:
+        for x in range(w):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    while bottom >= 0 and not row_has_content(bottom):
+        bottom -= 1
+
+    if bottom < 0:
+        return img
+
+    new_bottom = min(h - 1, bottom + max(0, bottom_pad))
+    if new_bottom >= h - 1:
+        return img
+
+    return img.crop((0, 0, w, new_bottom + 1))
+
+
 def prepare_comp_panel(img: Image.Image, target_w: int) -> Image.Image:
     """
     COMP12/36/72の外周余白を整理してから、上段セル幅いっぱいまで拡大する。
@@ -917,6 +948,7 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     # 9. 左列と右側ブロックの最終マージ
     # -------------------------------------------------------------------------
     if left_canvas is None:
+        right_canvas = trim_bottom_whitespace(right_canvas, bottom_pad=56)
         return pil_to_attachment(right_canvas, "LAYOUT_5_DASHBOARD")
 
     final_w = left_canvas.width + LAYOUT_GAP + right_canvas.width
@@ -925,6 +957,9 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     final_canvas = Image.new("RGB", (final_w, final_h), "white")
     final_canvas.paste(left_canvas, (0, 0))
     final_canvas.paste(right_canvas, (left_canvas.width + LAYOUT_GAP, 0))
+
+    # 下側だけ安全に少し詰める。上側・左右のレイアウトは崩さない。
+    final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=56)
 
     return pil_to_attachment(final_canvas, "LAYOUT_5_DASHBOARD")
 
