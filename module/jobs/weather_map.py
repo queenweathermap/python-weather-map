@@ -280,6 +280,8 @@ DISCORD_LINKS = [
     ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
     ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
     ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
+    ("秋田県防災ポータルサイト", "https://www.bousai-akita.jp/"),
+    ("秋田地方気象台", "https://www.jma-net.go.jp/akita/"),
 ]
 
 NOTION_LINKS = [
