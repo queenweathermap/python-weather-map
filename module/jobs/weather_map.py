@@ -289,6 +289,8 @@ NOTION_LINKS = [
     ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
     ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
     ("気象庁 防災情報（秋田県）", "https://www.jma.go.jp/bosai/#pattern=default&area_type=offices&area_code=050000"),
+    ("秋田県防災ポータルサイト", "https://www.bousai-akita.jp/"),
+    ("秋田地方気象台", "https://www.jma-net.go.jp/akita/"),
     ("WCN各種気象情報", "https://www.weathercaster.jp/member/member_only/kisho_shiryo/"),
 ]
 
