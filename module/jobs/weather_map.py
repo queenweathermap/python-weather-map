@@ -902,10 +902,9 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         #   左端  = 3段目の1枚目と2枚目の中央
         #   右端  = 3段目の5枚目と6枚目の中央
         # に合わせる。
-        # これは、3つのCOMPパネル幅で見ると
-        #   「1列目パネルの中央」〜「3列目パネルの中央」
-        # に相当するため、幅は right_w - right_col_w とする。
-        fx_target_w = max(1, int(right_w - right_col_w))
+        # 理論上は right_w - right_col_w だが、実際の見え方では少し大きめに見えるため、
+        # ここでは安全に「ほんの少しだけ」狭める。
+        fx_target_w = max(1, int(right_w - right_col_w - LAYOUT_GAP))
         fxjp854 = process_fxjp854_fit(
             fxjp854_raw,
             fx_target_w,
