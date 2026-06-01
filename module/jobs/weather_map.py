@@ -289,8 +289,6 @@ NOTION_LINKS = [
     ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
     ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
     ("気象庁 防災情報（秋田県）", "https://www.jma.go.jp/bosai/#pattern=default&area_type=offices&area_code=050000"),
-    ("秋田県防災ポータルサイト", "https://www.bousai-akita.jp/"),
-    ("秋田地方気象台", "https://www.jma-net.go.jp/akita/"),
     ("WCN各種気象情報", "https://www.weathercaster.jp/member/member_only/kisho_shiryo/"),
 ]
 
@@ -735,25 +733,22 @@ def process_fxjp854_fit(
     # 横結合後も上下左右の白余白を削る
     joined = trim_white_margins(joined, pad=0)
 
-    # 幅・高さの上限に収まるように、縦横比維持で縮小する。
-    scale = 1.0
-    if target_w and joined.width > target_w:
-        scale = min(scale, target_w / joined.width)
+    # 幅の目標がある場合は、縮小だけでなく拡大も許可する。
+    # これにより、下段FXJP854を「3段目の左右端の中央どうし」の間に広げられる。
+    if target_w and joined.width != target_w:
+        joined = resize_to_width_top(joined, target_w)
+
+    # 高さ上限がある場合のみ、必要に応じて縮小する。
     if target_h and joined.height > target_h:
-        scale = min(scale, target_h / joined.height)
+        new_w = max(1, int(joined.width * (target_h / joined.height)))
+        joined = joined.resize((new_w, target_h), Image.LANCZOS)
 
-    if scale < 1.0:
-        new_w = max(1, int(joined.width * scale))
-        new_h = max(1, int(joined.height * scale))
-        joined = joined.resize((new_w, new_h), Image.LANCZOS)
-
+    # 高さ指定があるときは、上揃えのまま必要最小限のキャンバスに載せる。
     if target_h:
-        canvas_w = max(target_w, joined.width)
+        canvas_w = joined.width
         canvas_h = max(target_h, joined.height)
         canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
-        x = (canvas_w - joined.width) // 2
-        y = 0
-        canvas.paste(joined, (x, y))
+        canvas.paste(joined, (0, 0))
         return canvas
 
     return joined
@@ -902,11 +897,17 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     # 6. FXJP854 を右側3列幅に合わせて組み立てる
     # -------------------------------------------------------------------------
     if fxjp854_raw:
-        # FXJP854は「上下切断→横並び」。右側3列幅・左列3段目高さの中で中央配置する。
+        # FXJP854は「上下切断→横並び」。
+        # 希望位置:
+        #   左端  = 3段目の左画像の中央
+        #   右端  = 3段目の右画像の中央
+        # となるよう、右側全幅から「半コマ分」だけ狭い幅まで広げる。
+        # （6コマ並びの中央〜中央に相当）
+        fx_target_w = max(1, int(right_w - (right_col_w / 2)))
         fxjp854 = process_fxjp854_fit(
             fxjp854_raw,
-            right_w,
-            target_h=row3_h,
+            fx_target_w,
+            target_h=None,
             gap=LAYOUT_GAP,
         )
     else:
