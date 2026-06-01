@@ -899,11 +899,13 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     if fxjp854_raw:
         # FXJP854は「上下切断→横並び」。
         # 希望位置:
-        #   左端  = 3段目の左画像の中央
-        #   右端  = 3段目の右画像の中央
-        # となるよう、右側全幅から「半コマ分」だけ狭い幅まで広げる。
-        # （6コマ並びの中央〜中央に相当）
-        fx_target_w = max(1, int(right_w - (right_col_w / 2)))
+        #   左端  = 3段目の1枚目と2枚目の中央
+        #   右端  = 3段目の5枚目と6枚目の中央
+        # に合わせる。
+        # これは、3つのCOMPパネル幅で見ると
+        #   「1列目パネルの中央」〜「3列目パネルの中央」
+        # に相当するため、幅は right_w - right_col_w とする。
+        fx_target_w = max(1, int(right_w - right_col_w))
         fxjp854 = process_fxjp854_fit(
             fxjp854_raw,
             fx_target_w,
