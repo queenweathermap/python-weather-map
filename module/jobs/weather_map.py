@@ -902,9 +902,11 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
         #   左端  = 3段目の1枚目と2枚目の中央
         #   右端  = 3段目の5枚目と6枚目の中央
         # に合わせる。
-        # 理論上は right_w - right_col_w だが、実際の見え方では少し大きめに見えるため、
-        # ここでは安全に「ほんの少しだけ」狭める。
-        fx_target_w = max(1, int(right_w - right_col_w - LAYOUT_GAP))
+        # 1枚目と2枚目の中央 〜 5枚目と6枚目の中央 に合わせる。
+        # 3つのCOMPパネルで見れば「左パネル中央 〜 右パネル中央」に相当するため、
+        # 幅は厳密に right_w - right_col_w とする。
+        fx_target_w = max(1, int(right_w - right_col_w))
+        print(f"[INFO] Layout5 FX target width exact: {fx_target_w} (right_w={right_w}, right_col_w={right_col_w})")
         fxjp854 = process_fxjp854_fit(
             fxjp854_raw,
             fx_target_w,
