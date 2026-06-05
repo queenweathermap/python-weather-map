@@ -802,9 +802,8 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     print(f"[INFO] Layout5 JMA numeric cycle: {cycle}")
 
     # 1. 各パーツの読み込み
-    # TKAISETU: WCN経由ではなく気象庁から直接取得（全ページ縦結合 → 図２も含む）
-    tkai_pages = fetch_jma_direct_pdf_pages(JMA_TKAISETU_URL, "TKAISETU")
-    tkai = combine_vertical(tkai_pages, gap=0) if tkai_pages else None
+    # TKAISETU: WCN経由で取得
+    tkai = get_first_page_or_none(fetch_pdf_pages(session, "TKAISETU"))
     aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
     aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
 
