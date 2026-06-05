@@ -485,6 +485,7 @@ def find_working_init_dt(
         url = build_png_url(probe.base, probe.layer, view_code, rjtd)
 
         r = http_get(url, referer=cfg.referer, timeout=timeout)
+        print(f"[PROBE] {model_name} back={back}h HTTP={r.status_code} URL={url}")
 
         if r.status_code == 200:
             return init_dt
