@@ -56,12 +56,32 @@ WARNING_INFOS = {
     "26": ("着雪注意報", "注意報"),
 }
 
+# --- 2026年5月29日からの新体系（危険警報＝警戒レベル4相当）------------------
+# 大雨・土砂災害・高潮・氾濫（洪水）に「危険警報」が新設された。
+# 数値コードは気象庁のコード管理表が一次情報で、本番JSONに実際に現れる値を
+# 確認してから下に追記すること（推測で入れない）。確認できたら例：
+#   "XX": ("大雨危険警報", "危険警報"),
+#   "XX": ("高潮危険警報", "危険警報"),
+#   "XX": ("氾濫危険警報", "危険警報"),
+# 未追記のコードが届いた場合は resolve() が「コードXX（未対応・要確認）」として
+# 通知に出すので、取りこぼしは起きない。
+# --------------------------------------------------------------------------
+
 KIND_COLOR = {
     "特別警報": 0x9C27B0,  # 紫
+    "危険警報": 0xD81B60,  # 濃いピンク（レベル4相当）
     "警報": 0xE53935,      # 赤
     "注意報": 0xFDD835,    # 黄
+    "不明": 0xFF6F00,      # オレンジ（未対応コード）
 }
-SEVERITY = {"特別警報": 3, "警報": 2, "注意報": 1}
+SEVERITY = {"特別警報": 4, "危険警報": 3, "不明": 3, "警報": 2, "注意報": 1}
+
+
+def resolve(code):
+    """コード -> (名称, 種別)。未知コードは要確認として返す。"""
+    if code in WARNING_INFOS:
+        return WARNING_INFOS[code]
+    return (f"コード{code}（未対応・要確認）", "不明")
 
 
 def fetch_json(url):
@@ -81,7 +101,7 @@ def build_area_name_map():
 
 
 def current_warnings(warning_json, name_map):
-    """{区域名: set(警報コード)} を返す（解除・該当なしは除外）。"""
+    """{区域名: set(警報コード)} を返す（解除・コード00は除外。未知コードは残す）。"""
     result = {}
     area_types = warning_json.get("areaTypes", [])
     if not area_types:
@@ -93,7 +113,7 @@ def current_warnings(warning_json, name_map):
         active = {
             w.get("code", "")
             for w in area.get("warnings", [])
-            if w.get("status") != "解除" and w.get("code") in WARNING_INFOS
+            if w.get("status") != "解除" and w.get("code") not in ("", "00")
         }
         if active:
             result[name] = active
@@ -165,21 +185,24 @@ def main():
 
     color = 0x2196F3
     if added:
-        top = max((WARNING_INFOS[w][1] for _, w in added), key=lambda k: SEVERITY[k])
+        top = max((resolve(w)[1] for _, w in added), key=lambda k: SEVERITY[k])
         color = KIND_COLOR[top]
+
+    def code_key(c):
+        return (0, int(c)) if c.isdigit() else (1, c)
 
     blocks = []
     if added:
         blocks.append("**🆕 新規・追加**\n" + "\n".join(
-            f"{a}：{WARNING_INFOS[w][0]}" for a, w in sorted(added)))
+            f"{a}：{resolve(w)[0]}" for a, w in sorted(added)))
     if cleared:
         blocks.append("**✅ 解除**\n" + "\n".join(
-            f"{a}：{WARNING_INFOS[w][0]}" for a, w in sorted(cleared)))
+            f"{a}：{resolve(w)[0]}" for a, w in sorted(cleared)))
     if curr:
         now = []
         for a in sorted(curr):
             names = "、".join(
-                WARNING_INFOS[w][0] for w in sorted(curr[a], key=lambda x: int(x)))
+                resolve(w)[0] for w in sorted(curr[a], key=code_key))
             now.append(f"・{a}：{names}")
         blocks.append("**現在発表中**\n" + "\n".join(now))
     else:
