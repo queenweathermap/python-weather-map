@@ -109,13 +109,13 @@ def resolve(code):
 
 
 def fetch_json(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "akita-weather-alert/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "akita-weather-warning/1.0"})
     with urllib.request.urlopen(req, timeout=30) as res:
         return json.loads(res.read().decode("utf-8"))
 
 
 def fetch_text(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "akita-weather-alert/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "akita-weather-warning/1.0"})
     with urllib.request.urlopen(req, timeout=30) as res:
         return res.read().decode("utf-8", errors="replace")
 
@@ -246,7 +246,7 @@ def send_discord(payload):
             "Content-Type": "application/json",
             # UA を付けないと urllib 既定の "Python-urllib/x.y" が送られ、
             # Discord 前段の Cloudflare に 403 Forbidden で弾かれる。
-            "User-Agent": "akita-weather-alert/1.0 (+https://github.com/)",
+            "User-Agent": "akita-weather-warning/1.0 (+https://github.com/)",
         },
         method="POST",
     )
