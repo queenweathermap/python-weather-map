@@ -79,7 +79,7 @@ DISCORD_MAX_UPLOAD_MB = float(os.environ.get("DISCORD_MAX_UPLOAD_MB", "8"))
 # 小さいサムネイルだけ添付し、高解像度PNG本体はR2 URLを開く。
 DISCORD_R2_PNG_LINK_FILENAMES = {
     "04_LAYOUT_4_WEEKLY",
-    "05_LAYOUT_5_DASHBOARD",
+    "06_LAYOUT_5_DASHBOARD",
 }
 DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
 DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "84"))
@@ -91,7 +91,8 @@ OUTPUT_TITLES = [
     "② AXJP140",
     "③ AUPA20",
     "④ 週間4列結合",
-    "⑤ 全部入り",
+    "⑤ WCN週間予報(秋田県)",
+    "⑥ 全部入り",
 ]
 
 OUTPUT_FILENAMES = [
@@ -99,7 +100,8 @@ OUTPUT_FILENAMES = [
     "02_AXJP140",
     "03_AUPA20",
     "04_LAYOUT_4_WEEKLY",
-    "05_LAYOUT_5_DASHBOARD",
+    "05_WCN_WEEKLY",
+    "06_LAYOUT_5_DASHBOARD",
 ]
 
 
@@ -275,6 +277,22 @@ def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
 EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 EMAGRAM_URL = os.environ.get("EMAGRAM_URL", "https://bk-pro.jp/images/ema/ema_aki_00.gif").strip()
 EMAGRAM_FILENAME = os.environ.get("EMAGRAM_FILENAME", "ema_aki_00.gif").strip()
+
+# -----------------------------------------------------------------------------
+# WCN週間予報（⑤）
+# WCN会員ページ（Basic認証：WEATHERCASTER_USER/PASS）。週間予報ページは
+# ハッシュ(#9=秋田)でJS描画するため requests では取れず、Playwrightで描画→スクショする。
+# Playwright は遅延importなので、未導入でも他の出力（①〜④/⑥）は影響を受けない。
+# -----------------------------------------------------------------------------
+WCN_WEEK_ENABLE = os.environ.get("WCN_WEEK_ENABLE", "1").lower() in ("1", "true", "yes", "on")
+WCN_WEEK_URL = os.environ.get(
+    "WCN_WEEK_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/week_show.cgi#9",
+).strip()
+WCN_WEEK_PREF_TEXT = os.environ.get("WCN_WEEK_PREF_TEXT", "秋田").strip()  # 描画完了の目印
+WCN_WEEK_VIEWPORT_WIDTH = int(os.environ.get("WCN_WEEK_VIEWPORT_WIDTH", "1200"))
+WCN_WEEK_VIEWPORT_HEIGHT = int(os.environ.get("WCN_WEEK_VIEWPORT_HEIGHT", "1000"))
+WCN_WEEK_WAIT_MS = int(os.environ.get("WCN_WEEK_WAIT_MS", "2500"))
 
 DISCORD_LINKS = [
     ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
@@ -471,6 +489,68 @@ def fetch_image_content(url: str) -> Optional[bytes]:
         print(f"[ERR] image fetch: {e} ({url})")
 
     return None
+
+
+def fetch_wcn_screenshot(url: str, *, label: str = "WCN") -> Optional[Image.Image]:
+    """
+    WCN会員ページ（Basic認証・#ハッシュで府県指定）を Playwright で開き、
+    ページ全体をスクショして PIL Image を返す。
+
+    week_show.cgi は location.hash(#9=秋田) をJSが読んで描画するため requests では
+    取得できない。Playwright は遅延importなので、未導入・失敗時は None を返し、
+    他の出力（①〜④/⑥）には影響しない。
+    """
+    if not (WEATHERCASTER_USER and WEATHERCASTER_PASS):
+        print(f"[NG] {label}: WEATHERCASTER_USER/PASS が未設定")
+        return None
+
+    try:
+        from playwright.sync_api import sync_playwright  # 遅延import
+    except Exception as e:
+        print(f"[ERR] {label}: playwright import 失敗（未導入?）: {e}")
+        return None
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport={
+                    "width": WCN_WEEK_VIEWPORT_WIDTH,
+                    "height": WCN_WEEK_VIEWPORT_HEIGHT,
+                },
+                http_credentials={
+                    "username": WEATHERCASTER_USER,
+                    "password": WEATHERCASTER_PASS,
+                },
+            )
+            page = context.new_page()
+            page.goto(url, wait_until="networkidle", timeout=60000)
+
+            # 初期描画で #ハッシュ が効かない場合に備えて hashchange を発火
+            try:
+                page.evaluate("window.dispatchEvent(new HashChangeEvent('hashchange'))")
+            except Exception:
+                pass
+
+            page.wait_for_timeout(WCN_WEEK_WAIT_MS)
+
+            # 秋田が描画されたか軽く待つ（失敗しても撮影は続行）
+            try:
+                page.get_by_text(WCN_WEEK_PREF_TEXT, exact=False).first.wait_for(timeout=10000)
+            except Exception:
+                pass
+
+            png = page.screenshot(full_page=True, type="png")
+            context.close()
+            browser.close()
+
+        img = Image.open(io.BytesIO(png)).convert("RGB")
+        print(f"[OK] {label}: screenshot {img.size} ({url})")
+        return img
+
+    except Exception as e:
+        print(f"[ERR] {label}: {e} ({url})")
+        return None
 
 
 # =============================================================================
@@ -1044,11 +1124,22 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
         append_output(images, layout4_att, 4)
 
     # -------------------------------------------------------------------------
-    # ⑤ 全部入り
+    # ⑤ WCN週間予報（秋田県）スクショ ※④週間の直後に入れる
+    # -------------------------------------------------------------------------
+    if WCN_WEEK_ENABLE:
+        wk_img = fetch_wcn_screenshot(WCN_WEEK_URL, label="WCN_WEEKLY")
+        if wk_img is not None:
+            wk_img = trim_white_margins(wk_img, pad=8)
+            append_output(images, pil_to_attachment(wk_img, "WCN_WEEKLY"), 5)
+        else:
+            errors.append("WCN_WEEKLY: screenshot failed")
+
+    # -------------------------------------------------------------------------
+    # ⑥ 全部入り
     # -------------------------------------------------------------------------
     layout5_att = build_layout_5(session, errors)
     if layout5_att:
-        append_output(images, layout5_att, 5)
+        append_output(images, layout5_att, 6)
 
     # ローカルへの一時デバッグ書き出し
     for fname, data, _ in images:
