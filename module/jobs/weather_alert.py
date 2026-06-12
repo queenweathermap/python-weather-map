@@ -17,7 +17,7 @@ WARNING_JSON_URL = f"https://www.jma.go.jp/bosai/warning/data/warning/{AREA_CODE
 AREA_NAME_URL = "https://www.jma.go.jp/bosai/common/const/area.json"
 STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WARNING_WEBHOOK_URL", "")
 
 # 二次細分区域名の一部で絞り込み（例: "秋田中央"）。空なら秋田県全域を監視。
 # どの区域名があるかは LIST_AREAS=1 で確認できる。
@@ -174,7 +174,7 @@ def main():
         return
 
     if not DISCORD_WEBHOOK_URL:
-        print("DISCORD_WEBHOOK_URL が未設定です", file=sys.stderr)
+        print("DISCORD_WARNING_WEBHOOK_URL が未設定です", file=sys.stderr)
         sys.exit(1)
 
     warning_json = fetch_json(WARNING_JSON_URL)
