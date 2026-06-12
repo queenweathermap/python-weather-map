@@ -15,7 +15,7 @@ import urllib.request
 AREA_CODE = "050000"  # 秋田県
 WARNING_JSON_URL = f"https://www.jma.go.jp/bosai/warning/data/warning/{AREA_CODE}.json"
 AREA_NAME_URL = "https://www.jma.go.jp/bosai/common/const/area.json"
-STATE_FILE = "state.json"
+STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 
