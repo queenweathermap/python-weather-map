@@ -791,7 +791,7 @@ def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Att
 def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ⑤ 全部入り（TeamSABOTENスタイル・タブレット天気図完全再現版）
-      左列: TKAISETU(WCN) / AUPQ35(JMA) / AUPQ78(JMA)
+      左列: TKAISETU(JMA直) / AUPQ35(JMA) / AUPQ78(JMA)
       上段: ASAS / FSAS24 / FSAS48
       中段: COMP12 / COMP36 / COMP72
       下段: FXJP854（上下分割→横並び）
@@ -803,8 +803,9 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     print(f"[INFO] Layout5 JMA numeric cycle: {cycle}")
 
     # 1. 各パーツの読み込み
-    # TKAISETU: WCN経由で取得
-    tkai = get_first_page_or_none(fetch_pdf_pages(session, "TKAISETU"))
+    # TKAISETU: JMA直取得（kaisetsu_tanki_latest.pdf = 最新版）。
+    # WCN経由は朝03:40版で貼り付くことがあるため、03:40/15:40の最新へ追従するJMA公開URLを使う。
+    tkai = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_TKAISETU_URL, "TKAISETU"))
     aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
     aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
 
