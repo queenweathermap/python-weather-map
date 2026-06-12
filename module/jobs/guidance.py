@@ -77,12 +77,15 @@ WCN_PORTAL = f"{WCN_BASE}/msm_guidance/gui_ken_hour.html"
 # 撮影対象。mode:
 #   "select_frame" … 府県選択→決定→iframe(data_area)を撮影（パラメータ無しページ）
 #   "page"         … 直URL（#05=秋田 等のハッシュ）を開いてページ全体を撮影
+# days: select_frame で撮る日のオフセット一覧（0=当日, 1=明日…）。
+#   1以上は「現在日付」チェックを外し、日付セレクトを当日+offset日に設定して決定する。
 GUIDANCE_TARGETS = [
     {
         "name": "wcn_msm_ken_hour",
         "label": "MSM府県時別",
         "url": f"{WCN_BASE}/msm_guidance/gui_ken_hour.html",
         "mode": "select_frame",
+        "days": [0, 1],   # 当日・明日の2枚
     },
     {
         "name": "wcn_bunpu_office",
@@ -91,13 +94,15 @@ GUIDANCE_TARGETS = [
         "mode": "page",
     },
 ]
-
 # =============================================================================
 # Utility
 # =============================================================================
 
 def jst_now():
     return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9)))
+
+def _day_label(day_offset: int) -> str:
+    return {0: "当日", 1: "明日", 2: "明後日"}.get(day_offset, f"+{day_offset}日")
 
 def png_to_jpg(png_bytes):
     im = Image.open(io.BytesIO(png_bytes)).convert("RGB")
@@ -118,17 +123,74 @@ def notion_page_url(page_id: str) -> str:
 # スクショ
 # =============================================================================
 
-def _select_pref_and_decide(page):
-    """府県選択＝WCN_PREF を選び、「決定」を押す。空白入りの値にも耐えるよう堅牢化。"""
-    # 府県選択（最初の select に都道府県が入っている）
+def _select_pref(page):
+    """府県選択＝WCN_PREF を選ぶ（決定は押さない）。最初の select に都道府県が入っている。"""
     page.locator("select").first.select_option(label=WCN_PREF)
-    # 「決定」ボタン（input[submit/button] や button、空白入り "決 定" に対応）
+
+
+def _click_decide(page):
+    """「決定」ボタン（input[submit/button] や button、空白入り "決 定" に対応）を押す。"""
     try:
         page.get_by_role("button", name=re.compile(r"決\s*定")).first.click()
     except Exception:
         page.locator(
             "input[type=submit], input[type=button], button"
         ).filter(has_text=re.compile(r"決\s*定")).first.click()
+
+
+def _set_date_offset(page, day_offset):
+    """『年月日』セレクト（オプション例: 06月13日）を当日+day_offset日に設定する。
+    当日＋数日先が1つの結合セレクトに入っている方式。年は表示に含まれないため
+    月・日で一致を取る（年またぎは稀なので考慮しない既知の制限）。"""
+    target = jst_now() + timedelta(days=day_offset)
+    mm, dd = target.month, target.day
+
+    sels = page.locator("select")
+    try:
+        n = sels.count()
+    except Exception:
+        n = 0
+
+    for i in range(n):
+        sel = sels.nth(i)
+        try:
+            texts = sel.locator("option").evaluate_all(
+                "els => els.map(e => (e.textContent || '').trim())")
+        except Exception:
+            continue
+
+        # 「◯月◯日」形式のオプションを持つ select ＝ 日付セレクト
+        is_date_select = False
+        match_idx = None
+        for idx, tx in enumerate(texts):
+            m = re.search(r"(\d+)\s*月\s*(\d+)\s*日", tx)
+            if m:
+                is_date_select = True
+                if int(m.group(1)) == mm and int(m.group(2)) == dd:
+                    match_idx = idx
+                    break
+
+        if not is_date_select:
+            continue
+        if match_idx is None:
+            print(f"[WARN] 日付セレクトに {mm:02d}月{dd:02d}日 が無い: {texts}")
+            return False
+        try:
+            sel.select_option(index=match_idx, timeout=3000)
+            print(f"[INFO] 日付セレクト設定 offset={day_offset} → {texts[match_idx]}")
+            return True
+        except Exception as e:
+            print(f"[WARN] 日付セレクト選択に失敗: {e}")
+            return False
+
+    print(f"[WARN] 『年月日』セレクトが見つからない offset={day_offset}")
+    return False
+
+
+def _select_pref_and_decide(page):
+    """後方互換: 府県選択→決定（当日）。"""
+    _select_pref(page)
+    _click_decide(page)
 
 
 def capture():
@@ -155,49 +217,58 @@ def capture():
 
         for t in GUIDANCE_TARGETS:
             name, label, url, mode = t["name"], t["label"], t["url"], t["mode"]
-            try:
-                print(f"[INFO] {label}")
-                page.goto(url, wait_until="networkidle", timeout=60000)
+            # select_frame は当日/明日…を撮れる。page は当日のみ。
+            days = t.get("days", [0]) if mode == "select_frame" else [0]
 
-                if mode == "select_frame":
-                    # 府県選択＝秋田県 → 決定（iframe data_area が秋田で再描画される）
-                    _select_pref_and_decide(page)
-                    page.wait_for_load_state("networkidle", timeout=60000)
-                    page.wait_for_timeout(WAIT_MS)
-                    target = page.frame(name="data_area")
-                    if target is None:
-                        errors.append(f"{label}: iframe 'data_area' が見つからない")
-                        continue
-                else:  # "page"：ハッシュ(#05)指定の府県分布など、ページ全体を撮る
-                    # 初期描画でハッシュが効かない場合に備え hashchange を発火させる
+            for day in days:
+                day_label = _day_label(day)
+                shot_name = name if day == 0 else f"{name}_d{day}"
+                full_label = f"{label}（{day_label}）" if mode == "select_frame" else label
+                try:
+                    print(f"[INFO] {full_label}")
+                    page.goto(url, wait_until="networkidle", timeout=60000)
+
+                    if mode == "select_frame":
+                        # 府県＝秋田県を選び、明日以降は日付セレクトを進めてから決定
+                        _select_pref(page)
+                        if day > 0:
+                            _set_date_offset(page, day)
+                        _click_decide(page)
+                        page.wait_for_load_state("networkidle", timeout=60000)
+                        page.wait_for_timeout(WAIT_MS)
+                        target = page.frame(name="data_area")
+                        if target is None:
+                            errors.append(f"{full_label}: iframe 'data_area' が見つからない")
+                            continue
+                    else:  # "page"：ハッシュ(#05)指定の府県分布など、ページ全体を撮る
+                        try:
+                            page.evaluate("window.dispatchEvent(new HashChangeEvent('hashchange'))")
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(WAIT_MS)
+                        target = page
+
+                    # 秋田が描画されたか軽く待つ（失敗しても撮影は続行）
                     try:
-                        page.evaluate("window.dispatchEvent(new HashChangeEvent('hashchange'))")
+                        target.get_by_text(WCN_PREF[:2], exact=False).first.wait_for(timeout=10000)
                     except Exception:
                         pass
-                    page.wait_for_timeout(WAIT_MS)
-                    target = page  # ページ本体を対象に
 
-                # 秋田が描画されたか軽く待つ（失敗しても撮影は続行）
-                try:
-                    target.get_by_text(WCN_PREF[:2], exact=False).first.wait_for(timeout=10000)
-                except Exception:
-                    pass
+                    body_text = target.locator("body").inner_text(timeout=5000)
+                    if "Authentication Failed" in body_text or "Unauthorized" in body_text:
+                        errors.append(f"{full_label}: authentication failed")
+                        continue
 
-                body_text = target.locator("body").inner_text(timeout=5000)
-                if "Authentication Failed" in body_text or "Unauthorized" in body_text:
-                    errors.append(f"{label}: authentication failed")
-                    continue
+                    # iframe は body 要素、ページは full_page で全体を撮る
+                    if mode == "select_frame":
+                        png = target.locator("body").screenshot(type="png")
+                    else:
+                        png = target.screenshot(full_page=True, type="png")
 
-                # iframe は body 要素、ページは full_page で全体を撮る
-                if mode == "select_frame":
-                    png = target.locator("body").screenshot(type="png")
-                else:
-                    png = target.screenshot(full_page=True, type="png")
+                    atts.append((f"{shot_name}.png", png, "image/png"))
 
-                atts.append((f"{name}.png", png, "image/png"))
-
-            except Exception as e:
-                errors.append(f"{label}: {e}")
+                except Exception as e:
+                    errors.append(f"{full_label}: {e}")
 
         context.close()
         browser.close()
@@ -310,7 +381,7 @@ def post_discord(urls, errors, notion_url=""):
     if urls:
         post_discord_item_image_urls(
             webhook_url=discord_url(),
-            title="📊 WCN MSMガイダンス（秋田県）",
+            title="📊 WCN ガイダンス（秋田県）｜MSM府県時別 当日/明日 ＋ 予報分布",
             image_urls=urls,
             notion_url="",
             rjtd="",
