@@ -14,8 +14,11 @@ jobs:
 
     env:
       TZ: Asia/Tokyo
-      JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
-      JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
+      # WCN（気象キャスターネットワーク）会員ページの Basic認証
+      WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
+      WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
+      # 撮影対象の府県（既定: 秋田県）
+      WCN_PREF: "秋田県"
 
       # ------------------------------------------------------------
       # R2
