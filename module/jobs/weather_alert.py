@@ -139,6 +139,11 @@ def load_state():
 
 
 def save_state(state):
+    # 保存先ディレクトリ（例: data/）が無ければ作る。これが無いと初回に
+    # open() が FileNotFoundError になるため、2ファイルだけで完結させる保険。
+    state_dir = os.path.dirname(STATE_FILE)
+    if state_dir:
+        os.makedirs(state_dir, exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(
             {k: sorted(v) for k, v in state.items()},
@@ -159,7 +164,13 @@ def send_discord(payload):
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         DISCORD_WEBHOOK_URL, data=data,
-        headers={"Content-Type": "application/json"}, method="POST",
+        headers={
+            "Content-Type": "application/json",
+            # UA を付けないと urllib 既定の "Python-urllib/x.y" が送られ、
+            # Discord 前段の Cloudflare に 403 Forbidden で弾かれる。
+            "User-Agent": "akita-weather-alert/1.0 (+https://github.com/)",
+        },
+        method="POST",
     )
     with urllib.request.urlopen(req, timeout=30) as res:
         return res.status
