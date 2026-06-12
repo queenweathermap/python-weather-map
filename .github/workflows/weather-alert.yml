@@ -1,0 +1,37 @@
+name: Akita Weather Alert
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # 15分ごと（GitHub側の都合で多少遅延することあり）
+  workflow_dispatch:           # 手動実行も可能
+
+permissions:
+  contents: write              # state.json をコミットして戻すため
+
+concurrency:
+  group: weather-alert
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run weather alert
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          AREA_FILTER: ""        # 区域で絞るなら二次細分区域名（例: "秋田中央"）
+        run: python weather_alert.py
+
+      - name: Commit state
+        run: |
+          if [[ -n "$(git status --porcelain state.json)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "update weather state [skip ci]"
+            git push
+          else
+            echo "no state change"
+          fi
