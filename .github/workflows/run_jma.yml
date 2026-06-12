@@ -106,6 +106,18 @@ jobs:
       EMAGRAM_URL: "https://bk-pro.jp/images/ema/ema_aki_00.gif"
       EMAGRAM_FILENAME: "ema_aki_00.gif"
 
+      # ------------------------------------------------------------
+      # ⑤ WCN週間予報（秋田県）
+      # ④週間の直後に、会員ページのスクショ1枚を差し込む。
+      # ハッシュ #9 = 秋田。Basic認証は上の WEATHERCASTER_USER/PASS を使う。
+      # ------------------------------------------------------------
+      WCN_WEEK_ENABLE: "1"
+      WCN_WEEK_URL: "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/week_show.cgi#9"
+      WCN_WEEK_PREF_TEXT: "秋田"
+      WCN_WEEK_VIEWPORT_WIDTH: "1200"
+      WCN_WEEK_VIEWPORT_HEIGHT: "1000"
+      WCN_WEEK_WAIT_MS: "2500"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -118,12 +130,17 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y poppler-utils
+          sudo apt-get install -y poppler-utils fonts-noto-cjk fonts-noto-cjk-extra
+          fc-cache -f
 
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow pdf2image boto3 notion-client
+          pip install requests pillow pdf2image boto3 notion-client playwright
+
+      - name: Install Playwright browser (for WCN週間予報 screenshot)
+        run: |
+          playwright install chromium
 
       - name: Run Weathercaster
         run: |
