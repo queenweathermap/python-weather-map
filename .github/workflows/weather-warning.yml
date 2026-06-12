@@ -1,4 +1,4 @@
-name: Akita Weather Alert
+name: Akita Weather Warning
 
 on:
   schedule:
@@ -9,7 +9,7 @@ permissions:
   contents: write              # 状態ファイルをコミットして戻すため
 
 concurrency:
-  group: weather-alert
+  group: weather-warning
   cancel-in-progress: false
 
 jobs:
@@ -18,18 +18,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run weather alert
+      - name: Run weather warning
         env:
           DISCORD_WARNING_WEBHOOK_URL: ${{ secrets.DISCORD_WARNING_WEBHOOK_URL }}
           AREA_FILTER: ""                          # 区域で絞るなら二次細分区域名（例: "秋田中央"）
-          STATE_FILE: "data/weather_alert_state.json"   # 状態ファイルの保存先
-        run: python module/jobs/weather_alert.py
+          STATE_FILE: "data/weather_warning_state.json"   # 状態ファイルの保存先
+        run: python module/jobs/weather_warning.py
 
       - name: Commit state
         run: |
           # -f で .gitignore を上書きして強制ステージ（data/*.json 等で除外されていても
           # 状態ファイルを必ずコミットできるようにする）。ステージ後の差分で要否を判定。
-          git add -f data/weather_alert_state.json
+          git add -f data/weather_warning_state.json
           if git diff --cached --quiet; then
             echo "no state change"
           else
