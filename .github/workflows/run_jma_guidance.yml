@@ -2,8 +2,8 @@ name: Run JMA Guidance
 
 on:
   schedule:
-    # 05:00 / 17:00  JST
-    # 20:00 / 08:00  UTC
+    # 04:00 / 16:00  JST
+    # 19:00 / 07:00  UTC
     - cron: "0 20,8 * * *"
 
   workflow_dispatch:
