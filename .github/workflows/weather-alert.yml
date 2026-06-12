@@ -27,12 +27,14 @@ jobs:
 
       - name: Commit state
         run: |
-          if [[ -n "$(git status --porcelain data/weather_alert_state.json)" ]]; then
+          # -f で .gitignore を上書きして強制ステージ（data/*.json 等で除外されていても
+          # 状態ファイルを必ずコミットできるようにする）。ステージ後の差分で要否を判定。
+          git add -f data/weather_alert_state.json
+          if git diff --cached --quiet; then
+            echo "no state change"
+          else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add data/weather_alert_state.json
             git commit -m "update weather state [skip ci]"
             git push
-          else
-            echo "no state change"
           fi
