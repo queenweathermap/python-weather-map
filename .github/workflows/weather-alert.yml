@@ -20,7 +20,7 @@ jobs:
 
       - name: Run weather alert
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WARNING_WEBHOOK_URL: ${{ secrets.DISCORD_WARNING_WEBHOOK_URL }}
           AREA_FILTER: ""                          # 区域で絞るなら二次細分区域名（例: "秋田中央"）
           STATE_FILE: "data/weather_alert_state.json"   # 状態ファイルの保存先
         run: python module/jobs/weather_alert.py
