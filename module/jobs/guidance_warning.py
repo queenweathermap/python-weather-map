@@ -365,8 +365,14 @@ def main():
         print("JMA_ADV_USER / JMA_ADV_PASS が未設定です", file=sys.stderr)
         sys.exit(1)
 
-    # 降水
-    data_url, init_iso = latest_data_url()
+    # 降水（GSM/MSM走行直後のみファイルが存在する。未公開時は 404 → 正常終了）
+    try:
+        data_url, init_iso = latest_data_url()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            print(f"降水ガイダンス未公開（404）— 次回実行まで待機: {e.url}")
+            sys.exit(0)
+        raise
     exceed, lines, ref = scan_rain(fetch_json(data_url), init_iso)
 
     # 風（取得失敗してもスキップして降水だけ通知する）
