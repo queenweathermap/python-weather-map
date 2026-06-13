@@ -123,29 +123,65 @@ def notion_page_url(page_id: str) -> str:
 # スクショ
 # =============================================================================
 
-def _select_pref(page):
-    """府県選択＝WCN_PREF を選ぶ（決定は押さない）。最初の select に都道府県が入っている。"""
-    page.locator("select").first.select_option(label=WCN_PREF)
+def _dump_frames(page):
+    """診断用: 全フレームの名前とセレクト内容をログに出す。"""
+    for fr in page.frames:
+        try:
+            n = fr.locator("select").count()
+            if n:
+                opts = fr.locator("select").first.locator("option").evaluate_all(
+                    "els => els.map(e => e.textContent.trim()).slice(0,6)")
+                print(f"[DEBUG] frame name={fr.name!r} url={fr.url[:60]} select[0]opts={opts}")
+            else:
+                print(f"[DEBUG] frame name={fr.name!r} url={fr.url[:60]} (no select)")
+        except Exception as e:
+            print(f"[DEBUG] frame name={fr.name!r} err={e}")
 
 
-def _click_decide(page):
-    """「決定」ボタン（input[submit/button] や button、空白入り "決 定" に対応）を押す。"""
+def _find_control_frame(page, pref=None):
+    """府県選択セレクトを持つフレームを返す（フレームセット対応）。
+    見つからなければ page 本体を返す（フォールバック）。"""
+    pref = pref or WCN_PREF
+    for fr in page.frames:
+        try:
+            sels = fr.locator("select")
+            if not sels.count():
+                continue
+            opts = sels.first.locator("option").evaluate_all(
+                "els => els.map(e => e.textContent.trim())")
+            if any(pref in o for o in opts):
+                print(f"[INFO] 操作フレーム検出: name={fr.name!r}")
+                return fr
+        except Exception:
+            continue
+    print("[INFO] 操作フレーム: main page（フレームセットなし）")
+    return page
+
+
+def _select_pref(ctrl):
+    """府県選択＝WCN_PREF を選ぶ（ctrl はフレームまたはページ）。"""
+    ctrl.locator("select").first.select_option(label=WCN_PREF)
+
+
+def _click_decide(ctrl):
+    """「決定」ボタン（空白入り "決 定" にも対応）を押す。"""
     try:
-        page.get_by_role("button", name=re.compile(r"決\s*定")).first.click()
+        ctrl.get_by_role("button", name=re.compile(r"決\s*定")).first.click()
     except Exception:
-        page.locator(
+        ctrl.locator(
             "input[type=submit], input[type=button], button"
         ).filter(has_text=re.compile(r"決\s*定")).first.click()
 
 
-def _set_date_offset(page, day_offset):
+def _set_date_offset(page, day_offset, ctrl=None):
     """『年月日』セレクト（オプション例: 06月13日）を当日+day_offset日に設定する。
     当日＋数日先が1つの結合セレクトに入っている方式。年は表示に含まれないため
-    月・日で一致を取る（年またぎは稀なので考慮しない既知の制限）。"""
+    月・日で一致を取る（年またぎは稀なので考慮しない既知の制限）。
+    ctrl: 操作フレーム（省略時は page を使う）。"""
     target = jst_now() + timedelta(days=day_offset)
     mm, dd = target.month, target.day
 
-    sels = page.locator("select")
+    sels = (ctrl or page).locator("select")
     try:
         n = sels.count()
     except Exception:
@@ -189,8 +225,9 @@ def _set_date_offset(page, day_offset):
 
 def _select_pref_and_decide(page):
     """後方互換: 府県選択→決定（当日）。"""
-    _select_pref(page)
-    _click_decide(page)
+    ctrl = _find_control_frame(page)
+    _select_pref(ctrl)
+    _click_decide(ctrl)
 
 
 def capture():
@@ -229,11 +266,13 @@ def capture():
                     page.goto(url, wait_until="networkidle", timeout=60000)
 
                     if mode == "select_frame":
-                        # 府県＝秋田県を選び、明日以降は日付セレクトを進めてから決定
-                        _select_pref(page)
+                        # フレームセット対応: 操作フレームを特定してからフォーム操作
+                        _dump_frames(page)
+                        ctrl = _find_control_frame(page)
+                        _select_pref(ctrl)
                         if day > 0:
-                            _set_date_offset(page, day)
-                        _click_decide(page)
+                            _set_date_offset(page, day, ctrl=ctrl)
+                        _click_decide(ctrl)
                         page.wait_for_load_state("networkidle", timeout=60000)
                         page.wait_for_timeout(WAIT_MS)
                         target = page.frame(name="data_area")

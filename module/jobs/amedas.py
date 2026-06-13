@@ -184,13 +184,48 @@ def notion_page_url(page_id: str) -> str:
 # フォーム操作（要素選択・府県選択・決定）
 # =============================================================================
 
-def _check_element(page, element_label) -> bool:
-    """要素選択（最高気温/最低気温）のラジオを選ぶ。複数戦略で堅牢に。"""
+def _dump_frames(page):
+    """診断用: 全フレームの名前とセレクト内容をログに出す。"""
+    for fr in page.frames:
+        try:
+            n = fr.locator("select").count()
+            if n:
+                opts = fr.locator("select").first.locator("option").evaluate_all(
+                    "els => els.map(e => e.textContent.trim()).slice(0,6)")
+                print(f"[DEBUG] frame name={fr.name!r} url={fr.url[:60]} select[0]opts={opts}")
+            else:
+                print(f"[DEBUG] frame name={fr.name!r} url={fr.url[:60]} (no select)")
+        except Exception as e:
+            print(f"[DEBUG] frame name={fr.name!r} err={e}")
+
+
+def _find_control_frame(page, pref=None):
+    """府県選択セレクト / ラジオを持つフレームを返す（フレームセット対応）。
+    見つからなければ page 本体を返す（フォールバック）。"""
+    pref = pref or WCN_PREF
+    for fr in page.frames:
+        try:
+            # 府県セレクトを持つフレームを探す
+            sels = fr.locator("select")
+            if sels.count():
+                opts = sels.first.locator("option").evaluate_all(
+                    "els => els.map(e => e.textContent.trim())")
+                if any(pref in o for o in opts):
+                    print(f"[INFO] 操作フレーム検出: name={fr.name!r}")
+                    return fr
+        except Exception:
+            continue
+    print("[INFO] 操作フレーム: main page（フレームセットなし）")
+    return page
+
+
+def _check_element(ctrl, element_label) -> bool:
+    """要素選択（最高気温/最低気温）のラジオを選ぶ（ctrl はフレームまたはページ）。"""
     if not element_label:
         return True
     strategies = [
-        lambda: page.get_by_label(element_label, exact=False).first.check(timeout=4000),
-        lambda: page.get_by_text(element_label, exact=False).first.click(timeout=4000),
+        lambda: ctrl.get_by_label(element_label, exact=False).first.check(timeout=4000),
+        lambda: ctrl.get_by_text(element_label, exact=False).first.click(timeout=4000),
     ]
     for s in strategies:
         try:
@@ -202,10 +237,10 @@ def _check_element(page, element_label) -> bool:
     return False
 
 
-def _select_pref_dropdown(page, pref) -> bool:
-    """府県が <select> なら選ぶ。成功したらフィルタ式とみなす。"""
+def _select_pref_dropdown(ctrl, pref) -> bool:
+    """府県が <select> なら選ぶ（ctrl はフレームまたはページ）。"""
     try:
-        sels = page.locator("select")
+        sels = ctrl.locator("select")
         n = sels.count()
         for i in range(n):
             try:
@@ -218,15 +253,15 @@ def _select_pref_dropdown(page, pref) -> bool:
     return False
 
 
-def _click_decide(page) -> bool:
-    """「決定」ボタン（空白入り "決 定" にも対応）を押す。"""
+def _click_decide(ctrl) -> bool:
+    """「決定」ボタン（空白入り "決 定" にも対応）を押す（ctrl はフレームまたはページ）。"""
     try:
-        page.get_by_role("button", name=re.compile(r"決\s*定")).first.click(timeout=3000)
+        ctrl.get_by_role("button", name=re.compile(r"決\s*定")).first.click(timeout=3000)
         return True
     except Exception:
         pass
     try:
-        page.locator(
+        ctrl.locator(
             "input[type=submit], input[type=button], button"
         ).filter(has_text=re.compile(r"決\s*定")).first.click(timeout=3000)
         return True
@@ -235,11 +270,11 @@ def _click_decide(page) -> bool:
     return False
 
 
-def _click_pref_link(page, pref) -> bool:
-    """府県リンク（アンカー）をクリックして秋田県セクションへスクロールさせる。"""
+def _click_pref_link(ctrl, pref) -> bool:
+    """府県リンク（アンカー）をクリックして秋田県セクションへスクロール（ctrl はフレームまたはページ）。"""
     for fn in (
-        lambda: page.get_by_role("link", name=re.compile(re.escape(pref))).first.click(timeout=4000),
-        lambda: page.get_by_text(pref, exact=False).first.click(timeout=4000),
+        lambda: ctrl.get_by_role("link", name=re.compile(re.escape(pref))).first.click(timeout=4000),
+        lambda: ctrl.get_by_text(pref, exact=False).first.click(timeout=4000),
     ):
         try:
             fn()
@@ -282,6 +317,24 @@ def _grab_akita_image(page, label) -> Image.Image:
             return Image.open(io.BytesIO(png)).convert("RGB")
         except Exception as e:
             print(f"[WARN] {label}: iframe撮影に失敗: {e}")
+
+    # data_area 以外のフレームで全国ページが描画されている場合も考慮
+    # まずすべてのフレームを body.screenshot で試みる
+    for fr in page.frames:
+        if fr.name in ("", "_top"):
+            continue
+        try:
+            clip = fr.evaluate(CLIP_JS, WCN_PREF)
+            if clip and clip.get("height", 0) > 60:
+                png = fr.locator("body").screenshot(type="png")
+                img = Image.open(io.BytesIO(png)).convert("RGB")
+                x, y = max(0, int(clip["x"])), max(0, int(clip["y"]))
+                w, h = int(clip["width"]), int(clip["height"])
+                img = img.crop((x, y, min(img.width, x + w), min(img.height, y + h)))
+                print(f"[INFO] {label}: frame={fr.name!r} 秋田県クロップ {img.size}")
+                return img
+        except Exception:
+            continue
 
     png_full = page.screenshot(full_page=True, type="png")
     img = Image.open(io.BytesIO(png_full)).convert("RGB")
@@ -339,12 +392,16 @@ def capture():
                 print(f"[INFO] {label}")
                 page.goto(url, wait_until="networkidle", timeout=60000)
 
+                # フレームセット対応: 操作フレームを特定してからフォーム操作
+                _dump_frames(page)
+                ctrl = _find_control_frame(page)
+
                 # 要素選択（最高/最低）→（秋田のみ府県選択）→ 決定
-                _check_element(page, element)
+                _check_element(ctrl, element)
                 dropdown_ok = True
                 if scope == "akita":
-                    dropdown_ok = _select_pref_dropdown(page, WCN_PREF)
-                _click_decide(page)
+                    dropdown_ok = _select_pref_dropdown(ctrl, WCN_PREF)
+                _click_decide(ctrl)
 
                 try:
                     page.wait_for_load_state("networkidle", timeout=60000)
@@ -355,7 +412,7 @@ def capture():
                 if scope == "akita":
                     # ドロップダウンで絞り込めない（リンク式）の場合は、府県アンカーへ移動
                     if not dropdown_ok:
-                        _click_pref_link(page, WCN_PREF)
+                        _click_pref_link(ctrl, WCN_PREF)
                         page.wait_for_timeout(800)
                     # 秋田が描画されたか軽く待つ（失敗しても続行）
                     try:
