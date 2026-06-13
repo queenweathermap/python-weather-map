@@ -596,7 +596,7 @@ def _notion_write(
     init_jst_iso = (report_dt or _jst_now()).isoformat()
     page_id = create_db_row(
         title=title,
-        category="ガイダンス",
+        category="Guidance",
         init_jst_iso=init_jst_iso,
         memo="",
         rjtd="",

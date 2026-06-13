@@ -672,7 +672,7 @@ def _notion_write(
     import time
     page_id = create_db_row(
         title=title,
-        category="AMeDAS",
+        category="Amedas",
         init_jst_iso=jst_now.isoformat(),
         memo="",
         rjtd="",
