@@ -30,6 +30,12 @@ MAP_BASE_URL = "https://www.jma.go.jp/bosai/amedas/data/map"
 
 DISCORD_AMEDAS_WEBHOOK_URL = os.environ.get("DISCORD_AMEDAS_WEBHOOK_URL", "")
 
+# 秋田中心の JMA AMeDAS マップ参照リンク（Discord に添付）
+JMA_AMEDAS_URL = (
+    "https://www.jma.go.jp/bosai/map.html"
+    "#9/39.615/140.218333333333/&elem=temp&contents=amedas&interval=60"
+)
+
 # JMA AMeDAS コードプレフィックス 32 = 秋田県
 AKITA_CODE_PREFIX = "32"
 
@@ -504,8 +510,8 @@ def _draw_ranking_img(rankings: dict, jst_now: datetime) -> bytes:
 
 
 def _fmt_akita_rows(results: List[dict]) -> Tuple[List[str], List[List[str]]]:
-    # "日最高/日最低" = 当日0:00〜現在の最高/最低
-    headers = ["地点名", "現在℃", "日最高℃", "日最低℃", "湿度%", "風速m/s", "風向", "前1h雨mm", "日積算雨mm"]
+    # "日最高/日最低" = 当日0:00〜現在の最高/最低（現在気温は削除）
+    headers = ["地点名", "日最高℃", "日最低℃", "湿度%", "風速m/s", "風向", "前1h雨mm", "日積算雨mm"]
     rows = []
     for r in results:
         def tf(v): return f"{v:.1f}" if v is not None else "---"
@@ -514,7 +520,6 @@ def _fmt_akita_rows(results: List[dict]) -> Tuple[List[str], List[List[str]]]:
         wsp = f"{r['wind']:.1f}" if r["wind"] is not None else "---"
         rows.append([
             r["name"],
-            tf(r["temp"]),
             tf(r["max_temp"]),
             tf(r["min_temp"]),
             hum,
@@ -683,25 +688,36 @@ def main():
     )
     ts_hourly_str = ts_hourly_jst.strftime("%Y/%m/%d %H:%M JST")
 
+    detail_headers = ["日時", "気温℃", "前1h降水mm", "日積算降水mm", "風向", "風速m/s", "日照h", "湿度%"]
+    detail_right   = {1, 2, 3, 5, 6, 7}
+
+    # 秋田県一覧（現在℃なし・日最高/日最低は当日0:00〜現在）
     headers, rows = _fmt_akita_rows(results)
     img1 = _draw_table_img(
-        title=f"アメダス 秋田県  現在:{ts_hourly_str}  （日最高/日最低は0:00〜現在）",
+        title=f"アメダス 秋田県  {ts_hourly_str}  （日最高/日最低は0:00〜現在）",
         headers=headers,
         rows=rows,
-        right_align_cols={1, 2, 3, 4, 5, 7, 8},
+        right_align_cols={1, 2, 3, 4, 6, 7},
     )
     print(f"[INFO] akita image: {len(img1)} bytes")
-    _post_image(img1, "amedas_akita.png")
+    _post_image(img1, "amedas_akita.png", content=f"<{JMA_AMEDAS_URL}>")
 
-    # 全国ランキング ─ 最新正時の観測値をもとに集計
+    # 全国ランキング
     img2 = _draw_ranking_img(rankings, ts_hourly_jst)
     print(f"[INFO] ranking image: {len(img2)} bytes")
     _post_image(img2, "amedas_ranking.png")
 
-    # 3地点 時系列詳細
-    img3 = _draw_3station_detail_img(maps, ts_list, jst_today_start_utc, ts_hourly_jst)
-    print(f"[INFO] detail image: {len(img3)} bytes")
-    _post_image(img3, "amedas_detail.png")
+    # 3地点 時系列詳細（各局1枚ずつ）
+    for code, name in DETAIL_STATIONS:
+        rows_d = _station_detail_rows(maps, ts_list, code, jst_today_start_utc)
+        img_d  = _draw_table_img(
+            title=f"アメダス {name}（{code}）  {ts_hourly_str}",
+            headers=detail_headers,
+            rows=rows_d,
+            right_align_cols=detail_right,
+        )
+        print(f"[INFO] detail {name}: {len(img_d)} bytes")
+        _post_image(img_d, f"amedas_detail_{name}.png")
 
     print("=== Done ===")
 
