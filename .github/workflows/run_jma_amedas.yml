@@ -30,6 +30,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y fonts-noto-cjk
+          pip install Pillow
+
       - name: Run JMA Amedas
         run: |
           python scripts/jma_amedas.py
