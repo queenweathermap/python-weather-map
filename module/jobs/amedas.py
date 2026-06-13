@@ -40,6 +40,13 @@ JST = timezone(timedelta(hours=9))
 WIND_DIR_JP = ["北北東","北東","東北東","東","東南東","南東","南南東","南",
                "南南西","南西","西南西","西","西北西","北西","北北西","北"]
 
+# 時系列詳細を出力する3地点
+DETAIL_STATIONS = [
+    ("32126", "鷹巣"),
+    ("32402", "秋田"),
+    ("32596", "横手"),
+]
+
 # =============================================================================
 # 画像スタイル
 # =============================================================================
@@ -497,12 +504,13 @@ def _draw_ranking_img(rankings: dict, jst_now: datetime) -> bytes:
 
 
 def _fmt_akita_rows(results: List[dict]) -> Tuple[List[str], List[List[str]]]:
-    headers = ["地点名", "気温", "最高", "最低", "湿度", "風速", "風向", "1h降水", "24h降水"]
+    # "日最高/日最低" = 当日0:00〜現在の最高/最低
+    headers = ["地点名", "現在℃", "日最高℃", "日最低℃", "湿度%", "風速m/s", "風向", "前1h雨mm", "日積算雨mm"]
     rows = []
     for r in results:
         def tf(v): return f"{v:.1f}" if v is not None else "---"
         def rf(v): return f"{v:.1f}" if v > 0 else "0.0"
-        hum = f"{r['humidity']:.0f}%" if r["humidity"] is not None else "---"
+        hum = f"{r['humidity']:.0f}" if r["humidity"] is not None else "---"
         wsp = f"{r['wind']:.1f}" if r["wind"] is not None else "---"
         rows.append([
             r["name"],
@@ -516,6 +524,88 @@ def _fmt_akita_rows(results: List[dict]) -> Tuple[List[str], List[List[str]]]:
             rf(r["rn24h"]),
         ])
     return headers, rows
+
+
+def _station_detail_rows(
+    maps: Dict[str, dict],
+    ts_list: List[str],
+    code: str,
+    jst_today_start_utc: datetime,
+) -> List[List[str]]:
+    """1局の時系列データ行（新しい順）を返す。"""
+    daily_rn = 0.0
+    raw = []
+    for ts_str in reversed(ts_list):   # oldest → newest で日積算を積む
+        ts_utc = datetime.strptime(ts_str, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+        ts_jst = ts_utc.astimezone(JST)
+        entry  = maps.get(ts_str, {}).get(code, {})
+
+        temp     = _val(entry, "temp")
+        rn       = _val(entry, "rn")
+        wind     = _val(entry, "wind")
+        wd_code  = _val(entry, "windDirection")
+        sun1h    = _val(entry, "sun1h")
+        humidity = _val(entry, "humidity")
+
+        if ts_utc >= jst_today_start_utc and rn is not None:
+            daily_rn += rn
+
+        wd_jp = WIND_DIR_JP[int(wd_code) - 1] if wd_code and 1 <= wd_code <= 16 else "---"
+
+        def tf(v): return f"{v:.1f}" if v is not None else "---"
+
+        raw.append([
+            f"{ts_jst.day}日 {ts_jst.strftime('%H:%M')}",
+            tf(temp),
+            f"{rn:.1f}" if rn is not None else "0.0",
+            f"{daily_rn:.1f}",
+            wd_jp,
+            tf(wind),
+            f"{sun1h:.1f}" if sun1h is not None else "---",
+            f"{humidity:.0f}" if humidity is not None else "---",
+        ])
+
+    return list(reversed(raw))   # newest first
+
+
+def _draw_3station_detail_img(
+    maps: Dict[str, dict],
+    ts_list: List[str],
+    jst_today_start_utc: datetime,
+    jst_now: datetime,
+) -> bytes:
+    """3地点の時系列詳細テーブルを縦積みした1枚のPNGを返す。"""
+    from PIL import Image
+
+    ts_str  = jst_now.strftime("%Y/%m/%d %H:%M JST")
+    headers = ["日時", "気温℃", "前1h降水mm", "日積算降水mm", "風向", "風速m/s", "日照h", "湿度%"]
+    right_c = {1, 2, 3, 5, 6, 7}
+
+    png_list = []
+    for code, name in DETAIL_STATIONS:
+        rows = _station_detail_rows(maps, ts_list, code, jst_today_start_utc)
+        png  = _draw_table_img(
+            title=f"アメダス {name}（{code}）  {ts_str}",
+            headers=headers,
+            rows=rows,
+            right_align_cols=right_c,
+        )
+        png_list.append(png)
+
+    # 縦に連結
+    imgs  = [Image.open(io.BytesIO(p)) for p in png_list]
+    gap   = 6
+    w     = max(img.width for img in imgs)
+    h     = sum(img.height for img in imgs) + gap * (len(imgs) - 1)
+    combo = Image.new("RGB", (w, h), (235, 240, 248))
+    y_off = 0
+    for img in imgs:
+        combo.paste(img, (0, y_off))
+        y_off += img.height + gap
+
+    buf = io.BytesIO()
+    combo.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 # =============================================================================
@@ -585,12 +675,17 @@ def main():
     results  = _collect(akita, maps, ts_list, jst_today_start_utc)
     rankings = _ranking(maps, ts_list, table)
 
-    ts_str = jst_now.strftime("%Y/%m/%d %H:%M JST")
+    # 秋田県一覧 ─ 「現在」は最新正時、「日最高/日最低」は当日0:00〜現在
+    ts_hourly_jst = (
+        datetime.strptime(ts_list[0], "%Y%m%d%H%M%S")
+        .replace(tzinfo=timezone.utc)
+        .astimezone(JST)
+    )
+    ts_hourly_str = ts_hourly_jst.strftime("%Y/%m/%d %H:%M JST")
 
-    # 秋田県一覧画像
     headers, rows = _fmt_akita_rows(results)
     img1 = _draw_table_img(
-        title=f"アメダス 秋田県  {ts_str}",
+        title=f"アメダス 秋田県  現在:{ts_hourly_str}  （日最高/日最低は0:00〜現在）",
         headers=headers,
         rows=rows,
         right_align_cols={1, 2, 3, 4, 5, 7, 8},
@@ -598,10 +693,15 @@ def main():
     print(f"[INFO] akita image: {len(img1)} bytes")
     _post_image(img1, "amedas_akita.png")
 
-    # 全国ランキング画像
-    img2 = _draw_ranking_img(rankings, jst_now)
+    # 全国ランキング ─ 最新正時の観測値をもとに集計
+    img2 = _draw_ranking_img(rankings, ts_hourly_jst)
     print(f"[INFO] ranking image: {len(img2)} bytes")
     _post_image(img2, "amedas_ranking.png")
+
+    # 3地点 時系列詳細
+    img3 = _draw_3station_detail_img(maps, ts_list, jst_today_start_utc, ts_hourly_jst)
+    print(f"[INFO] detail image: {len(img3)} bytes")
+    _post_image(img3, "amedas_detail.png")
 
     print("=== Done ===")
 
