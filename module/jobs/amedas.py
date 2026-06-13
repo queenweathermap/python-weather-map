@@ -30,6 +30,9 @@ MAP_BASE_URL = "https://www.jma.go.jp/bosai/amedas/data/map"
 
 DISCORD_AMEDAS_WEBHOOK_URL = os.environ.get("DISCORD_AMEDAS_WEBHOOK_URL", "")
 
+R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
+R2_PREFIX  = os.environ.get("R2_PREFIX", "amedas").strip().strip("/")
+
 # 秋田中心の JMA AMeDAS マップ参照リンク（Discord に添付）
 JMA_AMEDAS_URL = (
     "https://www.jma.go.jp/bosai/map.html"
@@ -614,6 +617,94 @@ def _draw_3station_detail_img(
 
 
 # =============================================================================
+# R2 アップロード
+# =============================================================================
+
+def _upload_r2(items: List[Tuple[str, bytes]], jst_now: datetime) -> List[str]:
+    """(filename, bytes) リストを R2 にアップして URL リストを返す。"""
+    if not R2_ENABLE:
+        return []
+    try:
+        from module.utils.r2_utils import put_bytes, make_url
+    except ImportError:
+        print("[WARN] r2_utils not available")
+        return []
+
+    day  = jst_now.strftime("%Y%m%d")
+    urls: List[str] = []
+    for fname, data in items:
+        key = f"{R2_PREFIX}/{day}/{fname}"
+        try:
+            put_bytes(key, data, content_type="image/png")
+            urls.append(make_url(key))
+            print(f"[OK] R2 upload: {key}")
+        except Exception as e:
+            print(f"[WARN] R2 upload {key}: {e}")
+            urls.append("")
+    return urls
+
+
+# =============================================================================
+# Notion 書き込み
+# =============================================================================
+
+def _notion_write(
+    title: str,
+    r2_urls: List[str],
+    jst_now: datetime,
+) -> None:
+    try:
+        from module.utils.notion_utils import (
+            notion_enabled,
+            create_db_row,
+            append_images,
+            append_heading,
+            append_bookmark,
+        )
+    except ImportError:
+        print("[WARN] notion_utils not available")
+        return
+
+    if not notion_enabled():
+        print("[SKIP] Notion not enabled")
+        return
+
+    import time
+    page_id = create_db_row(
+        title=title,
+        category="AMeDAS",
+        init_jst_iso=jst_now.isoformat(),
+        memo="",
+        rjtd="",
+        prefix=R2_PREFIX,
+        r2_url=next((u for u in r2_urls if u), ""),
+        autogen=True,
+        icon_emoji="🌡️",
+    )
+    if not page_id:
+        print("[WARN] Notion page create failed")
+        return
+
+    time.sleep(1.0)
+
+    try:
+        valid_urls = [u for u in r2_urls if u]
+        if valid_urls:
+            append_images(page_id, valid_urls, chunk=30)
+    except Exception as e:
+        print(f"[WARN] Notion image append failed: {e}")
+
+    try:
+        append_heading(page_id, "参考リンク", level=2)
+        append_bookmark(page_id, JMA_AMEDAS_URL,
+                        caption="気象庁 アメダス（秋田）")
+    except Exception as e:
+        print(f"[WARN] Notion bookmarks failed: {e}")
+
+    print(f"[OK] Notion page: {page_id}")
+
+
+# =============================================================================
 # Discord 送信
 # =============================================================================
 
@@ -680,7 +771,6 @@ def main():
     results  = _collect(akita, maps, ts_list, jst_today_start_utc)
     rankings = _ranking(maps, ts_list, table)
 
-    # 秋田県一覧 ─ 「現在」は最新正時、「日最高/日最低」は当日0:00〜現在
     ts_hourly_jst = (
         datetime.strptime(ts_list[0], "%Y%m%d%H%M%S")
         .replace(tzinfo=timezone.utc)
@@ -691,7 +781,7 @@ def main():
     detail_headers = ["日時", "気温℃", "前1h降水mm", "日積算降水mm", "風向", "風速m/s", "日照h", "湿度%"]
     detail_right   = {1, 2, 3, 5, 6, 7}
 
-    # 秋田県一覧（現在℃なし・日最高/日最低は当日0:00〜現在）
+    # 秋田県一覧
     headers, rows = _fmt_akita_rows(results)
     img1 = _draw_table_img(
         title=f"アメダス 秋田県  {ts_hourly_str}  （日最高/日最低は0:00〜現在）",
@@ -700,14 +790,13 @@ def main():
         right_align_cols={1, 2, 3, 4, 6, 7},
     )
     print(f"[INFO] akita image: {len(img1)} bytes")
-    _post_image(img1, "amedas_akita.png", content=f"<{JMA_AMEDAS_URL}>")
 
     # 全国ランキング
     img2 = _draw_ranking_img(rankings, ts_hourly_jst)
     print(f"[INFO] ranking image: {len(img2)} bytes")
-    _post_image(img2, "amedas_ranking.png")
 
-    # 3地点 時系列詳細（各局1枚ずつ）
+    # 3地点 時系列詳細
+    detail_imgs: List[Tuple[str, bytes]] = []
     for code, name in DETAIL_STATIONS:
         rows_d = _station_detail_rows(maps, ts_list, code, jst_today_start_utc)
         img_d  = _draw_table_img(
@@ -717,7 +806,27 @@ def main():
             right_align_cols=detail_right,
         )
         print(f"[INFO] detail {name}: {len(img_d)} bytes")
-        _post_image(img_d, f"amedas_detail_{name}.png")
+        detail_imgs.append((f"amedas_detail_{name}.png", img_d))
+
+    # R2 アップロード
+    img_items: List[Tuple[str, bytes]] = [
+        ("amedas_akita.png",    img1),
+        ("amedas_ranking.png",  img2),
+    ] + detail_imgs
+    r2_urls = _upload_r2(img_items, jst_now)
+
+    # Notion 書き込み
+    _notion_write(
+        f"AMeDAS 秋田 / {ts_hourly_str}",
+        r2_urls,
+        jst_now,
+    )
+
+    # Discord 投稿（順序は変わらず）
+    _post_image(img1, "amedas_akita.png", content=f"<{JMA_AMEDAS_URL}>")
+    _post_image(img2, "amedas_ranking.png")
+    for fname, img_d in detail_imgs:
+        _post_image(img_d, fname)
 
     print("=== Done ===")
 

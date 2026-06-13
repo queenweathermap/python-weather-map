@@ -93,6 +93,8 @@ OUTPUT_TITLES = [
     "④ 週間4列結合",
     "⑤ WCN週間予報(秋田県)",
     "⑥ 全部入り",
+    "⑦ JMA短期予報",
+    "⑧ JMA週間予報",
 ]
 
 OUTPUT_FILENAMES = [
@@ -102,6 +104,8 @@ OUTPUT_FILENAMES = [
     "04_LAYOUT_4_WEEKLY",
     "05_WCN_WEEKLY",
     "06_LAYOUT_5_DASHBOARD",
+    "07_JMA_TANKI",
+    "08_JMA_SHUUKAN",
 ]
 
 
@@ -835,6 +839,399 @@ def process_fxjp854_fit(
     return joined
 
 
+# =============================================================================
+# JMA 天気予報 API (⑦ 短期予報 / ⑧ 週間予報)
+# =============================================================================
+
+_JMF_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/050000.json"
+_JMF_WDAYS        = "月火水木金土日"
+_JMF_COAST        = "050010"
+_JMF_INLAND       = "050020"
+_JMF_AREA_LABELS  = {"050010": "沿岸", "050020": "内陸"}
+_JMF_RELIABILITY  = {"A": "高", "B": "中", "C": "低"}
+_JMF_STATIONS     = {"32402": "秋田", "32126": "鷹巣", "32596": "横手"}
+
+_JMF_FONT_CANDIDATES = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+    "/usr/share/fonts/noto-cjk/NotoSansCJKjp-Regular.otf",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+    "/Library/Fonts/Arial Unicode.ttf",
+]
+
+_JMF_C_TITLE_BG  = (45,  90, 145)
+_JMF_C_TITLE_FG  = (255, 255, 255)
+_JMF_C_HEADER_BG = (85, 140, 200)
+_JMF_C_HEADER_FG = (255, 255, 255)
+_JMF_C_ROW_ODD   = (255, 255, 255)
+_JMF_C_ROW_EVEN  = (238, 246, 255)
+_JMF_C_BORDER    = (190, 205, 220)
+_JMF_C_TEXT      = (30,  30,  30)
+
+
+def _jmf_jst(iso: str):
+    if not iso:
+        return None
+    try:
+        from datetime import datetime, timezone, timedelta
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone(timedelta(hours=9)))
+        return dt.astimezone(timezone(timedelta(hours=9)))
+    except ValueError:
+        return None
+
+
+def _jmf_day_label(dt) -> str:
+    return f"{dt.month}/{dt.day}({_JMF_WDAYS[dt.weekday()]})"
+
+
+def _jmf_v(arr: list, i: int, default: str = "-") -> str:
+    return arr[i] if i < len(arr) and arr[i] else default
+
+
+def _jmf_load_fonts():
+    try:
+        from PIL import ImageFont
+        for path in _JMF_FONT_CANDIDATES:
+            if os.path.exists(path):
+                try:
+                    f_sm = ImageFont.truetype(path, 13)
+                    f_md = ImageFont.truetype(path, 14)
+                    f_lg = ImageFont.truetype(path, 15)
+                    return f_sm, f_md, f_lg
+                except Exception:
+                    pass
+        f = ImageFont.load_default()
+        return f, f, f
+    except ImportError:
+        return None, None, None
+
+
+def _jmf_cell_w(draw, texts: list, font, pad: int = 16) -> int:
+    max_w = 0
+    for t in texts:
+        bb = draw.textbbox((0, 0), t, font=font)
+        max_w = max(max_w, bb[2] - bb[0])
+    return max_w + pad
+
+
+def _jmf_draw_table(
+    title: str,
+    headers: list,
+    rows: list,
+    right_align_cols: set = None,
+) -> bytes:
+    from PIL import ImageDraw
+    right_align_cols = right_align_cols or set()
+
+    tmp  = Image.new("RGB", (1, 1))
+    d0   = ImageDraw.Draw(tmp)
+    f_sm, f_md, f_lg = _jmf_load_fonts()
+    if f_sm is None:
+        raise ImportError("Pillow ImageFont unavailable")
+
+    ROW_H = 26
+    HDR_H = 28
+    TTL_H = 32
+    PAD_X = 10
+
+    col_contents = [
+        [h] + [r[i] for r in rows if i < len(r)]
+        for i, h in enumerate(headers)
+    ]
+    col_widths = [_jmf_cell_w(d0, col, f_sm) for col in col_contents]
+    total_w    = sum(col_widths) + len(col_widths) + 1
+    total_h    = TTL_H + HDR_H + len(rows) * ROW_H + 1
+
+    img = Image.new("RGB", (total_w, total_h), (255, 255, 255))
+    d   = ImageDraw.Draw(img)
+
+    d.rectangle([(0, 0), (total_w, TTL_H)], fill=_JMF_C_TITLE_BG)
+    d.text((PAD_X, (TTL_H - 15) // 2), title, fill=_JMF_C_TITLE_FG, font=f_lg)
+
+    y = TTL_H
+    d.rectangle([(0, y), (total_w, y + HDR_H)], fill=_JMF_C_HEADER_BG)
+    x = 0
+    for hdr, cw in zip(headers, col_widths):
+        bb = d.textbbox((0, 0), hdr, font=f_sm)
+        tw = bb[2] - bb[0]
+        d.text((x + (cw - tw) // 2, y + (HDR_H - 13) // 2), hdr, fill=_JMF_C_HEADER_FG, font=f_sm)
+        x += cw + 1
+    y += HDR_H
+
+    for ri, row in enumerate(rows):
+        bg = _JMF_C_ROW_ODD if ri % 2 == 0 else _JMF_C_ROW_EVEN
+        d.rectangle([(0, y), (total_w, y + ROW_H)], fill=bg)
+        d.line([(0, y), (total_w, y)], fill=_JMF_C_BORDER)
+        x = 0
+        for ci, (cell, cw) in enumerate(zip(row, col_widths)):
+            bb = d.textbbox((0, 0), cell, font=f_sm)
+            tw = bb[2] - bb[0]
+            tx = x + cw - tw - 6 if ci in right_align_cols else x + 6
+            d.text((tx, y + (ROW_H - 13) // 2), cell, fill=_JMF_C_TEXT, font=f_sm)
+            x += cw + 1
+        y += ROW_H
+
+    x = 0
+    for cw in col_widths[:-1]:
+        x += cw
+        d.line([(x, TTL_H), (x, total_h)], fill=_JMF_C_BORDER)
+        x += 1
+    d.line([(0, total_h - 1), (total_w, total_h - 1)], fill=_JMF_C_BORDER)
+    d.rectangle([(0, 0), (total_w - 1, total_h - 1)], outline=_JMF_C_BORDER)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def _jmf_shorten_weather(text: str, max_len: int = 12) -> str:
+    text = (text
+            .replace("のち", "後")
+            .replace("時々", "時")
+            .replace("一時", "一")
+            .replace("所により", "")
+            .replace("激しく", "強"))
+    return text[:max_len] if len(text) > max_len else text
+
+
+def _jmf_shorten_wind(text: str, max_len: int = 8) -> str:
+    return text[:max_len] if text and len(text) > max_len else (text or "-")
+
+
+def _jmf_anomaly(val_str: str, avg_val: str) -> str:
+    try:
+        diff = round(float(val_str) - float(avg_val))
+        return f"+{diff}" if diff > 0 else str(diff) if diff != 0 else "±0"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _jmf_group_pops_by_day(pop_times: list, vals: list, weather_days: list) -> list:
+    result = []
+    for day_dt in weather_days:
+        day_date = day_dt.date()
+        slots = [v for pt, v in zip(pop_times, vals) if pt.date() == day_date]
+        result.append("/".join(f"{v}%" for v in slots) if slots else "-")
+    return result
+
+
+def _jmf_fetch() -> Optional[list]:
+    try:
+        r = requests.get(
+            _JMF_FORECAST_URL,
+            headers={"User-Agent": "akita-weather-map-bot/1.0"},
+            timeout=15,
+        )
+        if r.status_code == 200:
+            return r.json()
+        print(f"[WARN] JMF forecast HTTP {r.status_code}")
+    except Exception as e:
+        print(f"[WARN] JMF forecast fetch: {e}")
+    return None
+
+
+def _jmf_parse_short(short: dict) -> dict:
+    ts = short.get("timeSeries", [])
+    if len(ts) < 3:
+        return {}
+
+    t0 = ts[0]
+    weather_times = [_jmf_jst(t) for t in t0.get("timeDefines", [])]
+    weather_times = [dt for dt in weather_times if dt]
+    weather_by_area = {a["area"]["code"]: a for a in t0.get("areas", [])}
+
+    t1 = ts[1]
+    pop_times = [_jmf_jst(t) for t in t1.get("timeDefines", [])]
+    pop_times = [dt for dt in pop_times if dt]
+    pops_by_area = {a["area"]["code"]: a for a in t1.get("areas", [])}
+
+    t2 = ts[2]
+    temps_by_station = {a["area"]["code"]: a for a in t2.get("areas", [])}
+
+    return {
+        "office":        short.get("publishingOffice", ""),
+        "report_dt":     _jmf_jst(short.get("reportDatetime", "")),
+        "weather_times": weather_times,
+        "weather":       weather_by_area,
+        "pop_times":     pop_times,
+        "pops":          pops_by_area,
+        "temps":         temps_by_station,
+    }
+
+
+def _jmf_parse_weekly(weekly: dict) -> dict:
+    ts = weekly.get("timeSeries", [])
+    if len(ts) < 2:
+        return {}
+
+    t0 = ts[0]
+    week_times = [_jmf_jst(t) for t in t0.get("timeDefines", [])]
+    week_times = [dt for dt in week_times if dt]
+    area0 = t0.get("areas", [{}])[0]
+
+    t1 = ts[1]
+    temp_area = t1.get("areas", [{}])[0]
+
+    avg_areas = weekly.get("tempAverage", {}).get("areas", [{}])
+    avg_area  = avg_areas[0] if avg_areas else {}
+
+    return {
+        "office":        weekly.get("publishingOffice", ""),
+        "report_dt":     _jmf_jst(weekly.get("reportDatetime", "")),
+        "week_times":    week_times,
+        "weather_codes": area0.get("weatherCodes", []),
+        "weathers":      area0.get("weathers",     []),
+        "pops":          area0.get("pops",          []),
+        "reliabilities": area0.get("reliabilities", []),
+        "temps_max":     temp_area.get("tempsMax",  []),
+        "temps_min":     temp_area.get("tempsMin",  []),
+        "avg_max":       avg_area.get("max", []),
+        "avg_min":       avg_area.get("min", []),
+    }
+
+
+def build_jma_tanki(errors: List[str]) -> Optional[Attachment]:
+    """⑦ JMA 短期予報テーブル PNG を Attachment として返す。"""
+    raw = _jmf_fetch()
+    if not raw or not isinstance(raw, list):
+        errors.append("JMA_TANKI: forecast fetch failed")
+        return None
+
+    st = _jmf_parse_short(raw[0] if raw else {})
+    if not st:
+        errors.append("JMA_TANKI: parse failed")
+        return None
+
+    report_dt     = st.get("report_dt")
+    weather_times = st.get("weather_times", [])
+    if not weather_times:
+        errors.append("JMA_TANKI: no weather_times")
+        return None
+
+    office = st.get("office", "")
+    ts_str = report_dt.strftime("%Y/%m/%d %H:%M") if report_dt else ""
+    title  = f"秋田県 短期天気予報  {ts_str} JST  発表: {office}"
+
+    day_labels = ["今日", "明日", "明後日"]
+    day_hdrs = [
+        f"{day_labels[i] if i < len(day_labels) else f'+{i}日'}({_jmf_day_label(dt)})"
+        for i, dt in enumerate(weather_times[:3])
+    ]
+    headers = [""] + day_hdrs
+    rows    = []
+
+    for code in (_JMF_COAST, _JMF_INLAND):
+        label    = _JMF_AREA_LABELS[code]
+        a        = st["weather"].get(code, {})
+        weathers = a.get("weathers", [])
+        winds    = a.get("winds",    [])
+        rows.append(
+            [f"{label} 天気"] + [
+                _jmf_shorten_weather(_jmf_v(weathers, i))
+                for i in range(len(weather_times[:3]))
+            ]
+        )
+        rows.append(
+            [f"{label} 風"] + [
+                _jmf_shorten_wind(_jmf_v(winds, i))
+                for i in range(len(weather_times[:3]))
+            ]
+        )
+
+    for code in (_JMF_COAST, _JMF_INLAND):
+        label    = _JMF_AREA_LABELS[code]
+        pop_a    = st["pops"].get(code, {})
+        pop_vals = pop_a.get("pops", [])
+        pop_days = _jmf_group_pops_by_day(st["pop_times"], pop_vals, weather_times[:3])
+        rows.append([f"降水確率%({label})"] + pop_days)
+
+    for code, label in _JMF_STATIONS.items():
+        t_a   = st["temps"].get(code, {})
+        temps = t_a.get("temps", [])
+        today_str = (f"↑{temps[0]} ↓{temps[1]}" if len(temps) >= 2
+                     else f"↑{temps[0]}" if temps else "-")
+        tmrw_str  = (f"↑{temps[2]} ↓{temps[3]}" if len(temps) >= 4
+                     else f"↑{temps[2]}" if len(temps) >= 3 else "-")
+        rows.append([f"気温℃ {label}", today_str, tmrw_str, "-"])
+
+    try:
+        png = _jmf_draw_table(title, headers, rows)
+        print(f"[OK] JMA_TANKI: {len(png)} bytes")
+        return ("07_JMA_TANKI.png", png, "image/png")
+    except Exception as e:
+        errors.append(f"JMA_TANKI: render failed ({e})")
+        return None
+
+
+def build_jma_shuukan(errors: List[str]) -> Optional[Attachment]:
+    """⑧ JMA 週間予報テーブル PNG を Attachment として返す。"""
+    raw = _jmf_fetch()
+    if not raw or not isinstance(raw, list) or len(raw) < 2:
+        errors.append("JMA_SHUUKAN: forecast fetch failed")
+        return None
+
+    wk = _jmf_parse_weekly(raw[1])
+    if not wk:
+        errors.append("JMA_SHUUKAN: parse failed")
+        return None
+
+    report_dt  = wk.get("report_dt")
+    week_times = wk.get("week_times", [])
+    if not week_times:
+        errors.append("JMA_SHUUKAN: no week_times")
+        return None
+
+    office = wk.get("office", "")
+    ts_str = report_dt.strftime("%Y/%m/%d %H:%M") if report_dt else ""
+    title  = f"秋田県 週間天気予報  {ts_str} JST  発表: {office}"
+
+    headers = [""] + [_jmf_day_label(dt) for dt in week_times]
+    n       = len(week_times)
+
+    weathers     = wk.get("weathers",     [])
+    weather_codes = wk.get("weather_codes", [])
+    pops         = wk.get("pops",         [])
+    rels         = wk.get("reliabilities", [])
+    temps_max    = wk.get("temps_max",    [])
+    temps_min    = wk.get("temps_min",    [])
+    avg_max      = wk.get("avg_max",      [])
+    avg_min      = wk.get("avg_min",      [])
+
+    rows = [
+        ["秋田県 天気"] + [_jmf_shorten_weather(_jmf_v(weathers, i)) for i in range(n)],
+        ["天気コード"]  + [f"[{_jmf_v(weather_codes, i)}]" for i in range(n)],
+        ["降水確率%"]   + [
+            f"{_jmf_v(pops, i)}%" if _jmf_v(pops, i) != "-" else "-"
+            for i in range(n)
+        ],
+        ["信頼度"] + [
+            _JMF_RELIABILITY.get(_jmf_v(rels, i), _jmf_v(rels, i)) for i in range(n)
+        ],
+        ["秋田 最高℃"] + [
+            (_jmf_v(temps_max, i)
+             + (f"({_jmf_anomaly(_jmf_v(temps_max, i), _jmf_v(avg_max, i))})"
+                if i < len(avg_max) and _jmf_v(avg_max, i) != "-" else ""))
+            for i in range(n)
+        ],
+        ["秋田 最低℃"] + [
+            (_jmf_v(temps_min, i)
+             + (f"({_jmf_anomaly(_jmf_v(temps_min, i), _jmf_v(avg_min, i))})"
+                if i < len(avg_min) and _jmf_v(avg_min, i) != "-" else ""))
+            for i in range(n)
+        ],
+    ]
+
+    try:
+        png = _jmf_draw_table(title, headers, rows)
+        print(f"[OK] JMA_SHUUKAN: {len(png)} bytes")
+        return ("08_JMA_SHUUKAN.png", png, "image/png")
+    except Exception as e:
+        errors.append(f"JMA_SHUUKAN: render failed ({e})")
+        return None
+
+
 def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ④ 週間 4列結合
@@ -1140,6 +1537,20 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
     layout5_att = build_layout_5(session, errors)
     if layout5_att:
         append_output(images, layout5_att, 6)
+
+    # -------------------------------------------------------------------------
+    # ⑦ JMA 短期予報
+    # -------------------------------------------------------------------------
+    tanki_att = build_jma_tanki(errors)
+    if tanki_att:
+        append_output(images, tanki_att, 7)
+
+    # -------------------------------------------------------------------------
+    # ⑧ JMA 週間予報
+    # -------------------------------------------------------------------------
+    shuukan_att = build_jma_shuukan(errors)
+    if shuukan_att:
+        append_output(images, shuukan_att, 8)
 
     # ローカルへの一時デバッグ書き出し
     for fname, data, _ in images:
