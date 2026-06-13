@@ -2,578 +2,274 @@
 # =============================================================================
 # module/jobs/amedas.py
 #
-# WCN（気象キャスターネットワーク）アメダス一覧:
-#   HTML → スクショ → JPG/PNG → R2一時保存 → Notion取り込み → Discord(#amedas)
+# JMA AMeDAS 秋田県データ → Discord(#amedas) 配信
+# urllib stdlib のみ・認証不要・Playwright不使用
 #
-# 撮影対象（いずれも「府県選択→決定」で右ページが変わる方式）:
-#   ① アメダス積算降水量  totalamedas.html
-#   ② アメダス気温（最高） alltemp.html  要素=最高気温
-#   ③ アメダス気温（最低） alltemp.html  要素=最低気温
-#
-# 範囲は「秋田県」のみ（他ジョブと同じ秋田中心）。全国一覧から秋田県セクションを
-# 切り出す。配信は 朝3時 / 午後3時（JST）の2回。
-#
-# 方針:
-#   ・Notion = 正本
-#   ・R2 = 21日保存の一時置き場
-#   ・Discord = ビュー
-#   ・入口リンクはテキスト投稿
+# 配信: 朝3時 / 午後3時（JST）
+# データ:
+#   ・秋田県各局: 現在気温 / 日最高 / 日最低 / 3h積算降水 / 24h積算降水
+#   ・全国最高気温ランキング TOP10
+#   ・全国最低気温ランキング TOP10
 # =============================================================================
 
 from __future__ import annotations
 
-import io
+import json
 import os
-import re
-import time
-import requests
-
-from datetime import datetime, timezone, timedelta
-from typing import List, Tuple, Optional
-
-from PIL import Image
-from playwright.sync_api import sync_playwright
-
-
-from module.utils.r2_utils import put_bytes, make_url
-from module.utils.notion_utils import (
-    notion_enabled,
-    create_db_row,
-    append_images,
-    append_imported_images_from_urls,
-    append_heading,
-    append_bookmark,
-)
-from module.utils.discord_utils import (
-    post_discord_item_image_urls,
-    post_discord_complete,
-)
+import urllib.request
+import urllib.error
+from datetime import datetime, timezone, timedelta, date
+from typing import Dict, List, Optional, Tuple
 
 # =============================================================================
-# 設定
+# JMA AMeDAS 公開API（認証不要）
 # =============================================================================
+LATEST_TIME_URL = "https://www.jma.go.jp/bosai/amedas/data/latest_time.json"
+AMEDAS_TABLE_URL = "https://www.jma.go.jp/bosai/amedas/const/amedastable.json"
+MAP_BASE_URL = "https://www.jma.go.jp/bosai/amedas/data/map"
 
-OUTPUT_DIR = "/tmp/jma_amedas"
+DISCORD_AMEDAS_WEBHOOK_URL = os.environ.get("DISCORD_AMEDAS_WEBHOOK_URL", "")
 
-JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "90"))
-R2_ENABLE = os.environ.get("R2_ENABLE", "1") in ("1", "true", "yes")
-R2_PREFIX = os.environ.get("R2_PREFIX", "amedas")
+# 秋田県 AMeDAS局コードのプレフィックス
+AKITA_PREFIX = os.environ.get("AMEDAS_AKITA_PREFIX", "32")
 
-VIEWPORT_WIDTH = int(os.environ.get("AMEDAS_VIEWPORT_WIDTH", "1280"))
-VIEWPORT_HEIGHT = int(os.environ.get("AMEDAS_VIEWPORT_HEIGHT", "1000"))
-WAIT_MS = int(os.environ.get("AMEDAS_WAIT_MS", "2500"))
+# 秋田のバウンディングボックス（コード判定の補完）
+AKITA_LAT = (38.8, 40.6)
+AKITA_LON = (139.5, 141.2)
 
-NOTION_IMPORT_IMAGES = os.environ.get("NOTION_IMPORT_IMAGES", "0").lower() in ("1", "true", "yes", "on")
-NOTION_IMPORT_TIMEOUT_SECONDS = int(os.environ.get("NOTION_IMPORT_TIMEOUT_SECONDS", "180"))
-NOTION_IMPORT_POLL_SECONDS = float(os.environ.get("NOTION_IMPORT_POLL_SECONDS", "2.0"))
+RANK_TOP_N = int(os.environ.get("AMEDAS_RANK_TOP_N", "10"))
 
-Attachment = Tuple[str, bytes, str]
-
-# =============================================================================
-# WCN会員ページ。Basic認証（WEATHERCASTER_USER/PASS）。
-# 直URLは別府県に戻るため、各ページで「府県選択→決定」して秋田を描画させる。
-# =============================================================================
-WCN_BASE = os.environ.get(
-    "WCN_BASE", "https://www.weathercaster.jp/web/member_only/weather-data")
-WCN_PREF = os.environ.get("WCN_PREF", "秋田県")
-
-AMEDAS_TOTAL_URL = f"{WCN_BASE}/amedas/totalamedas.html"
-AMEDAS_TEMP_URL = f"{WCN_BASE}/amedas/alltemp.html"
-AMEDAS_RANKING_URL = f"{WCN_BASE}/amedas/ranking.html"
-
-# 撮影対象。
-#   element = 要素選択（最高気温/最低気温）。None は要素選択なし。
-#   scope   = "akita" … 秋田県セクションを切り出す / "all" … 右ページ全体（全国）を撮る
-AMEDAS_TARGETS = [
-    {
-        "name": "amedas_total_precip",
-        "label": "アメダス積算降水量",
-        "url": AMEDAS_TOTAL_URL,
-        "element": None,
-        "scope": "akita",
-    },
-    {
-        "name": "amedas_temp_max",
-        "label": "アメダス気温(最高)",
-        "url": AMEDAS_TEMP_URL,
-        "element": "最高気温",
-        "scope": "akita",
-    },
-    {
-        "name": "amedas_temp_min",
-        "label": "アメダス気温(最低)",
-        "url": AMEDAS_TEMP_URL,
-        "element": "最低気温",
-        "scope": "akita",
-    },
-    {
-        "name": "amedas_ranking",
-        "label": "アメダスランキング(全国)",
-        "url": AMEDAS_RANKING_URL,
-        "element": None,
-        "scope": "all",
-    },
-]
-
-# 全国一覧ページから「秋田県」セクションの矩形（CSS px・ページ座標）を求めるJS。
-# 「topへ」リンクを持つ府県見出しの位置を上から並べ、秋田県の見出し〜次の見出し
-# 直前までを切り出し範囲とする。見つからなければ null（→ full_page にフォールバック）。
-CLIP_JS = r"""
-(pref) => {
-  const norm = s => (s || '').replace(/\s/g, '');
-  const want = norm(pref);                 // 秋田県
-  const wantShort = want.replace('県', '').replace('府', '').replace('地方', ''); // 秋田
-
-  // 「topへ」リンク＝各府県見出しの目印
-  const tops = Array.from(document.querySelectorAll('a'))
-    .filter(a => /top/i.test(a.textContent || '') && /へ/.test(a.textContent || ''));
-
-  const heads = tops.map(a => {
-    // top へ リンクを含む見出し行（府県名テキストを含む親）まで遡る
-    let el = a;
-    for (let i = 0; i < 5 && el.parentElement; i++) {
-      el = el.parentElement;
-      const t = norm(el.textContent);
-      if (t.length > 2) break;
-    }
-    const r = el.getBoundingClientRect();
-    return { y: r.top + window.scrollY, text: norm(el.textContent) };
-  }).sort((a, b) => a.y - b.y);
-
-  if (!heads.length) return null;
-
-  let idx = heads.findIndex(h => h.text.includes(want) || h.text.includes(wantShort));
-  if (idx < 0) return null;
-
-  const top = Math.max(0, heads[idx].y - 10);
-  const bottom = (idx + 1 < heads.length)
-    ? heads[idx + 1].y - 6
-    : document.body.scrollHeight;
-  const width = Math.max(
-    document.documentElement.scrollWidth,
-    document.body.scrollWidth
-  );
-  return { x: 0, y: top, width: width, height: Math.max(60, bottom - top) };
-}
-"""
+JST = timezone(timedelta(hours=9))
 
 # =============================================================================
-# Utility
+# HTTP
 # =============================================================================
 
-def jst_now():
-    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9)))
-
-
-def png_bytes(img: Image.Image) -> bytes:
-    out = io.BytesIO()
-    img.convert("RGB").save(out, format="PNG", optimize=True)
-    return out.getvalue()
-
-
-def discord_url():
-    return os.getenv("DISCORD_AMEDAS_WEBHOOK_URL", "")
-
-
-def notion_page_url(page_id: str) -> str:
-    clean = (page_id or "").replace("-", "")
-    return f"https://www.notion.so/{clean}" if clean else ""
-
-
-# =============================================================================
-# フォーム操作（要素選択・府県選択・決定）
-# =============================================================================
-
-def _dump_frames(page):
-    """診断用: 全フレームの名前とセレクト内容をログに出す。"""
-    for fr in page.frames:
-        try:
-            n = fr.locator("select").count()
-            if n:
-                opts = fr.locator("select").first.locator("option").evaluate_all(
-                    "els => els.map(e => e.textContent.trim()).slice(0,6)")
-                print(f"[DEBUG] frame name={fr.name!r} url={fr.url[:60]} select[0]opts={opts}")
-            else:
-                print(f"[DEBUG] frame name={fr.name!r} url={fr.url[:60]} (no select)")
-        except Exception as e:
-            print(f"[DEBUG] frame name={fr.name!r} err={e}")
-
-
-def _find_control_frame(page, pref=None):
-    """府県選択セレクト / ラジオを持つフレームを返す（フレームセット対応）。
-    見つからなければ page 本体を返す（フォールバック）。"""
-    pref = pref or WCN_PREF
-    for fr in page.frames:
-        try:
-            # 府県セレクトを持つフレームを探す
-            sels = fr.locator("select")
-            if sels.count():
-                opts = sels.first.locator("option").evaluate_all(
-                    "els => els.map(e => e.textContent.trim())")
-                if any(pref in o for o in opts):
-                    print(f"[INFO] 操作フレーム検出: name={fr.name!r}")
-                    return fr
-        except Exception:
-            continue
-    print("[INFO] 操作フレーム: main page（フレームセットなし）")
-    return page
-
-
-def _check_element(ctrl, element_label) -> bool:
-    """要素選択（最高気温/最低気温）のラジオを選ぶ（ctrl はフレームまたはページ）。"""
-    if not element_label:
-        return True
-    strategies = [
-        lambda: ctrl.get_by_label(element_label, exact=False).first.check(timeout=4000),
-        lambda: ctrl.get_by_text(element_label, exact=False).first.click(timeout=4000),
-    ]
-    for s in strategies:
-        try:
-            s()
-            return True
-        except Exception:
-            continue
-    print(f"[WARN] 要素選択に失敗: {element_label}")
-    return False
-
-
-def _select_pref_dropdown(ctrl, pref) -> bool:
-    """府県が <select> なら選ぶ（ctrl はフレームまたはページ）。"""
+def _fetch(url: str) -> Optional[object]:
     try:
-        sels = ctrl.locator("select")
-        n = sels.count()
-        for i in range(n):
-            try:
-                sels.nth(i).select_option(label=pref, timeout=2000)
-                return True
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return False
-
-
-def _click_decide(ctrl) -> bool:
-    """「決定」ボタン（空白入り "決 定" にも対応）を押す（ctrl はフレームまたはページ）。"""
-    try:
-        ctrl.get_by_role("button", name=re.compile(r"決\s*定")).first.click(timeout=3000)
-        return True
-    except Exception:
-        pass
-    try:
-        ctrl.locator(
-            "input[type=submit], input[type=button], button"
-        ).filter(has_text=re.compile(r"決\s*定")).first.click(timeout=3000)
-        return True
-    except Exception:
-        pass
-    return False
-
-
-def _click_pref_link(ctrl, pref) -> bool:
-    """府県リンク（アンカー）をクリックして秋田県セクションへスクロール（ctrl はフレームまたはページ）。"""
-    for fn in (
-        lambda: ctrl.get_by_role("link", name=re.compile(re.escape(pref))).first.click(timeout=4000),
-        lambda: ctrl.get_by_text(pref, exact=False).first.click(timeout=4000),
-    ):
-        try:
-            fn()
-            return True
-        except Exception:
-            continue
-    return False
-
-
-def _grab_full_image(page, label) -> Image.Image:
-    """右ページ全体（全国）の PIL Image を返す。
-    data_area iframe があればその body、無ければページ全体（full_page）。クロップしない。
-    """
-    fr = page.frame(name="data_area")
-    if fr is not None:
-        try:
-            png = fr.locator("body").screenshot(type="png")
-            print(f"[INFO] {label}: iframe data_area を撮影（全国）")
-            return Image.open(io.BytesIO(png)).convert("RGB")
-        except Exception as e:
-            print(f"[WARN] {label}: iframe撮影に失敗: {e}")
-    png_full = page.screenshot(full_page=True, type="png")
-    img = Image.open(io.BytesIO(png_full)).convert("RGB")
-    print(f"[INFO] {label}: full_page（全国） {img.size}")
-    return img
-
-
-def _grab_akita_image(page, label) -> Image.Image:
-    """秋田県の表だけを切り出した PIL Image を返す。
-    1) data_area iframe（フィルタ式）があればその body を撮る
-    2) 全国ページなら full_page を撮り、秋田県セクション矩形でクロップ
-    3) 矩形が見つからなければ full_page をそのまま返す
-    deviceScaleFactor=1 前提なので CSS px とスクショpx は一致する。
-    """
-    fr = page.frame(name="data_area")
-    if fr is not None:
-        try:
-            png = fr.locator("body").screenshot(type="png")
-            print(f"[INFO] {label}: iframe data_area を撮影")
-            return Image.open(io.BytesIO(png)).convert("RGB")
-        except Exception as e:
-            print(f"[WARN] {label}: iframe撮影に失敗: {e}")
-
-    # data_area 以外のフレームで全国ページが描画されている場合も考慮
-    # まずすべてのフレームを body.screenshot で試みる
-    for fr in page.frames:
-        if fr.name in ("", "_top"):
-            continue
-        try:
-            clip = fr.evaluate(CLIP_JS, WCN_PREF)
-            if clip and clip.get("height", 0) > 60:
-                png = fr.locator("body").screenshot(type="png")
-                img = Image.open(io.BytesIO(png)).convert("RGB")
-                x, y = max(0, int(clip["x"])), max(0, int(clip["y"]))
-                w, h = int(clip["width"]), int(clip["height"])
-                img = img.crop((x, y, min(img.width, x + w), min(img.height, y + h)))
-                print(f"[INFO] {label}: frame={fr.name!r} 秋田県クロップ {img.size}")
-                return img
-        except Exception:
-            continue
-
-    png_full = page.screenshot(full_page=True, type="png")
-    img = Image.open(io.BytesIO(png_full)).convert("RGB")
-
-    clip = None
-    try:
-        clip = page.evaluate(CLIP_JS, WCN_PREF)
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "akita-amedas-bot/1.0 (+https://github.com/)"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        print(f"[WARN] HTTP {e.code}: {url}")
+        return None
     except Exception as e:
-        print(f"[WARN] {label}: clip評価に失敗: {e}")
+        print(f"[WARN] fetch: {e} ({url})")
+        return None
 
-    if clip and clip.get("height", 0) > 60:
-        x = max(0, int(clip["x"]))
-        y = max(0, int(clip["y"]))
-        w = int(clip["width"])
-        h = int(clip["height"])
-        img = img.crop((x, y, min(img.width, x + w), min(img.height, y + h)))
-        print(f"[INFO] {label}: 秋田県セクションをクロップ {img.size}")
+
+def _val(entry: dict, key: str) -> Optional[float]:
+    """[value, quality] 形式から値を取り出す。品質コード 0/1 のみ採用。"""
+    v = entry.get(key)
+    if isinstance(v, list) and len(v) >= 2 and v[1] in (0, 1):
+        try:
+            return float(v[0]) if v[0] is not None else None
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+# =============================================================================
+# タイムスタンプ
+# =============================================================================
+
+def _parse_latest() -> Tuple[datetime, datetime]:
+    """latest_time.json を読んで (jst_now, latest_utc) を返す。"""
+    raw = _fetch(LATEST_TIME_URL)
+    if raw:
+        utc = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     else:
-        print(f"[INFO] {label}: 秋田県セクション未検出 → full_page {img.size}")
+        utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        utc = utc.replace(minute=(utc.minute // 10) * 10) - timedelta(minutes=10)
+    return utc.astimezone(JST), utc
 
-    return img
+
+def _hourly_ts_list(base_utc: datetime, hours: int) -> List[str]:
+    """base_utc の正時から hours 時間分の 14桁 UTC タイムスタンプ（新→古）。"""
+    cur = base_utc.replace(minute=0, second=0, microsecond=0)
+    result = []
+    for _ in range(hours):
+        result.append(cur.strftime("%Y%m%d%H%M%S"))
+        cur -= timedelta(hours=1)
+    return result
 
 
 # =============================================================================
-# スクショ
+# 地点テーブル
 # =============================================================================
 
-def capture():
-    atts = []
-    errors = []
-
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    user = os.getenv("WEATHERCASTER_USER", "").strip()
-    password = os.getenv("WEATHERCASTER_PASS", "").strip()
-
-    if not user or not password:
-        errors.append("WCN auth env is missing: WEATHERCASTER_USER / WEATHERCASTER_PASS")
-        return atts, errors
-
-    with sync_playwright() as p:
-
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
-            http_credentials={"username": user, "password": password},
-            device_scale_factor=1,
-        )
-        page = context.new_page()
-
-        for t in AMEDAS_TARGETS:
-            name, label, url, element = t["name"], t["label"], t["url"], t["element"]
-            scope = t.get("scope", "akita")
+def _load_akita_stations(table: dict) -> Dict[str, str]:
+    """コードプレフィックス or lat/lon で秋田県局を抽出 → {code: 漢字名}。"""
+    result = {}
+    for code, info in table.items():
+        name = info.get("kjName", code)
+        if code.startswith(AKITA_PREFIX):
+            result[code] = name
+            continue
+        lat_raw = info.get("lat")
+        lon_raw = info.get("lon")
+        if lat_raw and lon_raw:
             try:
-                print(f"[INFO] {label}")
-                page.goto(url, wait_until="networkidle", timeout=60000)
+                lat = lat_raw[0] + lat_raw[1] / 60
+                lon = lon_raw[0] + lon_raw[1] / 60
+                if AKITA_LAT[0] <= lat <= AKITA_LAT[1] and AKITA_LON[0] <= lon <= AKITA_LON[1]:
+                    result[code] = name
+            except Exception:
+                pass
+    return dict(sorted(result.items()))
 
-                # フレームセット対応: 操作フレームを特定してからフォーム操作
-                _dump_frames(page)
-                ctrl = _find_control_frame(page)
-
-                # 要素選択（最高/最低）→（秋田のみ府県選択）→ 決定
-                _check_element(ctrl, element)
-                dropdown_ok = True
-                if scope == "akita":
-                    dropdown_ok = _select_pref_dropdown(ctrl, WCN_PREF)
-                _click_decide(ctrl)
-
-                try:
-                    page.wait_for_load_state("networkidle", timeout=60000)
-                except Exception:
-                    pass
-                page.wait_for_timeout(WAIT_MS)
-
-                if scope == "akita":
-                    # ドロップダウンで絞り込めない（リンク式）の場合は、府県アンカーへ移動
-                    if not dropdown_ok:
-                        _click_pref_link(ctrl, WCN_PREF)
-                        page.wait_for_timeout(800)
-                    # 秋田が描画されたか軽く待つ（失敗しても続行）
-                    try:
-                        page.get_by_text(WCN_PREF[:2], exact=False).first.wait_for(timeout=10000)
-                    except Exception:
-                        pass
-
-                body_text = page.locator("body").inner_text(timeout=5000)
-                if "Authentication Failed" in body_text or "Unauthorized" in body_text:
-                    errors.append(f"{label}: authentication failed")
-                    continue
-
-                if scope == "akita":
-                    img = _grab_akita_image(page, label)
-                else:
-                    img = _grab_full_image(page, label)
-                atts.append((f"{name}.png", png_bytes(img), "image/png"))
-
-            except Exception as e:
-                errors.append(f"{label}: {e}")
-
-        context.close()
-        browser.close()
-
-    return atts, errors
 
 # =============================================================================
-# R2
+# データ集計
 # =============================================================================
 
-def upload(prefix, atts):
-    urls = []
-    rep = None
+def _collect(
+    akita: Dict[str, str],
+    ts_list: List[str],
+    jst_today_start_utc: datetime,
+) -> List[dict]:
+    """各局の気温・降水データを集計して返す。"""
+    # 全時刻の map データを取得（新→古）
+    maps: Dict[str, dict] = {}
+    for ts in ts_list:
+        data = _fetch(f"{MAP_BASE_URL}/{ts}.json")
+        if data:
+            maps[ts] = data
+    print(f"[INFO] maps fetched: {len(maps)}/{len(ts_list)}")
 
-    if not R2_ENABLE:
-        return urls, rep
+    results = []
+    for code, name in akita.items():
+        # 最新値
+        latest_entry = maps.get(ts_list[0], {}).get(code, {}) if ts_list else {}
+        temp = _val(latest_entry, "temp")
 
-    for fname, blob, mime in atts:
-        key = f"{prefix}/{fname}"
-        put_bytes(key, blob, content_type=mime)
-        url = make_url(key)
+        daily_temps: List[float] = []
+        rn_by_hour: List[Tuple[datetime, float]] = []
 
-        urls.append(url)
-        if rep is None:
-            rep = url
+        for ts_str, map_data in maps.items():
+            ts_utc = datetime.strptime(ts_str, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+            entry = map_data.get(code, {})
+            t_val = _val(entry, "temp")
+            rn_val = _val(entry, "rn")
+            if t_val is not None and ts_utc >= jst_today_start_utc:
+                daily_temps.append(t_val)
+            if rn_val is not None:
+                rn_by_hour.append((ts_utc, rn_val))
 
-    return urls, rep
+        max_temp = max(daily_temps) if daily_temps else None
+        min_temp = min(daily_temps) if daily_temps else None
 
-# =============================================================================
-# Notion
-# =============================================================================
+        # 降水積算（新→古の順でスライス）
+        rn_sorted = sorted(rn_by_hour, key=lambda x: x[0], reverse=True)
+        rn3h = sum(v for _, v in rn_sorted[:3])
+        rn24h = sum(v for _, v in rn_sorted[:24])
 
-def write_notion(base_jst, prefix, urls, rep, errors, atts):
-    if not notion_enabled():
-        return None
+        results.append({
+            "code": code,
+            "name": name,
+            "temp": temp,
+            "max_temp": max_temp,
+            "min_temp": min_temp,
+            "rn3h": rn3h,
+            "rn24h": rn24h,
+        })
 
-    title = f"Amedas / {base_jst.strftime('%Y%m%d %H:%M')}"
+    return results
 
-    page_id = create_db_row(
-        title=title,
-        category="Amedas",
-        init_jst_iso=base_jst.isoformat(),
-        memo="\n".join(errors),
-        rjtd="",
-        prefix=prefix,
-        r2_url=rep or "",
-        autogen=True,
-        icon_emoji="🌡️",
-    )
-
-    if not page_id:
-        return None
-
-    time.sleep(1)
-
-    try:
-        append_heading(page_id, "アメダス（秋田県）", level=2)
-
-        if urls:
-            if NOTION_IMPORT_IMAGES:
-                items = []
-                for idx, url in enumerate(urls):
-                    if idx < len(atts):
-                        fname, _blob, mime = atts[idx]
-                    else:
-                        fname, mime = f"amedas_{idx + 1:02d}.png", "image/png"
-                    items.append((fname, url, mime or "image/png"))
-
-                append_imported_images_from_urls(
-                    page_id,
-                    items,
-                    chunk=10,
-                    timeout_seconds=NOTION_IMPORT_TIMEOUT_SECONDS,
-                    poll_seconds=NOTION_IMPORT_POLL_SECONDS,
-                )
-            else:
-                append_images(page_id, urls)
-
-    except Exception as e:
-        print(f"[WARN] Notion image import/append failed: {e}")
-
-        try:
-            if urls:
-                append_images(page_id, urls)
-        except Exception as e2:
-            print(f"[WARN] Notion fallback append_images failed: {e2}")
-
-    try:
-        append_heading(page_id, "アメダス入口", level=2)
-        append_bookmark(page_id, AMEDAS_TOTAL_URL, caption="WCN アメダス積算降水量")
-        append_bookmark(page_id, AMEDAS_TEMP_URL, caption="WCN アメダス気温（最高/最低）")
-        append_bookmark(page_id, AMEDAS_RANKING_URL, caption="WCN アメダスランキング（全国）")
-    except Exception as e:
-        print(f"[WARN] Notion bookmark failed: {e}")
-
-    return page_id
 
 # =============================================================================
-# Discord
+# 全国ランキング
 # =============================================================================
 
-def post_discord(urls, errors, notion_url=""):
-    if not discord_url():
+def _ranking(latest_ts: str, table: dict) -> Tuple[list, list]:
+    data = _fetch(f"{MAP_BASE_URL}/{latest_ts}.json") or {}
+    entries = []
+    for code, obs in data.items():
+        t = _val(obs, "temp")
+        if t is not None and code in table:
+            entries.append((code, table[code].get("kjName", code), t))
+    hot = sorted(entries, key=lambda x: x[2], reverse=True)[:RANK_TOP_N]
+    cold = sorted(entries, key=lambda x: x[2])[:RANK_TOP_N]
+    return hot, cold
+
+
+# =============================================================================
+# Discord フォーマット
+# =============================================================================
+
+def _tf(v: Optional[float], unit: str = "℃") -> str:
+    return f"{v:.1f}{unit}" if v is not None else "---"
+
+
+def _fmt_akita(results: List[dict], jst_now: datetime) -> str:
+    lines = [
+        f"🌡️ **アメダス 秋田県**　{jst_now.strftime('%m/%d %H:%M')} JST",
+        "```",
+        "地点       気温  日最高  日最低  3h雨  24h雨",
+        "─" * 46,
+    ]
+    for r in results:
+        t   = _tf(r["temp"]).rjust(6)
+        mx  = _tf(r["max_temp"]).rjust(6)
+        mn  = _tf(r["min_temp"]).rjust(6)
+        r3  = _tf(r["rn3h"], "mm").rjust(6)
+        r24 = _tf(r["rn24h"], "mm").rjust(7)
+        name = r["name"][:5]  # 最大5文字（余白はコードブロック内で調整）
+        lines.append(f"{name:<6}{t}  {mx}  {mn}  {r3}  {r24}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def _fmt_ranking(hot: list, cold: list, jst_now: datetime) -> str:
+    ts = jst_now.strftime("%m/%d %H:%M")
+    lines = [
+        f"🏆 **全国気温ランキング**　{ts} JST",
+        "",
+        f"🔥 最高気温 TOP{RANK_TOP_N}",
+        "```",
+    ]
+    for i, (_, name, t) in enumerate(hot, 1):
+        lines.append(f"{i:>2}. {name:<8} {t:.1f}℃")
+    lines += [
+        "```",
+        "",
+        f"🥶 最低気温 TOP{RANK_TOP_N}",
+        "```",
+    ]
+    for i, (_, name, t) in enumerate(cold, 1):
+        lines.append(f"{i:>2}. {name:<8} {t:.1f}℃")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Discord 送信
+# =============================================================================
+
+def _post(content: str):
+    if not DISCORD_AMEDAS_WEBHOOK_URL:
+        print("[SKIP] DISCORD_AMEDAS_WEBHOOK_URL not set")
         return
-
-    # 画像（積算降水量・最高気温・最低気温）
-    if urls:
-        post_discord_item_image_urls(
-            webhook_url=discord_url(),
-            title="🌡️ アメダス｜秋田県(積算降水量・最高/最低気温) ＋ ランキング(全国)",
-            image_urls=urls,
-            notion_url="",
-            rjtd="",
-            init_jst="",
-        )
-
-    # 入口（テキスト）
-    try:
-        requests.post(
-            discord_url(),
-            json={
-                "content": (
-                    "🔗 アメダス入口（WCN・要ログイン）\n"
-                    f"・積算降水量: {AMEDAS_TOTAL_URL}\n"
-                    f"・気温(最高/最低): {AMEDAS_TEMP_URL}\n"
-                    f"・ランキング(全国): {AMEDAS_RANKING_URL}"
-                )
-            },
-            timeout=10,
-        )
-    except Exception as e:
-        print(e)
-
-    # 完了
-    post_discord_complete(
-        webhook_url=discord_url(),
-        category="Amedas",
-        notion_url="",
-        attach_count=len(urls),
-        errors=errors,
+    body = json.dumps({"content": content}).encode("utf-8")
+    req = urllib.request.Request(
+        DISCORD_AMEDAS_WEBHOOK_URL,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "akita-amedas-bot/1.0 (+https://github.com/)",
+        },
+        method="POST",
     )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            print(f"[OK] Discord HTTP {r.status}")
+    except Exception as e:
+        print(f"[ERR] Discord post: {e}")
 
 
 # =============================================================================
@@ -583,21 +279,34 @@ def post_discord(urls, errors, notion_url=""):
 def main():
     print("=== Start Amedas ===")
 
-    base_jst = jst_now()
-    prefix = f"{R2_PREFIX}/{base_jst.strftime('%Y%m%d_%H%M')}"
+    jst_now, latest_utc = _parse_latest()
+    latest_ts = latest_utc.strftime("%Y%m%d%H%M%S")
+    print(f"[INFO] latest: {jst_now.strftime('%Y-%m-%d %H:%M JST')} ({latest_ts})")
 
-    atts, errors = capture()
-    urls, rep = upload(prefix, atts)
+    # 地点テーブル
+    table = _fetch(AMEDAS_TABLE_URL) or {}
+    akita = _load_akita_stations(table)
+    print(f"[INFO] 秋田県局: {len(akita)} stations")
 
-    page_id = write_notion(base_jst, prefix, urls, rep, errors, atts)
-    notion_url = notion_page_url(page_id) if page_id else ""
+    # 過去24時間の正時タイムスタンプ
+    ts_list = _hourly_ts_list(latest_utc, 24)
 
-    if notion_url:
-        print(f"[OK] Notion URL: {notion_url}")
+    # JST 当日 0時の UTC（日最高/最低の起算点）
+    jst_today_start = jst_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    jst_today_start_utc = jst_today_start.astimezone(timezone.utc)
 
-    post_discord(urls, errors, notion_url=notion_url)
+    # データ集計
+    results = _collect(akita, ts_list, jst_today_start_utc)
+
+    # 全国ランキング
+    hot, cold = _ranking(latest_ts, table)
+
+    # Discord 配信
+    _post(_fmt_akita(results, jst_now))
+    _post(_fmt_ranking(hot, cold, jst_now))
 
     print("=== Done ===")
+
 
 if __name__ == "__main__":
     main()
