@@ -13,62 +13,17 @@ jobs:
 
     env:
       TZ: Asia/Tokyo
-      # WCN（気象キャスターネットワーク）会員ページの Basic認証
-      WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
-      WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
-      # 撮影対象の府県（既定: 秋田県）
-      WCN_PREF: "秋田県"
 
       # ------------------------------------------------------------
-      # R2
-      # ※画像URLの公開ベースURLは、以前の運用どおり ASSET_BASE_URL を使う
+      # Discord  #amedas 専用チャンネル
       # ------------------------------------------------------------
-      R2_ENABLE: "1"
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
-      R2_PREFIX: "amedas"
-      R2_RETENTION_DAYS: "21"
-      R2_CLEANUP_DRY_RUN: "0"
-
-      # ------------------------------------------------------------
-      # Notion
-      # ------------------------------------------------------------
-      NOTION_ENABLE: "1"
-      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
-      NOTION_IMPORT_IMAGES: "1"
-      NOTION_IMPORT_TIMEOUT_SECONDS: "240"
-      NOTION_IMPORT_POLL_SECONDS: "2.0"
-
-      NOTION_PROP_TITLE: "名前"
-      NOTION_PROP_CATEGORY: "区分"
-      NOTION_PROP_INIT_JST: "発行基準時刻"
-      NOTION_PROP_MEMO: "メモ"
-      NOTION_PROP_RJTD: "RJTD"
-      NOTION_PROP_PREFIX: "prefix"
-      NOTION_PROP_R2URL: "R2 URL"
-      NOTION_PROP_AUTOGEN: "自動生成"
-
-      # ------------------------------------------------------------
-      # Discord
-      # #amedas 専用チャンネル
-      # ------------------------------------------------------------
-      DISCORD_ENABLE: "1"
       DISCORD_AMEDAS_WEBHOOK_URL: ${{ secrets.DISCORD_AMEDAS_WEBHOOK_URL }}
-      DISCORD_MAX_IMAGES_PER_MESSAGE: "10"
-      DISCORD_SLEEP_SEC: "1.0"
 
       # ------------------------------------------------------------
-      # スクリーンショット設定
+      # アメダス設定
       # ------------------------------------------------------------
-      AMEDAS_VIEWPORT_WIDTH: "1280"
-      AMEDAS_VIEWPORT_HEIGHT: "1000"
-      AMEDAS_WAIT_MS: "2500"
-      # PNG保存のため通常は未使用。JPEGへ戻す場合のみ使用。
-      JPEG_QUALITY: "90"
+      AMEDAS_AKITA_PREFIX: "32"    # 秋田県局コードのプレフィックス
+      AMEDAS_RANK_TOP_N: "10"      # 全国ランキング表示件数
 
     steps:
       - name: Checkout
@@ -79,26 +34,6 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python packages
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests pillow playwright boto3 notion-client
-
-      - name: Install Japanese fonts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
-          fc-cache -f
-
-      - name: Install Playwright browsers
-        run: |
-          playwright install chromium
-
       - name: Run JMA Amedas
         run: |
           python scripts/jma_amedas.py
-
-      - name: Cleanup old R2 objects
-        if: always()
-        run: |
-          python scripts/r2_cleanup.py
