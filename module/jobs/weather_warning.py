@@ -266,12 +266,23 @@ def main():
         print("DISCORD_WARNING_WEBHOOK_URL が未設定です", file=sys.stderr)
         sys.exit(1)
 
-    warning_json = fetch_json(WARNING_JSON_URL)
-    name_map = build_area_name_map()
-    curr_w = current_warnings(warning_json, name_map)
-
     state = load_state()
     prev_w, prev_f = state["warnings"], state["fire"]
+
+    # 気象庁JSONが一時的に404/5xx等を返した場合は前回値を据え置く。
+    # 取得失敗を「全解除」と扱うと誤通知になるため、林野火災側と同じ保守的な挙動にする。
+    warning_json = {}
+    try:
+        warning_json = fetch_json(WARNING_JSON_URL)
+        try:
+            name_map = build_area_name_map()
+        except Exception as e:
+            print(f"区域名データ取得に失敗（コード表示で継続）: {e}", file=sys.stderr)
+            name_map = {}
+        curr_w = current_warnings(warning_json, name_map)
+    except Exception as e:
+        print(f"気象警報・注意報データ取得に失敗（前回値を据え置き）: {e}", file=sys.stderr)
+        curr_w = dict(prev_w)
 
     # 林野火災（第三者サイト）。取得・解析に失敗したら前回値を据え置き、
     # 誤った「解除」通知が出ないようにする。
