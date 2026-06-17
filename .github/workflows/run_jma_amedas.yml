@@ -34,6 +34,36 @@ jobs:
       GUIDANCE_VIEWPORT_HEIGHT: "1200"
       GUIDANCE_WAIT_MS: "3000"
 
+      # ------------------------------------------------------------
+      # R2（画像一時保存・Notion 埋め込み用）
+      # ------------------------------------------------------------
+      R2_ENABLE: "1"
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
+      R2_PREFIX: "amedas"
+
+      # ------------------------------------------------------------
+      # Notion（ログ保存）
+      # ------------------------------------------------------------
+      NOTION_ENABLE: "1"
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      NOTION_IMPORT_IMAGES: "1"
+      NOTION_IMPORT_TIMEOUT_SECONDS: "180"
+      NOTION_IMPORT_POLL_SECONDS: "2.0"
+
+      NOTION_PROP_TITLE: "名前"
+      NOTION_PROP_CATEGORY: "区分"
+      NOTION_PROP_INIT_JST: "発行基準時刻"
+      NOTION_PROP_MEMO: "メモ"
+      NOTION_PROP_RJTD: "RJTD"
+      NOTION_PROP_PREFIX: "prefix"
+      NOTION_PROP_R2URL: "R2 URL"
+      NOTION_PROP_AUTOGEN: "自動生成"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,7 +78,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
           fc-cache -f
-          pip install Pillow requests playwright
+          pip install Pillow requests playwright boto3 notion-client
 
       - name: Install Playwright browsers
         run: |
