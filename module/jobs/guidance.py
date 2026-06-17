@@ -230,47 +230,77 @@ def _tile_columns(img_bytes: bytes, n_cols: int = 5, header_px: int = 60) -> byt
         W, H = img.size
         px = img.load()
 
-        # ── ステーションヘッダー行を検出 ──────────────────────
-        # WCN MSM のステーション見出しはオレンジ/赤系の帯
+        # ── 色診断（初回のみ: header_px 直後の200行をサンプル出力）──
+        _diag_done = getattr(_tile_columns, "_diag_done", False)
+        if not _diag_done:
+            _tile_columns._diag_done = True
+            print("[DEBUG] color profile (y: R,G,B at center-x):")
+            cx = W // 2
+            prev_rgb = None
+            for dy in range(min(200, H - header_px)):
+                y = header_px + dy
+                try:
+                    rgb = px[cx, y]
+                    r, g, b = rgb[0], rgb[1], rgb[2]
+                    cur_rgb = (r, g, b)
+                    # 前行と大きく違う行だけ出力（変化点の検出）
+                    if prev_rgb is None or abs(r-prev_rgb[0])+abs(g-prev_rgb[1])+abs(b-prev_rgb[2]) > 40:
+                        print(f"  y={y:4d}: RGB({r:3d},{g:3d},{b:3d})")
+                    prev_rgb = cur_rgb
+                except Exception:
+                    pass
+
+        # ── ステーション境界行を検出（時刻ラベル行 = 水色/青グレー系）──
+        # WCN MSM の時刻ラベル行は B > G > R かつ中程度の明るさ
         sample_xs = [max(1, W * k // 8) for k in range(1, 8)]  # 7点サンプル
 
-        def _is_orange_row(y: int) -> bool:
+        def _is_time_row(y: int) -> bool:
             cnt = 0
             for x in sample_xs:
                 try:
                     rgb = px[x, y]
                     r, g, b = rgb[0], rgb[1], rgb[2]
-                    if r > 180 and g < 150 and b < 120:
+                    # 水色/青グレー: B が R より 20 以上高く、かつ G も高め
+                    if b > r + 20 and b > 130 and g > 110 and r < 210:
                         cnt += 1
                 except Exception:
                     pass
-            return cnt >= 4  # 7点中4点以上
+            return cnt >= 4
 
-        # header_px 行より下でスキャン（先頭はヘッダー区画）
         station_bounds: list[int] = []
-        prev_orange = False
+        prev_time = False
         for y in range(header_px, H):
-            cur = _is_orange_row(y)
-            if cur and not prev_orange:
+            cur = _is_time_row(y)
+            if cur and not prev_time:
                 station_bounds.append(y)
-            prev_orange = cur
+            prev_time = cur
 
         print(f"[INFO] tile_columns: detected {len(station_bounds)} station boundaries")
 
         # ── 等分割に最も近い境界で分割点を決定 ──────────────
         body_h = H - header_px
-        split_ys: list[int] = [header_px]
-        for col in range(1, n_cols):
-            target_y = header_px + col * body_h // n_cols
-            # target_y を超えない中で最も近い station boundary
-            candidates = [b for b in station_bounds if b <= target_y]
-            if candidates:
-                best = max(candidates)  # target_y 直前の境界
-            else:
-                best = header_px  # フォールバック
-            if best != split_ys[-1]:
-                split_ys.append(best)
-        split_ys.append(H)
+        if not station_bounds:
+            # 境界未検出 → 等分割にフォールバック
+            print("[WARN] tile_columns: no boundaries detected, using equal-interval split")
+            split_ys = [header_px + i * body_h // n_cols for i in range(n_cols)] + [H]
+        else:
+            split_ys: list[int] = [header_px]
+            for col in range(1, n_cols):
+                target_y = header_px + col * body_h // n_cols
+                # target_y を超えない中で最も近い station boundary
+                candidates = [b for b in station_bounds if b <= target_y]
+                if candidates:
+                    best = max(candidates)
+                else:
+                    best = header_px
+                if best != split_ys[-1]:
+                    split_ys.append(best)
+            split_ys.append(H)
+
+        # 分割数が n_cols より少なくなった場合は等分割で補完
+        if len(split_ys) - 1 < n_cols:
+            print(f"[WARN] tile_columns: only {len(split_ys)-1} splits found, falling back to equal-interval")
+            split_ys = [header_px + i * body_h // n_cols for i in range(n_cols)] + [H]
 
         # 実際の列数（境界が足りない場合は減る可能性あり）
         actual_cols = len(split_ys) - 1
