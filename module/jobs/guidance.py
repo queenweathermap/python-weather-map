@@ -38,9 +38,12 @@ WCN_KISHO_URL = "https://www.weathercaster.jp/member/member_only/kisho_shiryo/"
 WCN_USER      = os.environ.get("WEATHERCASTER_USER", "").strip()
 WCN_PASS      = os.environ.get("WEATHERCASTER_PASS", "").strip()
 WCN_PREF      = os.environ.get("WCN_PREF", "秋田県")
-WCN_WAIT_MS   = int(os.environ.get("GUIDANCE_WAIT_MS", "2500"))
-WCN_VP_W      = int(os.environ.get("GUIDANCE_VIEWPORT_WIDTH",  "1600"))
-WCN_VP_H      = int(os.environ.get("GUIDANCE_VIEWPORT_HEIGHT", "1200"))
+WCN_WAIT_MS     = int(os.environ.get("GUIDANCE_WAIT_MS", "2500"))
+WCN_VP_W        = int(os.environ.get("GUIDANCE_VIEWPORT_WIDTH",  "1600"))
+WCN_VP_H        = int(os.environ.get("GUIDANCE_VIEWPORT_HEIGHT", "1200"))
+# MSM タイル設定（縦長画像を横並びに分割）
+WCN_MSM_COLS    = int(os.environ.get("WCN_MSM_COLS",      "5"))   # 列数
+WCN_MSM_HDR_PX  = int(os.environ.get("WCN_MSM_HEADER_PX", "0"))   # ヘッダー高さ(px)。0=自動推定
 
 # MSM 府県時別
 WCN_MSM_URL   = os.environ.get(
@@ -213,6 +216,39 @@ def _wcn_click_pref(data_frame, pref: str) -> None:
         import time; time.sleep(0.4)
 
 
+def _tile_columns(img_bytes: bytes, n_cols: int = 5, header_px: int = 0) -> bytes:
+    """縦長画像を n_cols 列に分割して横並びにする。
+    header_px > 0 の場合、先頭 header_px ピクセルをヘッダーとして各タイルの先頭に複製する。
+    """
+    try:
+        from PIL import Image
+        import io as _io
+        img = Image.open(_io.BytesIO(img_bytes))
+        W, H = img.size
+        hdr_h  = header_px
+        body_h = H - hdr_h
+        tile_h = -(-body_h // n_cols)  # ceil division
+        new_w  = W * n_cols
+        new_h  = hdr_h + tile_h
+        tiled  = Image.new("RGB", (new_w, new_h), (255, 255, 255))
+        if hdr_h > 0:
+            hdr = img.crop((0, 0, W, hdr_h))
+        for i in range(n_cols):
+            x = i * W
+            if hdr_h > 0:
+                tiled.paste(hdr, (x, 0))
+            y0 = hdr_h + i * tile_h
+            y1 = min(y0 + tile_h, H)
+            strip = img.crop((0, y0, W, y1))
+            tiled.paste(strip, (x, hdr_h))
+        buf = _io.BytesIO()
+        tiled.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[WARN] tile_columns 失敗: {e}")
+        return img_bytes
+
+
 def _add_label_banner(img_bytes: bytes, label: str) -> bytes:
     """画像上部にラベルバナーを追加する。Pillow 未インストール時は元画像をそのまま返す。"""
     try:
@@ -344,9 +380,16 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
                         # submit ボタンは name 属性なしのケースも考慮
                         ff.locator('input[type="submit"]').first.click()
                     page.wait_for_timeout(WCN_WAIT_MS)
-                    # body 全体撮影（八森〜東成瀬 全地点）
+                    # body 全体撮影（八森〜東成瀬 全地点）→ 横タイルに組み替え
                     raw = _shot_fullbody(page)
-                    img = _add_label_banner(raw, msm_day_labels[day_offset])
+                    # ヘッダー高さ: 指定がなければ画像高の約5%を使用
+                    from PIL import Image as _PILImage
+                    import io as _pil_io
+                    _tmp = _PILImage.open(_pil_io.BytesIO(raw))
+                    hdr_px = WCN_MSM_HDR_PX if WCN_MSM_HDR_PX > 0 else max(30, _tmp.height // 20)
+                    print(f"[INFO] MSM tile: {WCN_MSM_COLS} cols, header={hdr_px}px, total_h={_tmp.height}px")
+                    tiled = _tile_columns(raw, n_cols=WCN_MSM_COLS, header_px=hdr_px)
+                    img = _add_label_banner(tiled, msm_day_labels[day_offset])
                     fname = f"wcn_msm_{day_lbl}.png"
                     results.append((fname, img))
                     print(f"[OK] {fname}  {len(img):,} bytes")
