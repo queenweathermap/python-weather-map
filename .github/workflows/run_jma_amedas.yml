@@ -57,7 +57,3 @@ jobs:
       - name: Run JMA Amedas
         run: |
           python scripts/jma_amedas.py
-
-      - name: Screenshot WCN Amedas pages
-        run: |
-          python scripts/wcn_amedas.py
