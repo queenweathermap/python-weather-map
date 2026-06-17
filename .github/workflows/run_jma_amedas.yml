@@ -33,6 +33,7 @@ jobs:
       GUIDANCE_VIEWPORT_WIDTH: "1400"
       GUIDANCE_VIEWPORT_HEIGHT: "1200"
       GUIDANCE_WAIT_MS: "3000"
+      WCN_ALLAMEDAS_ANCHOR: "15"   # allamedas_2.cgi の秋田セクション anchor ID
 
       # ------------------------------------------------------------
       # R2（画像一時保存・Notion 埋め込み用）
