@@ -78,6 +78,18 @@ JMA_FORECAST_URL = os.environ.get(
     "https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code=050000",
 )
 
+# =============================================================================
+# JMA 気象防災アドバイザー サイト設定
+# =============================================================================
+JMA_ADV_USER         = os.environ.get("JMA_ADV_USER", "").strip()
+JMA_ADV_PASS         = os.environ.get("JMA_ADV_PASS", "").strip()
+JMA_ADV_BASE         = "https://www.jma.go.jp/bosai/advisor"
+JMA_ADV_AREA         = os.environ.get("JMA_ADV_AREA",         "秋田県")
+JMA_ADV_COLD_STATION = os.environ.get("JMA_ADV_COLD_STATION", "秋田")
+JMA_ADV_WAIT_MS      = int(os.environ.get("JMA_ADV_WAIT_MS",  "3000"))
+JMA_ADV_VP_W         = int(os.environ.get("JMA_ADV_VP_W",     "1200"))
+JMA_ADV_VP_H         = int(os.environ.get("JMA_ADV_VP_H",      "900"))
+
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX  = os.environ.get("R2_PREFIX", "guidance").strip().strip("/")
 
@@ -527,6 +539,191 @@ def _fetch(url: str) -> Optional[object]:
     except Exception as e:
         print(f"[WARN] fetch {url}: {e}")
         return None
+
+
+# =============================================================================
+# JMA アドバイザー スクリーンショット
+# =============================================================================
+
+def screenshot_jma_advisor() -> List[Tuple[str, bytes]]:
+    """気象防災アドバイザーサイトのガイダンス帳票をスクリーンショット。
+
+    取得:
+      adv_guid_rain3h.png   MSM 3時間降水量ガイダンス一覧（秋田県）
+      adv_guid_snow3h.png   MSM 3時間降雪量ガイダンス一覧（秋田県、5〜10月スキップ）
+      adv_guid_wind.png     MSM 最大風速ガイダンス一覧（秋田県 沿岸/内陸 2列）
+      adv_cold_temp.png     寒気帳票 気温（秋田）
+      adv_cold_anom.png     寒気帳票 平年差（秋田）
+    """
+    if not (JMA_ADV_USER and JMA_ADV_PASS):
+        print("[SKIP] JMA_ADV_USER/PASS 未設定 — アドバイザー スクリーンショットをスキップ")
+        return []
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[WARN] playwright 未インストール")
+        return []
+
+    results: List[Tuple[str, bytes]] = []
+    month = _jst_now().month
+
+    def _wait(page) -> None:
+        page.wait_for_timeout(JMA_ADV_WAIT_MS)
+
+    def _select_area(page, area: str) -> None:
+        """エリアセレクトを探して選択（label → 部分一致フォールバック）。"""
+        sel = page.locator("select").first
+        try:
+            sel.select_option(label=area)
+        except Exception:
+            opts = sel.locator("option").all_text_contents()
+            matched = [o for o in opts if area.replace("県","").replace("都","").replace("府","") in o]
+            if matched:
+                sel.select_option(label=matched[0])
+            else:
+                print(f"[WARN] エリア選択失敗: {area} opts={opts[:5]}")
+
+    def _shot_body(page, label: str) -> bytes:
+        """全体を撮影してラベルバナーを追加。"""
+        raw = page.locator("body").screenshot()
+        return _add_label_banner(raw, label)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        ctx = browser.new_context(
+            http_credentials={"username": JMA_ADV_USER, "password": JMA_ADV_PASS},
+            viewport={"width": JMA_ADV_VP_W, "height": JMA_ADV_VP_H},
+        )
+        page = ctx.new_page()
+
+        # ── guid_table: 降水・降雪 ──────────────────────────────────
+        GUID_TABLE_URL = f"{JMA_ADV_BASE}/guid_table.html"
+        for element_label, fname, lbl, skip in [
+            ("rain3h", "adv_guid_rain3h.png", "MSM 3時間降水量ガイダンス（秋田県）", False),
+            ("snow3h", "adv_guid_snow3h.png", "MSM 3時間降雪量ガイダンス（秋田県）", 5 <= month <= 10),
+        ]:
+            if skip:
+                print(f"[SKIP] {fname}（降雪量 5〜10月）")
+                continue
+            try:
+                page.goto(GUID_TABLE_URL, wait_until="networkidle", timeout=60_000)
+                _wait(page)
+                # エリア: 秋田県
+                _select_area(page, JMA_ADV_AREA)
+                # モデル: MSM ボタン
+                try:
+                    page.locator("button, input[type='button'], input[type='radio']").filter(has_text="MSM").first.click()
+                except Exception:
+                    pass
+                # 要素: rain3h / snow3h
+                try:
+                    elem_sel = page.locator("select").nth(1)
+                    elem_sel.select_option(label=element_label)
+                except Exception:
+                    # フォールバック: テキストで選択
+                    page.locator(f"option:text-matches('{element_label}', 'i')").first.click()
+                _wait(page)
+                raw = _shot_body(page, lbl)
+                results.append((fname, raw))
+                print(f"[OK] {fname}  {len(raw):,} bytes")
+            except Exception as e:
+                print(f"[WARN] {fname} 撮影失敗: {e}")
+
+        # ── guid_table_wind: 最大風速（沿岸/内陸 2列） ─────────────
+        try:
+            WIND_URL = f"{JMA_ADV_BASE}/guid_table_wind.html"
+            page.goto(WIND_URL, wait_until="networkidle", timeout=60_000)
+            _wait(page)
+            _select_area(page, JMA_ADV_AREA)
+            # MSM ボタン
+            try:
+                page.locator("button, input[type='button'], input[type='radio']").filter(has_text="MSM").first.click()
+            except Exception:
+                pass
+            _wait(page)
+            # 全体撮影 → 沿岸/内陸 で垂直分割して2列に並べる
+            raw_full = page.locator("body").screenshot()
+            wind_tiled = _split_wind_two_cols(raw_full)
+            img = _add_label_banner(wind_tiled, f"MSM 最大風速ガイダンス（{JMA_ADV_AREA}）")
+            results.append(("adv_guid_wind.png", img))
+            print(f"[OK] adv_guid_wind.png  {len(img):,} bytes")
+        except Exception as e:
+            print(f"[WARN] adv_guid_wind 撮影失敗: {e}")
+
+        # ── cold_table: 寒気帳票 気温 / 平年差 ────────────────────
+        COLD_URL = f"{JMA_ADV_BASE}/cold_table.html"
+        for btn_text, fname, lbl in [
+            ("気温",  "adv_cold_temp.png", f"寒気帳票 気温（{JMA_ADV_COLD_STATION}）"),
+            ("平年差", "adv_cold_anom.png", f"寒気帳票 平年差（{JMA_ADV_COLD_STATION}）"),
+        ]:
+            try:
+                page.goto(COLD_URL, wait_until="networkidle", timeout=60_000)
+                _wait(page)
+                # 地点選択（秋田）
+                try:
+                    page.locator(f"a:text('{JMA_ADV_COLD_STATION}'), option:text('{JMA_ADV_COLD_STATION}')").first.click()
+                    _wait(page)
+                except Exception:
+                    pass
+                # 気温 / 平年差 ボタンをクリック
+                page.locator(f"button:text('{btn_text}'), input[value='{btn_text}']").first.click()
+                _wait(page)
+                raw = _shot_body(page, lbl)
+                results.append((fname, raw))
+                print(f"[OK] {fname}  {len(raw):,} bytes")
+            except Exception as e:
+                print(f"[WARN] {fname} 撮影失敗: {e}")
+
+        browser.close()
+
+    return results
+
+
+def _split_wind_two_cols(img_bytes: bytes) -> bytes:
+    """風速帳票（秋田県）を 沿岸 / 内陸 で垂直分割して横2列に並べる。
+    分割点: 左端列の色変化（沿岸→内陸 の section header row）を検出。
+    検出失敗時は縦半分で分割。
+    """
+    try:
+        from PIL import Image
+        import io as _io
+        img = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
+        W, H = img.size
+        px = img.load()
+
+        # 左端数列をスキャンして色変化を探す（内陸ヘッダー行の境界）
+        # セクションヘッダー行は濃い青（アドバイザーサイトのスタイル想定）
+        split_y = None
+        scan_xs = [2, 4, 6, 8, 10]
+        prev_colors = [(px[x, 0][0], px[x, 0][1], px[x, 0][2]) for x in scan_xs]
+        for y in range(10, H - 10):
+            cur_colors = [(px[x, y][0], px[x, y][1], px[x, y][2]) for x in scan_xs]
+            # 急激な色変化を検出
+            diffs = [abs(c[0]-p[0])+abs(c[1]-p[1])+abs(c[2]-p[2])
+                     for c, p in zip(cur_colors, prev_colors)]
+            if sum(diffs) > 300 and y > H * 0.3:  # 上30%は無視
+                split_y = y
+                break
+            prev_colors = cur_colors
+
+        if split_y is None:
+            split_y = H // 2  # フォールバック
+
+        top = img.crop((0, 0, W, split_y))
+        bot = img.crop((0, split_y, W, H))
+
+        # 2列横並び
+        new_img = Image.new("RGB", (W * 2, max(top.height, bot.height)), (255, 255, 255))
+        new_img.paste(top, (0, 0))
+        new_img.paste(bot, (W, 0))
+
+        buf = _io.BytesIO()
+        new_img.save(buf, format="PNG", optimize=True)
+        print(f"[INFO] wind split at y={split_y} (H={H})")
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[WARN] wind split 失敗: {e}")
+        return img_bytes
 
 
 # =============================================================================
@@ -1204,6 +1401,11 @@ def main():
     # 分布予報・週間ガイダンス・JMA予報: 直接 Discord 投稿
     if other_images:
         _post_images_bulk(other_images, content="**WCN ガイダンス（分布予報・週間・気象庁予報）**")
+
+    # JMA アドバイザー ガイダンス帳票
+    adv_images = screenshot_jma_advisor()
+    if adv_images:
+        _post_images_bulk(adv_images, content="**気象防災アドバイザー ガイダンス帳票**")
 
     print("=== Done ===")
 
