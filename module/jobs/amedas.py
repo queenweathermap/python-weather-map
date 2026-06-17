@@ -893,70 +893,121 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         page.wait_for_load_state("networkidle", timeout=30_000)
         page.wait_for_timeout(WCN_WAIT_MS)
 
-    ALLAMEDAS_ANCHOR = os.environ.get("WCN_ALLAMEDAS_ANCHOR", "15")  # 秋田のアンカーID
+    # 秋田のアンカーID（allamedas_2.cgi#XX の XX）
+    ALLAMEDAS_ANCHOR = os.environ.get("WCN_ALLAMEDAS_ANCHOR", "15")
+
+    def _debug_form(page) -> None:
+        """form_area の全 select / option を DEBUG 出力。"""
+        ff = page.frame(name="form_area")
+        if not ff:
+            return
+        for si, sel in enumerate(ff.locator("select").all()):
+            name = sel.get_attribute("name") or f"[{si}]"
+            opts = [(o.get_attribute("value"), o.inner_text())
+                    for o in sel.locator("option").all()]
+            print(f"[DEBUG] form select name={name} opts={opts}")
+
+    def _submit_form_value(page, select_name: str, value: str) -> bool:
+        """form_area の select[name] を value に変更して送信。成功時 True。"""
+        ff = page.frame(name="form_area")
+        if not ff:
+            return False
+        # すべての select を確認し value or text で合致するものを選択
+        matched = False
+        for sel in ff.locator("select").all():
+            sname = sel.get_attribute("name") or ""
+            try:
+                sel.select_option(value=value)
+                matched = True
+                print(f"[INFO] selected value={value} in select name={sname}")
+                break
+            except Exception:
+                pass
+        if not matched:
+            # value がなければテキスト部分一致で試す
+            for sel in ff.locator("select").all():
+                for opt in sel.locator("option").all():
+                    if value in (opt.get_attribute("value") or "") or value in opt.inner_text():
+                        sel.select_option(value=opt.get_attribute("value"))
+                        matched = True
+                        break
+                if matched:
+                    break
+        if not matched:
+            print(f"[WARN] select value={value} not found")
+            return False
+        try:
+            btn = ff.locator('input[type="submit"], button[type="submit"]').first
+            btn.click()
+            _wait(page)
+            return True
+        except Exception as e:
+            print(f"[WARN] submit failed: {e}")
+            return False
 
     def _shot_pref_section(page) -> bytes:
         """data_area を秋田アンカーへスクロールしてビューポート撮影。"""
         df = page.frame(name="data_area")
         if not df:
             raise RuntimeError("data_area not found")
-        # アンカー (#15) にスクロール
+        # アンカー ID でスクロール（location.hash 経由）
         try:
-            df.evaluate(f"document.getElementById('{ALLAMEDAS_ANCHOR}')?.scrollIntoView()")
-            df.evaluate("window.scrollBy(0, -40)")  # ヘッダー行を含めて少し上へ
-            page.wait_for_timeout(300)
+            df.evaluate(f"location.hash = '#{ALLAMEDAS_ANCHOR}'")
+            page.wait_for_timeout(400)
+            df.evaluate("window.scrollBy(0, -40)")
         except Exception:
             pass
-        # iframe をビューポート高に固定して撮影（縦長にしない）
         page.evaluate(
             f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{WCN_VP_H}px'"
         )
         page.wait_for_timeout(200)
         return page.locator('iframe[name="data_area"]').screenshot()
 
-    def _shot_full(page) -> bytes:
-        """data_area を全高展開して撮影（ランキング用）。"""
+    def _compose_2x2(img_bytes_list: List[bytes], pad: int = 6) -> bytes:
+        """4枚以内の画像を 2列グリッドに合成して PNG バイト列を返す。"""
+        from PIL import Image as PILImage
+        imgs = [PILImage.open(io.BytesIO(b)).convert("RGB") for b in img_bytes_list]
+        ncols = 2
+        nrows = (len(imgs) + 1) // 2
+        col_w = max(img.width for img in imgs)
+        row_h = max(img.height for img in imgs)
+        canvas = PILImage.new(
+            "RGB",
+            (col_w * ncols + pad * (ncols - 1), row_h * nrows + pad * (nrows - 1)),
+            (220, 220, 220),
+        )
+        for i, img in enumerate(imgs):
+            r, c = divmod(i, ncols)
+            canvas.paste(img, (c * (col_w + pad), r * (row_h + pad)))
+        buf = io.BytesIO()
+        canvas.save(buf, "PNG")
+        return buf.getvalue()
+
+    def _shot_ranking_tables(page) -> List[bytes]:
+        """ranking data_area の12テーブルを個別撮影して返す。"""
         df = page.frame(name="data_area")
         if not df:
             raise RuntimeError("data_area not found")
+        # 全高展開
         scroll_h = df.evaluate("document.body.scrollHeight")
         page.evaluate(
             f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{scroll_h}px'"
         )
-        page.wait_for_timeout(300)
-        return page.locator('iframe[name="data_area"]').screenshot()
-
-    def _submit_form(page, select_name: str, value: str):
-        ff = page.frame(name="form_area")
-        if not ff:
-            raise RuntimeError("form_area not found")
-        ff.select_option(f'select[name="{select_name}"]', value=value)
-        page.wait_for_timeout(200)
-        ff.locator('input[type="submit"], button[type="submit"]').first.click()
-        _wait(page)
-
-    def _select_by_idx(page, idx: int):
-        ff = page.frame(name="form_area")
-        if not ff:
-            raise RuntimeError("form_area not found")
-        sel = ff.locator("select").first
-        options = sel.locator("option").all()
-        if idx >= len(options):
-            raise IndexError(f"option index {idx} >= {len(options)}")
-        val = options[idx].get_attribute("value")
-        sel.select_option(value=val)
-        page.wait_for_timeout(200)
-        ff.locator('input[type="submit"], button[type="submit"]').first.click()
-        _wait(page)
-
-    def _debug_form_opts(page) -> List[str]:
-        ff = page.frame(name="form_area")
-        if not ff:
-            return []
-        try:
-            return ff.locator("select").first.locator("option").all_text_contents()
-        except Exception:
-            return []
+        page.wait_for_timeout(500)
+        table_imgs: List[bytes] = []
+        tables = df.locator("table").all()
+        print(f"[DEBUG] ranking tables found: {len(tables)}")
+        for i, tbl in enumerate(tables):
+            try:
+                bb = tbl.bounding_box()
+                if not bb or bb["height"] < 80:
+                    continue
+                raw = tbl.screenshot()
+                table_imgs.append(raw)
+                print(f"[DEBUG] table[{i}] {bb['width']:.0f}x{bb['height']:.0f}")
+            except Exception as e:
+                print(f"[WARN] table[{i}] skip: {e}")
+        return table_imgs
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -967,38 +1018,25 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         page = ctx.new_page()
 
         # ---- 1. allamedas.html ----------------------------------------
+        # allamedas_2.cgi は要素別ページ直接URL方式で取得
+        # form_area でページを開いたあと select を変更して送信
         ALLAMEDAS_ITEMS = [
-            ("element", "rain3h", "wcn_amedas_rain3h.png", "アメダス 3時間降水量"),
-            ("element", "tmax",   "wcn_amedas_tmax.png",   "アメダス 最高気温"),
-            ("element", "tmin",   "wcn_amedas_tmin.png",   "アメダス 最低気温"),
-            ("element", "wmax",   "wcn_amedas_wmax.png",   "アメダス 最大風速"),
-            ("element", "humin",  "wcn_amedas_humin.png",  "アメダス 最小湿度"),
-            ("element", "snow",   "wcn_amedas_snow.png",   "アメダス 積雪深"),
+            ("rain3h", "wcn_amedas_rain3h.png", "アメダス 3時間降水量"),
+            ("tmax",   "wcn_amedas_tmax.png",   "アメダス 最高気温"),
+            ("tmin",   "wcn_amedas_tmin.png",   "アメダス 最低気温"),
+            ("wmax",   "wcn_amedas_wmax.png",   "アメダス 最大風速"),
+            ("humin",  "wcn_amedas_humin.png",  "アメダス 最小湿度"),
+            ("snow",   "wcn_amedas_snow.png",   "アメダス 積雪深"),
         ]
-        for select_name, value, fname, lbl in ALLAMEDAS_ITEMS:
+        _debug_done = False
+        for value, fname, lbl in ALLAMEDAS_ITEMS:
             try:
                 page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
                 _wait(page)
-                opts = _debug_form_opts(page)
-                print(f"[DEBUG] allamedas opts: {opts}")
-                try:
-                    _submit_form(page, select_name, value)
-                except Exception:
-                    ff = page.frame(name="form_area")
-                    if ff:
-                        sel = ff.locator("select").first
-                        try:
-                            sel.select_option(value=value)
-                        except Exception:
-                            for opt in sel.locator("option").all():
-                                if value in opt.inner_text() or lbl.split()[-1] in opt.inner_text():
-                                    sel.select_option(value=opt.get_attribute("value"))
-                                    break
-                        try:
-                            ff.locator('input[type="submit"], button[type="submit"]').first.click()
-                            _wait(page)
-                        except Exception:
-                            pass
+                if not _debug_done:
+                    _debug_form(page)
+                    _debug_done = True
+                _submit_form_value(page, "element", value)
                 raw = _shot_pref_section(page)
                 img = _wcn_label_banner(raw, lbl)
                 results.append((fname, img))
@@ -1007,34 +1045,30 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                 print(f"[WARN] {fname} 撮影失敗: {e}")
 
         # ---- 2. ranking.html ------------------------------------------
-        RANKING_GROUPS = [
-            ("wcn_ranking_temp.png",  "ランキング 気温（最高↑ / 最低↓ / 低最高↓ / 高最低↑）"),
-            ("wcn_ranking_rain.png",  "ランキング 降水量（1h / 3h / 12h / 24h）"),
-            ("wcn_ranking_wind.png",  "ランキング 風速・湿度・積雪（最大風速 / 最大瞬間 / 最小湿度 / 積雪深）"),
+        # 12テーブルを4つずつ 2×2 グリッドで合成 → 3枚
+        RANKING_LABELS = [
+            "ランキング 気温（最高↑ / 最低↓ / 低最高↓ / 高最低↑）",
+            "ランキング 降水量（1h / 3h / 12h / 24h）",
+            "ランキング 風速・湿度・積雪（最大風速 / 最大瞬間 / 最小湿度 / 積雪深）",
+        ]
+        RANKING_FNAMES = [
+            "wcn_ranking_temp.png",
+            "wcn_ranking_rain.png",
+            "wcn_ranking_wind.png",
         ]
         try:
             page.goto(WCN_RANKING_URL, wait_until="networkidle", timeout=60_000)
             _wait(page)
-            rank_opts = _debug_form_opts(page)
-            print(f"[DEBUG] ranking opts: {rank_opts}")
-        except Exception as e:
-            print(f"[WARN] ranking.html ロード失敗: {e}")
-            rank_opts = []
-
-        for idx, (fname, lbl) in enumerate(RANKING_GROUPS):
-            try:
-                page.goto(WCN_RANKING_URL, wait_until="networkidle", timeout=60_000)
-                _wait(page)
-                if len(rank_opts) >= 3:
-                    _select_by_idx(page, idx)
-                else:
-                    print(f"[INFO] ranking opts < 3 — 全体撮影: {fname}")
-                raw = _shot_full(page)
+            table_imgs = _shot_ranking_tables(page)
+            # 最大12テーブルを4つずつグループ化
+            groups = [table_imgs[i:i + 4] for i in range(0, min(12, len(table_imgs)), 4)]
+            for i, (group, fname, lbl) in enumerate(zip(groups, RANKING_FNAMES, RANKING_LABELS)):
+                raw = _compose_2x2(group)
                 img = _wcn_label_banner(raw, lbl)
                 results.append((fname, img))
                 print(f"[OK] {fname}  {len(img):,} bytes")
-            except Exception as e:
-                print(f"[WARN] {fname} 撮影失敗: {e}")
+        except Exception as e:
+            print(f"[WARN] ranking 撮影失敗: {e}")
 
         browser.close()
 
