@@ -230,50 +230,30 @@ def _tile_columns(img_bytes: bytes, n_cols: int = 5, header_px: int = 60) -> byt
         W, H = img.size
         px = img.load()
 
-        # ── 色診断（初回のみ: header_px 直後の200行をサンプル出力）──
-        _diag_done = getattr(_tile_columns, "_diag_done", False)
-        if not _diag_done:
-            _tile_columns._diag_done = True
-            print("[DEBUG] color profile (y: R,G,B at center-x):")
-            cx = W // 2
-            prev_rgb = None
-            for dy in range(min(200, H - header_px)):
-                y = header_px + dy
-                try:
-                    rgb = px[cx, y]
-                    r, g, b = rgb[0], rgb[1], rgb[2]
-                    cur_rgb = (r, g, b)
-                    # 前行と大きく違う行だけ出力（変化点の検出）
-                    if prev_rgb is None or abs(r-prev_rgb[0])+abs(g-prev_rgb[1])+abs(b-prev_rgb[2]) > 40:
-                        print(f"  y={y:4d}: RGB({r:3d},{g:3d},{b:3d})")
-                    prev_rgb = cur_rgb
-                except Exception:
-                    pass
-
-        # ── ステーション境界行を検出（時刻ラベル行 = 水色/青グレー系）──
-        # WCN MSM の時刻ラベル行は B > G > R かつ中程度の明るさ
+        # ── ステーション境界行を検出 ──────────────────────────
+        # WCN MSM のステーション見出し帯 = 濃い青
+        # 色プロファイル実測値: RGB(31,71,135) / (39,95,175) / (23,71,135)
+        # 条件: R<70, G<120, B>120, B-R>80
         sample_xs = [max(1, W * k // 8) for k in range(1, 8)]  # 7点サンプル
 
-        def _is_time_row(y: int) -> bool:
+        def _is_station_header(y: int) -> bool:
             cnt = 0
             for x in sample_xs:
                 try:
-                    rgb = px[x, y]
-                    r, g, b = rgb[0], rgb[1], rgb[2]
-                    # 水色/青グレー: B が R より 20 以上高く、かつ G も高め
-                    if b > r + 20 and b > 130 and g > 110 and r < 210:
+                    r, g, b = px[x, y][0], px[x, y][1], px[x, y][2]
+                    if r < 70 and g < 120 and b > 120 and b - r > 80:
                         cnt += 1
                 except Exception:
                     pass
             return cnt >= 4
 
         station_bounds: list[int] = []
-        prev_time = False
+        prev_hdr = False
         for y in range(header_px, H):
-            cur = _is_time_row(y)
-            if cur and not prev_time:
+            cur = _is_station_header(y)
+            if cur and not prev_hdr:
                 station_bounds.append(y)
-            prev_time = cur
+            prev_hdr = cur
 
         print(f"[INFO] tile_columns: detected {len(station_bounds)} station boundaries")
 
