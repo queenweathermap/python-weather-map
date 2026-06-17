@@ -233,6 +233,10 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
 
     results: List[Tuple[str, bytes]] = []
 
+    def _shot(page) -> bytes:
+        """data_area iframe 要素をそのままスクリーンショット（960×700 の表示域だけ撮る）。"""
+        return page.locator('iframe[name="data_area"]').screenshot()
+
     def _grab_form_data(page, base_url: str, select_name: str, factors: list,
                         fname_prefix: str, scroll_to_pref: bool = False) -> None:
         """共通: フォームで要素選択 → 決定 → data_area 撮影 を factors 分繰り返す。"""
@@ -243,12 +247,11 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
                 if not ff:
                     raise RuntimeError("form_area not found")
                 _wcn_submit_and_wait(page, ff, select_name, value)
-                df = page.frame(name="data_area")
-                if not df:
-                    raise RuntimeError("data_area not found")
                 if scroll_to_pref:
-                    _wcn_scroll_to_pref(df, WCN_PREF)
-                img = df.screenshot()          # visible viewport
+                    df = page.frame(name="data_area")
+                    if df:
+                        _wcn_scroll_to_pref(df, WCN_PREF)
+                img = _shot(page)
                 fname = f"{fname_prefix}_{suffix}.png"
                 results.append((fname, img))
                 print(f"[OK] {fname}  {len(img):,} bytes")
@@ -276,10 +279,7 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
                     with page.expect_event("framenavigated", timeout=15_000):
                         ff.locator('input[type="submit"][name="dat"]').click()
                     page.wait_for_timeout(WCN_WAIT_MS)
-                    df = page.frame(name="data_area")
-                    if not df:
-                        raise RuntimeError("data_area not found")
-                    img = df.locator("body").screenshot()
+                    img = _shot(page)
                     fname = f"wcn_msm_{label}.png"
                     results.append((fname, img))
                     print(f"[OK] {fname}  {len(img):,} bytes")
