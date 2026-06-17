@@ -831,5 +831,245 @@ def main():
     print("=== Done ===")
 
 
+# =============================================================================
+# WCN アメダス観測値・ランキング スクリーンショット
+# =============================================================================
+WCN_USER      = os.environ.get("WEATHERCASTER_USER", "").strip()
+WCN_PASS      = os.environ.get("WEATHERCASTER_PASS", "").strip()
+WCN_WAIT_MS   = int(os.environ.get("GUIDANCE_WAIT_MS", "3000"))
+WCN_VP_W      = int(os.environ.get("GUIDANCE_VIEWPORT_WIDTH",  "1400"))
+WCN_VP_H      = int(os.environ.get("GUIDANCE_VIEWPORT_HEIGHT", "1200"))
+WCN_ALLAMEDAS_URL = os.environ.get(
+    "WCN_ALLAMEDAS_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/allamedas.html",
+)
+WCN_RANKING_URL = os.environ.get(
+    "WCN_RANKING_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/ranking.html",
+)
+
+
+def _wcn_label_banner(raw: bytes, label: str) -> bytes:
+    """スクリーンショットの上部にラベルバナーを追加。"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        banner_h = 36
+        banner = Image.new("RGB", (img.width, banner_h), (30, 30, 60))
+        draw = ImageDraw.Draw(banner)
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 20)
+        except Exception:
+            font = ImageFont.load_default()
+        draw.text((8, 6), label, fill=(255, 255, 255), font=font)
+        combined = Image.new("RGB", (img.width, banner_h + img.height))
+        combined.paste(banner, (0, 0))
+        combined.paste(img, (0, banner_h))
+        buf = io.BytesIO()
+        combined.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return raw
+
+
+def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
+    """WCN アメダス地点一覧とランキングをスクリーンショット。
+
+    allamedas.html: 3時間降水量/最高気温/最低気温/最大風速/最小湿度/積雪深（最大6枚）
+    ranking.html  : 気温ランキング / 降水量ランキング / 風速・湿度・積雪ランキング（3枚）
+    """
+    if not (WCN_USER and WCN_PASS):
+        print("[SKIP] WEATHERCASTER_USER/PASS 未設定 — WCN アメダス スクリーンショットをスキップ")
+        return []
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[WARN] playwright 未インストール — WCN アメダス スクリーンショットをスキップ")
+        return []
+
+    results: List[Tuple[str, bytes]] = []
+
+    def _wait(page):
+        page.wait_for_load_state("networkidle", timeout=30_000)
+        page.wait_for_timeout(WCN_WAIT_MS)
+
+    def _shot_full(page) -> bytes:
+        df = page.frame(name="data_area")
+        if not df:
+            raise RuntimeError("data_area not found")
+        scroll_h = df.evaluate("document.body.scrollHeight")
+        page.evaluate(
+            f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{scroll_h}px'"
+        )
+        page.wait_for_timeout(300)
+        return page.locator('iframe[name="data_area"]').screenshot()
+
+    def _submit_form(page, select_name: str, value: str):
+        ff = page.frame(name="form_area")
+        if not ff:
+            raise RuntimeError("form_area not found")
+        ff.select_option(f'select[name="{select_name}"]', value=value)
+        page.wait_for_timeout(200)
+        ff.locator('input[type="submit"], button[type="submit"]').first.click()
+        _wait(page)
+
+    def _select_by_idx(page, idx: int):
+        ff = page.frame(name="form_area")
+        if not ff:
+            raise RuntimeError("form_area not found")
+        sel = ff.locator("select").first
+        options = sel.locator("option").all()
+        if idx >= len(options):
+            raise IndexError(f"option index {idx} >= {len(options)}")
+        val = options[idx].get_attribute("value")
+        sel.select_option(value=val)
+        page.wait_for_timeout(200)
+        ff.locator('input[type="submit"], button[type="submit"]').first.click()
+        _wait(page)
+
+    def _debug_form_opts(page) -> List[str]:
+        ff = page.frame(name="form_area")
+        if not ff:
+            return []
+        try:
+            return ff.locator("select").first.locator("option").all_text_contents()
+        except Exception:
+            return []
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            http_credentials={"username": WCN_USER, "password": WCN_PASS},
+            viewport={"width": WCN_VP_W, "height": WCN_VP_H},
+        )
+        page = ctx.new_page()
+
+        # ---- 1. allamedas.html ----------------------------------------
+        ALLAMEDAS_ITEMS = [
+            ("element", "rain3h", "wcn_amedas_rain3h.png", "アメダス 3時間降水量"),
+            ("element", "tmax",   "wcn_amedas_tmax.png",   "アメダス 最高気温"),
+            ("element", "tmin",   "wcn_amedas_tmin.png",   "アメダス 最低気温"),
+            ("element", "wmax",   "wcn_amedas_wmax.png",   "アメダス 最大風速"),
+            ("element", "humin",  "wcn_amedas_humin.png",  "アメダス 最小湿度"),
+            ("element", "snow",   "wcn_amedas_snow.png",   "アメダス 積雪深"),
+        ]
+        for select_name, value, fname, lbl in ALLAMEDAS_ITEMS:
+            try:
+                page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
+                _wait(page)
+                opts = _debug_form_opts(page)
+                print(f"[DEBUG] allamedas opts: {opts}")
+                try:
+                    _submit_form(page, select_name, value)
+                except Exception:
+                    ff = page.frame(name="form_area")
+                    if ff:
+                        sel = ff.locator("select").first
+                        try:
+                            sel.select_option(value=value)
+                        except Exception:
+                            for opt in sel.locator("option").all():
+                                if value in opt.inner_text() or lbl.split()[-1] in opt.inner_text():
+                                    sel.select_option(value=opt.get_attribute("value"))
+                                    break
+                        try:
+                            ff.locator('input[type="submit"], button[type="submit"]').first.click()
+                            _wait(page)
+                        except Exception:
+                            pass
+                raw = _shot_full(page)
+                img = _wcn_label_banner(raw, lbl)
+                results.append((fname, img))
+                print(f"[OK] {fname}  {len(img):,} bytes")
+            except Exception as e:
+                print(f"[WARN] {fname} 撮影失敗: {e}")
+
+        # ---- 2. ranking.html ------------------------------------------
+        RANKING_GROUPS = [
+            ("wcn_ranking_temp.png",  "ランキング 気温（最高↑ / 最低↓ / 低最高↓ / 高最低↑）"),
+            ("wcn_ranking_rain.png",  "ランキング 降水量（1h / 3h / 12h / 24h）"),
+            ("wcn_ranking_wind.png",  "ランキング 風速・湿度・積雪（最大風速 / 最大瞬間 / 最小湿度 / 積雪深）"),
+        ]
+        try:
+            page.goto(WCN_RANKING_URL, wait_until="networkidle", timeout=60_000)
+            _wait(page)
+            rank_opts = _debug_form_opts(page)
+            print(f"[DEBUG] ranking opts: {rank_opts}")
+        except Exception as e:
+            print(f"[WARN] ranking.html ロード失敗: {e}")
+            rank_opts = []
+
+        for idx, (fname, lbl) in enumerate(RANKING_GROUPS):
+            try:
+                page.goto(WCN_RANKING_URL, wait_until="networkidle", timeout=60_000)
+                _wait(page)
+                if len(rank_opts) >= 3:
+                    _select_by_idx(page, idx)
+                else:
+                    print(f"[INFO] ranking opts < 3 — 全体撮影: {fname}")
+                raw = _shot_full(page)
+                img = _wcn_label_banner(raw, lbl)
+                results.append((fname, img))
+                print(f"[OK] {fname}  {len(img):,} bytes")
+            except Exception as e:
+                print(f"[WARN] {fname} 撮影失敗: {e}")
+
+        browser.close()
+
+    return results
+
+
+def post_wcn_amedas_to_discord(images: List[Tuple[str, bytes]]) -> None:
+    """WCN アメダス画像を Discord #amedas チャンネルへ投稿。"""
+    url = DISCORD_AMEDAS_WEBHOOK_URL
+    if not url:
+        print("[SKIP] DISCORD_AMEDAS_WEBHOOK_URL 未設定 — Discord 投稿をスキップ")
+        return
+
+    import json as _json
+    import uuid
+
+    allamedas = [(f, b) for f, b in images if f.startswith("wcn_amedas_")]
+    rankings  = [(f, b) for f, b in images if f.startswith("wcn_ranking_")]
+
+    def _post_multipart(files: List[Tuple[str, bytes]], content: str = "") -> None:
+        if not files:
+            return
+        boundary = uuid.uuid4().hex
+        body = b""
+        if content:
+            body += (
+                f'--{boundary}\r\n'
+                f'Content-Disposition: form-data; name="payload_json"\r\n\r\n'
+                f'{_json.dumps({"content": content, "flags": 4})}\r\n'
+            ).encode()
+        for i, (fname, data) in enumerate(files):
+            body += (
+                f'--{boundary}\r\n'
+                f'Content-Disposition: form-data; name="files[{i}]"; '
+                f'filename="{fname}"\r\n'
+                f'Content-Type: image/png\r\n\r\n'
+            ).encode() + data + b"\r\n"
+        body += f"--{boundary}--\r\n".encode()
+        req = urllib.request.Request(
+            url, data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "User-Agent": "discord-bot/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                print(f"[Discord] POST {resp.status} ({content or 'no content'})")
+        except Exception as e:
+            print(f"[WARN] Discord POST 失敗: {e}")
+
+    if allamedas:
+        _post_multipart(allamedas, content="**アメダス観測値（WCN）**")
+    for i, item in enumerate(rankings):
+        _post_multipart([item], content="**アメダスランキング（WCN）**" if i == 0 else "")
+
+
 if __name__ == "__main__":
     main()
