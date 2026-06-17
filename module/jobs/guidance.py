@@ -69,6 +69,16 @@ WCN_WEEK_FACTORS = [
     ("rain",  "2"),  # 日降水量
 ]
 
+# 気象庁予報ページ（直接CGI URL・#9=秋田県）
+WCN_YOHO_URL      = os.environ.get(
+    "WCN_YOHO_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/yoho_show.cgi#9",
+)
+WCN_WEEK_SHOW_URL = os.environ.get(
+    "WCN_WEEK_SHOW_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/week_show.cgi#9",
+)
+
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX  = os.environ.get("R2_PREFIX", "guidance").strip().strip("/")
 
@@ -201,11 +211,30 @@ def _wcn_submit_and_wait(page, form_frame, factor_select: str, factor_value: str
 
 def _wcn_click_pref(data_frame, pref: str) -> None:
     """data_area iframe 内の府県ナビリンクをクリックして秋田県セクションへジャンプ。"""
-    # 上部ナビの「秋田県」アンカーリンクをクリック → anchor へスクロール
     link = data_frame.locator(f"a:text('{pref}')").first
     if link.count() > 0:
         link.click()
         import time; time.sleep(0.4)
+
+
+def _add_label_banner(img_bytes: bytes, label: str) -> bytes:
+    """画像上部にラベルバナーを追加する。Pillow 未インストール時は元画像をそのまま返す。"""
+    try:
+        from PIL import Image, ImageDraw
+        import io as _io
+        img = Image.open(_io.BytesIO(img_bytes))
+        banner_h = 34
+        new_img = Image.new("RGB", (img.width, img.height + banner_h), (45, 90, 145))
+        draw = ImageDraw.Draw(new_img)
+        f_sm, _, _ = _load_fonts()
+        draw.text((12, (banner_h - 14) // 2), label, fill=(255, 255, 255), font=f_sm)
+        new_img.paste(img, (0, banner_h))
+        buf = _io.BytesIO()
+        new_img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[WARN] label追加失敗: {e}")
+        return img_bytes
 
 
 def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
@@ -233,14 +262,22 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
 
     results: List[Tuple[str, bytes]] = []
 
-    def _shot(page) -> bytes:
-        """data_area iframe 要素をそのままスクリーンショット（960×700 の表示域だけ撮る）。"""
+    def _shot_viewport(page) -> bytes:
+        """data_area iframe の表示域（秋田セクションへスクロール後）を撮影。"""
         return page.locator('iframe[name="data_area"]').screenshot()
 
-    def _grab_form_data(page, base_url: str, select_name: str, factors: list,
-                        fname_prefix: str, scroll_to_pref: bool = False) -> None:
+    def _shot_fullbody(page) -> bytes:
+        """data_area iframe の body 全体（全地点）を撮影。"""
+        df = page.frame(name="data_area")
+        if not df:
+            raise RuntimeError("data_area not found")
+        return df.locator("body").screenshot()
+
+    def _grab_form_data(page, base_url: str, select_name: str,
+                        factors: List[Tuple[str, str]], fname_prefix: str,
+                        labels: List[str], scroll_to_pref: bool = False) -> None:
         """共通: フォームで要素選択 → 決定 → data_area 撮影 を factors 分繰り返す。"""
-        for suffix, value in factors:
+        for (suffix, value), lbl in zip(factors, labels):
             try:
                 page.goto(base_url, wait_until="networkidle", timeout=60_000)
                 ff = page.frame(name="form_area")
@@ -251,12 +288,23 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
                     df = page.frame(name="data_area")
                     if df:
                         _wcn_click_pref(df, WCN_PREF)
-                img = _shot(page)
+                raw = _shot_viewport(page)
+                img = _add_label_banner(raw, lbl)
                 fname = f"{fname_prefix}_{suffix}.png"
                 results.append((fname, img))
                 print(f"[OK] {fname}  {len(img):,} bytes")
             except Exception as e:
                 print(f"[WARN] {fname_prefix}_{suffix} 撮影失敗: {e}")
+
+    # 降雪量は5〜10月はスキップ
+    month = _jst_now().month
+    bunpu_factors = [(s, v) for s, v in WCN_BUNPU_FACTORS
+                     if not (s == "snow3h" and 5 <= month <= 10)]
+    bunpu_labels  = {"tenki": "天気", "rain3h": "3時間降水量",
+                     "snow3h": "3時間降雪量", "temp": "気温"}
+    week_labels   = {"tmax": "週間ガイダンス 最高気温",
+                     "tmin": "週間ガイダンス 最低気温",
+                     "rain": "週間ガイダンス 日降水量"}
 
     try:
         with sync_playwright() as p:
@@ -268,7 +316,7 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
             page = ctx.new_page()
 
             # ── MSM 府県時別 今日 (date=0) ・明日 (date=1) ──────────
-            for day_offset, label in [(0, "d0"), (1, "d1")]:
+            for day_offset, day_lbl in [(0, "d0"), (1, "d1")]:
                 try:
                     page.goto(WCN_MSM_URL, wait_until="networkidle", timeout=60_000)
                     ff = page.frame(name="form_area")
@@ -279,20 +327,42 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
                     with page.expect_event("framenavigated", timeout=15_000):
                         ff.locator('input[type="submit"][name="dat"]').click()
                     page.wait_for_timeout(WCN_WAIT_MS)
-                    img = _shot(page)
-                    fname = f"wcn_msm_{label}.png"
+                    # body 全体撮影（八森〜東成瀬 全地点）
+                    img = _shot_fullbody(page)
+                    fname = f"wcn_msm_{day_lbl}.png"
                     results.append((fname, img))
                     print(f"[OK] {fname}  {len(img):,} bytes")
                 except Exception as e:
-                    print(f"[WARN] MSM {label} 撮影失敗: {e}")
+                    print(f"[WARN] MSM {day_lbl} 撮影失敗: {e}")
 
-            # ── 分布予報 (factorNo 0–3) ──────────────────────────────
+            # ── 分布予報（季節除外済み）──────────────────────────────
             _grab_form_data(page, WCN_BUNPU_URL, "factorNo",
-                            WCN_BUNPU_FACTORS, "wcn_bunpu", scroll_to_pref=True)
+                            bunpu_factors,
+                            "wcn_bunpu",
+                            [bunpu_labels[s] for s, _ in bunpu_factors],
+                            scroll_to_pref=True)
 
-            # ── 週間ガイダンス日データ (factorNo 0–2) ────────────────
+            # ── 週間ガイダンス日データ ────────────────────────────────
             _grab_form_data(page, WCN_WEEK_URL, "factorNo",
-                            WCN_WEEK_FACTORS, "wcn_week", scroll_to_pref=True)
+                            WCN_WEEK_FACTORS,
+                            "wcn_week",
+                            [week_labels[s] for s, _ in WCN_WEEK_FACTORS],
+                            scroll_to_pref=True)
+
+            # ── 気象庁予報（短期・週間）直接CGI ─────────────────────
+            for url, fname, lbl in [
+                (WCN_YOHO_URL,      "wcn_yoho.png",      "気象庁予報 短期（秋田県）"),
+                (WCN_WEEK_SHOW_URL, "wcn_week_show.png", "気象庁予報 週間（秋田県）"),
+            ]:
+                try:
+                    page.goto(url, wait_until="networkidle", timeout=60_000)
+                    page.wait_for_timeout(WCN_WAIT_MS)
+                    raw = page.locator("body").screenshot()
+                    img = _add_label_banner(raw, lbl)
+                    results.append((fname, img))
+                    print(f"[OK] {fname}  {len(img):,} bytes")
+                except Exception as e:
+                    print(f"[WARN] {fname} 撮影失敗: {e}")
 
             browser.close()
     except Exception as e:
@@ -897,70 +967,15 @@ def _post_images_bulk(images: List[Tuple[str, bytes]], content: str = "") -> Non
 # =============================================================================
 
 def main():
-    print("=== Start Guidance (JMA Forecast) ===")
+    print("=== Start Guidance (WCN Screenshot) ===")
 
-    raw = _fetch(FORECAST_URL)
-    if not raw or not isinstance(raw, list):
-        print("[ERR] forecast fetch failed")
-        return
-
-    short_raw  = raw[0] if len(raw) > 0 else {}
-    weekly_raw = raw[1] if len(raw) > 1 else {}
-
-    st = _parse_short_term(short_raw)
-    wk = _parse_weekly(weekly_raw)
-    report_dt = st.get("report_dt") or wk.get("report_dt")
-
-    # 画像生成
-    img1 = build_municipality_img(st)
-    img2 = build_tanki_img(st)
-    img3 = build_shuukan_img(wk)
-
-    for lbl, img in [("municipality", img1), ("tanki", img2), ("shuukan", img3)]:
-        if img:
-            print(f"[INFO] {lbl} img: {len(img)} bytes")
-        else:
-            print(f"[WARN] {lbl} img build failed")
-
-    # R2 アップロード
-    img_items = [
-        (fn, data)
-        for fn, data in [
-            ("guidance_municipality.png", img1),
-            ("guidance_tanki.png",        img2),
-            ("guidance_shuukan.png",      img3),
-        ]
-        if data
-    ]
-    r2_urls = _upload_r2(img_items)
-
-    # Notion 書き込み
-    ts_str = (report_dt.strftime("%Y/%m/%d %H:%M")
-              if report_dt else _jst_now().strftime("%Y/%m/%d %H:%M"))
-    _notion_write(f"ガイダンス / {ts_str} JST", r2_urls, report_dt)
-
-    # Discord: JMA Pillow 画像投稿（1枚ずつ）
-    if img1:
-        _post_image(img1, "guidance_municipality.png",
-                    content=f"<{JMA_FORECAST_PORTAL}>")
-    if img2:
-        _post_image(img2, "guidance_tanki.png")
-    if img3:
-        _post_image(img3, "guidance_shuukan.png")
-
-    # WCN スクリーンショット（MSM今日/明日・分布予報4要素・週間3要素）
+    # WCN スクリーンショット一式
+    # MSM今日/明日・分布予報・週間ガイダンス・気象庁予報短期/週間
     wcn_images = screenshot_wcn_all()
     if wcn_images:
-        _post_images_bulk(wcn_images, content="**WCN ガイダンス（MSM・分布予報・週間）**")
+        _post_images_bulk(wcn_images, content="**WCN ガイダンス（MSM・分布予報・週間・気象庁予報）**")
     else:
         print("[INFO] WCN スクリーンショットなし（スキップ）")
-
-    # Discord: 参考リンク
-    _post_text(
-        f"**参考リンク**\n"
-        f"・気象庁 天気予報（秋田県）\n{JMA_FORECAST_PORTAL}\n"
-        f"・WCN 各種気象情報\n{WCN_KISHO_URL}"
-    )
 
     print("=== Done ===")
 
