@@ -231,29 +231,38 @@ def _tile_columns(img_bytes: bytes, n_cols: int = 5, header_px: int = 60) -> byt
         px = img.load()
 
         # ── ステーション境界行を検出 ──────────────────────────
-        # WCN MSM のステーション見出し帯 = 濃い青
-        # 色プロファイル実測値: RGB(31,71,135) / (39,95,175) / (23,71,135)
-        # 条件: R<70, G<120, B>120, B-R>80
+        # WCN MSM の時刻ラベル行 = 肌色/ピンク系
+        # 色プロファイル実測値: RGB(255,228,225)
+        # 条件: R>240, G>210, B>210, R が最大, G≈B（白との区別: R>G が必要）
         sample_xs = [max(1, W * k // 8) for k in range(1, 8)]  # 7点サンプル
 
-        def _is_station_header(y: int) -> bool:
+        def _is_time_label_row(y: int) -> bool:
             cnt = 0
             for x in sample_xs:
                 try:
                     r, g, b = px[x, y][0], px[x, y][1], px[x, y][2]
-                    if r < 70 and g < 120 and b > 120 and b - r > 80:
+                    # 肌色/ピンク: R が高くて G・B より大きく、かつ G と B が近い
+                    if r > 240 and g > 210 and b > 210 and r > g and r > b and abs(int(g) - int(b)) < 25:
                         cnt += 1
                 except Exception:
                     pass
             return cnt >= 4
 
-        station_bounds: list[int] = []
-        prev_hdr = False
+        raw_bounds: list[int] = []
+        prev_pink = False
         for y in range(header_px, H):
-            cur = _is_station_header(y)
-            if cur and not prev_hdr:
-                station_bounds.append(y)
-            prev_hdr = cur
+            cur = _is_time_label_row(y)
+            if cur and not prev_pink:
+                raw_bounds.append(y)
+            prev_pink = cur
+
+        # 同一ステーション内の近接ピンク行（100px未満）は最初の1行だけ残す
+        station_bounds: list[int] = []
+        prev_b = -(header_px + 200)
+        for b in raw_bounds:
+            if b - prev_b > 100:
+                station_bounds.append(b)
+                prev_b = b
 
         print(f"[INFO] tile_columns: detected {len(station_bounds)} station boundaries")
 
