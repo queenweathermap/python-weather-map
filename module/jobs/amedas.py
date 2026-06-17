@@ -1071,5 +1071,24 @@ def post_wcn_amedas_to_discord(images: List[Tuple[str, bytes]]) -> None:
         _post_multipart([item], content="**アメダスランキング（WCN）**" if i == 0 else "")
 
 
+def main_wcn() -> None:
+    """WCN アメダス観測値・ランキング: スクリーンショット → R2 → Discord → Notion。"""
+    jst_now = datetime.now(JST)
+    images = screenshot_wcn_amedas_pages()
+    if not images:
+        print("[INFO] WCN アメダス画像なし — スキップ")
+        return
+
+    r2_urls = _upload_r2(images, jst_now)
+    post_wcn_amedas_to_discord(images)
+
+    ts = jst_now.strftime("%m/%d %H:%M")
+    _notion_write(
+        title=f"WCN アメダス観測値・ランキング / {ts}",
+        r2_urls=r2_urls,
+        jst_now=jst_now,
+    )
+
+
 if __name__ == "__main__":
     main()
