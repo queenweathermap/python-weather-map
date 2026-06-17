@@ -199,13 +199,13 @@ def _wcn_submit_and_wait(page, form_frame, factor_select: str, factor_value: str
     page.wait_for_timeout(WCN_WAIT_MS)
 
 
-def _wcn_scroll_to_pref(data_frame, pref: str) -> None:
-    """data_area iframe 内の府県リンクへスクロール（秋田県など）。"""
-    link = data_frame.locator(f"a:text('{pref}')")
+def _wcn_click_pref(data_frame, pref: str) -> None:
+    """data_area iframe 内の府県ナビリンクをクリックして秋田県セクションへジャンプ。"""
+    # 上部ナビの「秋田県」アンカーリンクをクリック → anchor へスクロール
+    link = data_frame.locator(f"a:text('{pref}')").first
     if link.count() > 0:
-        link.first.scroll_into_view_if_needed()
-        # スクロール確定待ち
-        import time; time.sleep(0.3)
+        link.click()
+        import time; time.sleep(0.4)
 
 
 def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
@@ -250,7 +250,7 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
                 if scroll_to_pref:
                     df = page.frame(name="data_area")
                     if df:
-                        _wcn_scroll_to_pref(df, WCN_PREF)
+                        _wcn_click_pref(df, WCN_PREF)
                 img = _shot(page)
                 fname = f"{fname_prefix}_{suffix}.png"
                 results.append((fname, img))
