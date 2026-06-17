@@ -571,17 +571,40 @@ def screenshot_jma_advisor() -> List[Tuple[str, bytes]]:
         page.wait_for_timeout(JMA_ADV_WAIT_MS)
 
     def _select_area(page, area: str) -> None:
-        """エリアセレクトを探して選択（label → 部分一致フォールバック）。"""
+        """エリアセレクトを探して選択。
+        ドロップダウンが地方単位（東北地方など）なので部分一致で対応。
+        """
         sel = page.locator("select").first
-        try:
+        opts = sel.locator("option").all_text_contents()
+        print(f"[DEBUG] area opts={opts}")
+        # 完全一致
+        if area in opts:
             sel.select_option(label=area)
-        except Exception:
-            opts = sel.locator("option").all_text_contents()
-            matched = [o for o in opts if area.replace("県","").replace("都","").replace("府","") in o]
-            if matched:
-                sel.select_option(label=matched[0])
-            else:
-                print(f"[WARN] エリア選択失敗: {area} opts={opts[:5]}")
+            return
+        # 都道府県名 → 地方名への変換テーブル
+        PREF_TO_REGION = {
+            "北海道": "北海道地方",
+            "青森県": "東北地方", "岩手県": "東北地方", "宮城県": "東北地方",
+            "秋田県": "東北地方", "山形県": "東北地方", "福島県": "東北地方",
+            "茨城県": "関東甲信地方", "栃木県": "関東甲信地方", "群馬県": "関東甲信地方",
+            "埼玉県": "関東甲信地方", "東京都": "関東甲信地方", "千葉県": "関東甲信地方",
+            "神奈川県": "関東甲信地方", "長野県": "関東甲信地方", "山梨県": "関東甲信地方",
+            "新潟県": "北陸地方", "富山県": "北陸地方", "石川県": "北陸地方", "福井県": "北陸地方",
+            "静岡県": "東海地方", "愛知県": "東海地方", "岐阜県": "東海地方", "三重県": "東海地方",
+        }
+        region = PREF_TO_REGION.get(area)
+        if region and region in opts:
+            sel.select_option(label=region)
+            print(f"[INFO] エリア: {area} → {region}")
+            return
+        # 部分一致フォールバック
+        short = area.replace("県","").replace("都","").replace("府","")
+        matched = [o for o in opts if short in o]
+        if matched:
+            sel.select_option(label=matched[0])
+            print(f"[INFO] エリア部分一致: {matched[0]}")
+        else:
+            print(f"[WARN] エリア選択失敗: {area} opts={opts}")
 
     def _shot_body(page, label: str) -> bytes:
         """全体を撮影してラベルバナーを追加。"""
@@ -598,9 +621,12 @@ def screenshot_jma_advisor() -> List[Tuple[str, bytes]]:
 
         # ── guid_table: 降水・降雪 ──────────────────────────────────
         GUID_TABLE_URL = f"{JMA_ADV_BASE}/guid_table.html"
-        for element_label, fname, lbl, skip in [
-            ("rain3h", "adv_guid_rain3h.png", "MSM 3時間降水量ガイダンス（秋田県）", False),
-            ("snow3h", "adv_guid_snow3h.png", "MSM 3時間降雪量ガイダンス（秋田県）", 5 <= month <= 10),
+        # HTML調査: 要素selectのvalueは rain3/snow3 (rain3h/snow3hではない)
+        # モデルボタンは <span class="model"> テキスト GSM/MSM
+        for elem_value, fname, lbl, skip in [
+            ("rain3", "adv_guid_rain3h.png", "MSM 3時間降水量ガイダンス（秋田県）", False),
+            ("pot",   "adv_guid_pot.png",    "MSM 発雷確率ガイダンス（秋田県）",   False),
+            ("snow3", "adv_guid_snow3h.png", "MSM 3時間降雪量ガイダンス（秋田県）", 5 <= month <= 10),
         ]:
             if skip:
                 print(f"[SKIP] {fname}（降雪量 5〜10月）")
@@ -608,20 +634,25 @@ def screenshot_jma_advisor() -> List[Tuple[str, bytes]]:
             try:
                 page.goto(GUID_TABLE_URL, wait_until="networkidle", timeout=60_000)
                 _wait(page)
-                # エリア: 秋田県
+                # エリア選択
                 _select_area(page, JMA_ADV_AREA)
-                # モデル: MSM ボタン
+                # MSMボタン: <span class="model"> テキスト "MSM"
                 try:
-                    page.locator("button, input[type='button'], input[type='radio']").filter(has_text="MSM").first.click()
+                    page.locator("span.model").filter(has_text="MSM").first.click(timeout=5_000)
+                    _wait(page)
                 except Exception:
                     pass
-                # 要素: rain3h / snow3h
+                # 要素select: value="rain3" / "snow3"
                 try:
-                    elem_sel = page.locator("select").nth(1)
-                    elem_sel.select_option(label=element_label)
+                    page.locator("select").nth(1).select_option(value=elem_value)
                 except Exception:
-                    # フォールバック: テキストで選択
-                    page.locator(f"option:text-matches('{element_label}', 'i')").first.click()
+                    # フォールバック: 全selectを試す
+                    for sel in page.locator("select").all():
+                        try:
+                            sel.select_option(value=elem_value)
+                            break
+                        except Exception:
+                            pass
                 _wait(page)
                 raw = _shot_body(page, lbl)
                 results.append((fname, raw))
@@ -629,50 +660,70 @@ def screenshot_jma_advisor() -> List[Tuple[str, bytes]]:
             except Exception as e:
                 print(f"[WARN] {fname} 撮影失敗: {e}")
 
-        # ── guid_table_wind: 最大風速（沿岸/内陸 2列） ─────────────
+        # ── guid_table_wind: 最大風速（秋田県 各アメダス地点） ─────
+        # エリア選択は2段階: 全国→東北地方→秋田管区気象台
         try:
             WIND_URL = f"{JMA_ADV_BASE}/guid_table_wind.html"
             page.goto(WIND_URL, wait_until="networkidle", timeout=60_000)
             _wait(page)
+            # 1段階目: 地方選択（東北地方）
             _select_area(page, JMA_ADV_AREA)
-            # MSM ボタン
+            _wait(page)
+            # 2段階目: 県レベル選択（秋田を含むオプションが追加される）
+            pref_short = JMA_ADV_AREA.replace("県","").replace("都","").replace("府","")
+            sel = page.locator("select").first
+            opts = sel.locator("option").all_text_contents()
+            print(f"[DEBUG] wind opts after region: {opts}")
+            # 全角スペース付きオプション（県レベル）の中から秋田を探す
+            pref_opts = [o for o in opts if pref_short in o and o.startswith("　")]
+            if pref_opts:
+                sel.select_option(label=pref_opts[0])
+                print(f"[INFO] wind 県選択: {pref_opts[0].strip()}")
+                _wait(page)
+            else:
+                print(f"[WARN] wind 県オプション見つからず（{pref_short}）: {opts}")
+            # MSMボタン: <span class="model"> テキスト "MSM"
             try:
-                page.locator("button, input[type='button'], input[type='radio']").filter(has_text="MSM").first.click()
+                page.locator("span.model").filter(has_text="MSM").first.click(timeout=5_000)
+                _wait(page)
             except Exception:
                 pass
-            _wait(page)
-            # 全体撮影 → 沿岸/内陸 で垂直分割して2列に並べる
+            # 秋田県 各アメダス地点の全体スクリーンショット（2列分割不要）
             raw_full = page.locator("body").screenshot()
-            wind_tiled = _split_wind_two_cols(raw_full)
-            img = _add_label_banner(wind_tiled, f"MSM 最大風速ガイダンス（{JMA_ADV_AREA}）")
+            img = _add_label_banner(raw_full, f"MSM 最大風速ガイダンス（{JMA_ADV_AREA} 各地点）")
             results.append(("adv_guid_wind.png", img))
             print(f"[OK] adv_guid_wind.png  {len(img):,} bytes")
         except Exception as e:
             print(f"[WARN] adv_guid_wind 撮影失敗: {e}")
 
-        # ── cold_table: 寒気帳票 気温 / 平年差 ────────────────────
+        # ── cold_table: 寒気帳票 秋田地点 気温 / 平年差 ──────────
+        # 操作フロー:
+        #   1. ページロード → 全地点×500hPa表示（mode=pressure）
+        #   2. th.clickable:text('秋田') をクリック → mode=point（秋田の気圧層×時刻）
+        #   3. デフォルトが気温（diff=false）なのでそのまま撮影
+        #   4. #display-true を mousedown → 平年差に切替えて撮影
         COLD_URL = f"{JMA_ADV_BASE}/cold_table.html"
-        for btn_text, fname, lbl in [
-            ("気温",  "adv_cold_temp.png", f"寒気帳票 気温（{JMA_ADV_COLD_STATION}）"),
-            ("平年差", "adv_cold_anom.png", f"寒気帳票 平年差（{JMA_ADV_COLD_STATION}）"),
-        ]:
-            try:
-                page.goto(COLD_URL, wait_until="networkidle", timeout=60_000)
-                _wait(page)
-                # 地点選択（秋田）
-                try:
-                    page.locator(f"a:text('{JMA_ADV_COLD_STATION}'), option:text('{JMA_ADV_COLD_STATION}')").first.click()
-                    _wait(page)
-                except Exception:
-                    pass
-                # 気温 / 平年差 ボタンをクリック
-                page.locator(f"button:text('{btn_text}'), input[value='{btn_text}']").first.click()
-                _wait(page)
-                raw = _shot_body(page, lbl)
-                results.append((fname, raw))
-                print(f"[OK] {fname}  {len(raw):,} bytes")
-            except Exception as e:
-                print(f"[WARN] {fname} 撮影失敗: {e}")
+        try:
+            page.goto(COLD_URL, wait_until="networkidle", timeout=60_000)
+            _wait(page)
+            # 秋田地点をクリック（th.clickable に click ハンドラー）
+            station = JMA_ADV_COLD_STATION  # "秋田"
+            page.locator(f"th.clickable:text-is('{station}')").first.click(timeout=10_000)
+            _wait(page)
+            # 気温（diff=false がデフォルト、念のため明示）
+            page.locator("#display-false").dispatch_event("mousedown")
+            _wait(page)
+            raw = _shot_body(page, f"寒気帳票 気温（{station}）")
+            results.append(("adv_cold_temp.png", raw))
+            print(f"[OK] adv_cold_temp.png  {len(raw):,} bytes")
+            # 平年差（diff=true）
+            page.locator("#display-true").dispatch_event("mousedown")
+            _wait(page)
+            raw = _shot_body(page, f"寒気帳票 平年差（{station}）")
+            results.append(("adv_cold_anom.png", raw))
+            print(f"[OK] adv_cold_anom.png  {len(raw):,} bytes")
+        except Exception as e:
+            print(f"[WARN] adv_cold 撮影失敗: {e}")
 
         browser.close()
 
