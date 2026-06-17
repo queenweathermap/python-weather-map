@@ -69,14 +69,10 @@ WCN_WEEK_FACTORS = [
     ("rain",  "2"),  # 日降水量
 ]
 
-# 気象庁予報ページ（直接CGI URL・#9=秋田県）
-WCN_YOHO_URL      = os.environ.get(
-    "WCN_YOHO_URL",
-    "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/yoho_show.cgi#9",
-)
-WCN_WEEK_SHOW_URL = os.environ.get(
-    "WCN_WEEK_SHOW_URL",
-    "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/week_show.cgi#9",
+# 気象庁 秋田県天気予報（公開ページ）
+JMA_FORECAST_URL = os.environ.get(
+    "JMA_FORECAST_URL",
+    "https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code=050000",
 )
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
@@ -267,11 +263,17 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
         return page.locator('iframe[name="data_area"]').screenshot()
 
     def _shot_fullbody(page) -> bytes:
-        """data_area iframe の body 全体（全地点）を撮影。"""
+        """data_area iframe を scrollHeight まで拡張して全体撮影。"""
         df = page.frame(name="data_area")
         if not df:
             raise RuntimeError("data_area not found")
-        return df.locator("body").screenshot()
+        # iframe の高さを body の実スクロール高さに合わせてから撮影
+        scroll_h = df.evaluate("document.body.scrollHeight")
+        page.evaluate(
+            f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{scroll_h}px'"
+        )
+        page.wait_for_timeout(200)
+        return page.locator('iframe[name="data_area"]').screenshot()
 
     def _grab_form_data(page, base_url: str, select_name: str,
                         factors: List[Tuple[str, str]], fname_prefix: str,
@@ -316,19 +318,35 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
             page = ctx.new_page()
 
             # ── MSM 府県時別 今日 (date=0) ・明日 (date=1) ──────────
+            msm_day_labels = {0: "MSM 時別ガイダンス 今日", 1: "MSM 時別ガイダンス 明日"}
             for day_offset, day_lbl in [(0, "d0"), (1, "d1")]:
                 try:
                     page.goto(WCN_MSM_URL, wait_until="networkidle", timeout=60_000)
                     ff = page.frame(name="form_area")
                     if not ff:
                         raise RuntimeError("form_area not found")
-                    ff.locator('select[name="fuken"]').select_option(label=WCN_PREF)
+                    # fuken: label で試みて失敗したら options を列挙してデバッグ出力
+                    fuken_sel = ff.locator('select[name="fuken"]')
+                    try:
+                        fuken_sel.select_option(label=WCN_PREF)
+                    except Exception:
+                        opts = fuken_sel.locator("option").all_text_contents()
+                        print(f"[DEBUG] fuken options: {opts}")
+                        # 部分一致で選択（秋田県 → 秋田 など）
+                        pref_short = WCN_PREF.replace("県", "").replace("府", "").replace("都", "")
+                        matched = [o for o in opts if pref_short in o]
+                        if matched:
+                            fuken_sel.select_option(label=matched[0])
+                        else:
+                            raise RuntimeError(f"fuken option not found: {WCN_PREF}")
                     ff.locator('select[name="date"]').select_option(value=str(day_offset))
                     with page.expect_event("framenavigated", timeout=15_000):
-                        ff.locator('input[type="submit"][name="dat"]').click()
+                        # submit ボタンは name 属性なしのケースも考慮
+                        ff.locator('input[type="submit"]').first.click()
                     page.wait_for_timeout(WCN_WAIT_MS)
                     # body 全体撮影（八森〜東成瀬 全地点）
-                    img = _shot_fullbody(page)
+                    raw = _shot_fullbody(page)
+                    img = _add_label_banner(raw, msm_day_labels[day_offset])
                     fname = f"wcn_msm_{day_lbl}.png"
                     results.append((fname, img))
                     print(f"[OK] {fname}  {len(img):,} bytes")
@@ -349,20 +367,17 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
                             [week_labels[s] for s, _ in WCN_WEEK_FACTORS],
                             scroll_to_pref=True)
 
-            # ── 気象庁予報（短期・週間）直接CGI ─────────────────────
-            for url, fname, lbl in [
-                (WCN_YOHO_URL,      "wcn_yoho.png",      "気象庁予報 短期（秋田県）"),
-                (WCN_WEEK_SHOW_URL, "wcn_week_show.png", "気象庁予報 週間（秋田県）"),
-            ]:
-                try:
-                    page.goto(url, wait_until="networkidle", timeout=60_000)
-                    page.wait_for_timeout(WCN_WAIT_MS)
-                    raw = page.locator("body").screenshot()
-                    img = _add_label_banner(raw, lbl)
-                    results.append((fname, img))
-                    print(f"[OK] {fname}  {len(img):,} bytes")
-                except Exception as e:
-                    print(f"[WARN] {fname} 撮影失敗: {e}")
+            # ── 気象庁 秋田県天気予報（公開ページ）────────────────
+            try:
+                page.goto(JMA_FORECAST_URL, wait_until="networkidle", timeout=60_000)
+                # JS レンダリング完了を待つ
+                page.wait_for_timeout(4000)
+                raw = page.screenshot(full_page=True)
+                img = _add_label_banner(raw, "気象庁 秋田県天気予報")
+                results.append(("jma_forecast.png", img))
+                print(f"[OK] jma_forecast.png  {len(img):,} bytes")
+            except Exception as e:
+                print(f"[WARN] jma_forecast 撮影失敗: {e}")
 
             browser.close()
     except Exception as e:
