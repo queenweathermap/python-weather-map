@@ -2,8 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 秋田県の降水ガイダンス（数値予報＝予測値）を監視し、しきい値を超える予想が出た
-ときだけ Discord にテキストで「予測アラート」を通知する。weather_warning.py と
-同じ「取得→差分→変化時だけ通知」方式。標準ライブラリのみ。
+ときだけ Discord にスクリーンショット＋テキストで「予測アラート」を通知する。
+weather_warning.py と同じ「取得→差分→変化時だけ通知」方式。
+
+スクリーンショット: WCN（気象キャスターネットワーク）会員ページの MSM府県時別を
+  Playwright で秋田県選択→撮影。WEATHERCASTER_USER/WEATHERCASTER_PASS が未設定か
+  Playwright 未インストールの場合は従来のテキスト embed にフォールバック。
 
 ★重要: これは気象庁の正式な「警報・注意報」ではない。数値予報ガイダンス（予測値）に
   対する自前のしきい値判定であり、通知は「○mm以上の予想」という予測情報。
@@ -116,14 +120,20 @@ def latest_data_url():
     return f"{BASE_URL}/{ts}_{MODEL}_rain.json", iso
 
 
+_AREA_FALLBACK = {
+    "050010": "秋田県沿岸",
+    "050020": "秋田県内陸",
+}
+
+
 def area_name_map():
-    """guid_area_class10.json から code->名称。構造不明でも壊れないよう寛容に解釈。"""
+    """guid_area_class10.json から code->名称。取得失敗時は既知コードのフォールバックを使う。"""
     try:
         raw = fetch_json(f"{BASE_URL}/guid_area_class10.json")
     except Exception as e:
-        print(f"[WARN] area json 取得失敗（コード表示にフォールバック）: {e}", file=sys.stderr)
-        return {}
-    m = {}
+        print(f"[WARN] area json 取得失敗（フォールバック使用）: {e}", file=sys.stderr)
+        return dict(_AREA_FALLBACK)
+    m = dict(_AREA_FALLBACK)  # 取得成功時も既知名称をベースに上書き
     if isinstance(raw, dict):
         for code, v in raw.items():
             if isinstance(v, dict):
@@ -411,12 +421,13 @@ def main():
     def disp(a, e):
         return lines.get((a, e), f"{a} {ELEM_LABEL.get(e, e)}")
 
+    # --- アラートテキスト組み立て ---
     blocks = []
     if added:
-        blocks.append("**🆕 しきい値到達（予想）**\n" + "\n".join(
+        blocks.append("🆕 **しきい値到達（予想）**\n" + "\n".join(
             disp(a, e) for a, e in sorted(added)))
     if cleared:
-        blocks.append("**✅ しきい値を下回った（予想）**\n" + "\n".join(
+        blocks.append("✅ **しきい値を下回った（予想）**\n" + "\n".join(
             f"{a} {ELEM_LABEL.get(e, e)}：しきい値未満に" for a, e in sorted(cleared)))
     if exceed:
         now = ["・" + disp(a, e) for a in sorted(exceed) for e in sorted(exceed[a])]
@@ -424,20 +435,18 @@ def main():
     if ref:
         blocks.append("**参考：予想ピーク**\n" + "\n".join(t for _, t in ref))
 
-    blocks.append(f"**🔗 関連リンク**\n[気象庁 ガイダンス（要ログイン）]({ADVISOR_PORTAL})")
-
-    footer = (f"数値予報ガイダンス {MODEL.upper()}（降水={FILTER} / 風=アメダス地点）"
-              f"・予測値で気象庁の正式な警報ではありません／降水初期時刻 {init_iso}")
-
+    footer_line = (f"数値予報ガイダンス {MODEL.upper()}（降水={FILTER}）"
+                   f" ・予測値で正式警報ではありません／初期時刻 {init_iso}")
     payload = {
         "embeds": [{
             "title": "🌧️💨🥶 秋田県 ガイダンス予測アラート（降水・風・寒気）",
             "description": "\n\n".join(blocks)[:4000],
-            "color": 0x1E88E5,  # 青（予測情報）
-            "footer": {"text": footer[:2048]},
+            "color": 0x1E88E5,
+            "footer": {"text": footer_line[:2048]},
         }]
     }
     print("通知:", send_discord(payload))
+
     save_state(exceed)
 
 
