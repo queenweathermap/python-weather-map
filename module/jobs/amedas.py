@@ -893,7 +893,29 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         page.wait_for_load_state("networkidle", timeout=30_000)
         page.wait_for_timeout(WCN_WAIT_MS)
 
+    ALLAMEDAS_ANCHOR = os.environ.get("WCN_ALLAMEDAS_ANCHOR", "15")  # 秋田のアンカーID
+
+    def _shot_pref_section(page) -> bytes:
+        """data_area を秋田アンカーへスクロールしてビューポート撮影。"""
+        df = page.frame(name="data_area")
+        if not df:
+            raise RuntimeError("data_area not found")
+        # アンカー (#15) にスクロール
+        try:
+            df.evaluate(f"document.getElementById('{ALLAMEDAS_ANCHOR}')?.scrollIntoView()")
+            df.evaluate("window.scrollBy(0, -40)")  # ヘッダー行を含めて少し上へ
+            page.wait_for_timeout(300)
+        except Exception:
+            pass
+        # iframe をビューポート高に固定して撮影（縦長にしない）
+        page.evaluate(
+            f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{WCN_VP_H}px'"
+        )
+        page.wait_for_timeout(200)
+        return page.locator('iframe[name="data_area"]').screenshot()
+
     def _shot_full(page) -> bytes:
+        """data_area を全高展開して撮影（ランキング用）。"""
         df = page.frame(name="data_area")
         if not df:
             raise RuntimeError("data_area not found")
@@ -977,7 +999,7 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                             _wait(page)
                         except Exception:
                             pass
-                raw = _shot_full(page)
+                raw = _shot_pref_section(page)
                 img = _wcn_label_banner(raw, lbl)
                 results.append((fname, img))
                 print(f"[OK] {fname}  {len(img):,} bytes")
