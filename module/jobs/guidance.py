@@ -32,6 +32,43 @@ DISCORD_GUIDANCE_WEBHOOK_URL = os.environ.get("DISCORD_GUIDANCE_WEBHOOK_URL", ""
 
 WCN_KISHO_URL = "https://www.weathercaster.jp/member/member_only/kisho_shiryo/"
 
+# =============================================================================
+# WCN スクリーンショット設定
+# =============================================================================
+WCN_USER      = os.environ.get("WEATHERCASTER_USER", "").strip()
+WCN_PASS      = os.environ.get("WEATHERCASTER_PASS", "").strip()
+WCN_PREF      = os.environ.get("WCN_PREF", "秋田県")
+WCN_WAIT_MS   = int(os.environ.get("GUIDANCE_WAIT_MS", "2500"))
+WCN_VP_W      = int(os.environ.get("GUIDANCE_VIEWPORT_WIDTH",  "1600"))
+WCN_VP_H      = int(os.environ.get("GUIDANCE_VIEWPORT_HEIGHT", "1200"))
+
+# MSM 府県時別
+WCN_MSM_URL   = os.environ.get(
+    "WCN_MSM_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/msm_guidance/gui_ken_hour.html",
+)
+# 分布予報・市町村: (ファイル名suffix, select value, 表示名)
+WCN_BUNPU_URL = os.environ.get(
+    "WCN_BUNPU_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/jma_yoho/bunpu_office.html",
+)
+WCN_BUNPU_FACTORS = [
+    ("tenki",  "0"),  # 天気
+    ("rain3h", "1"),  # 3時間降水量
+    ("snow3h", "2"),  # 3時間降雪量
+    ("temp",   "3"),  # 気温
+]
+# 週間ガイダンス日データ
+WCN_WEEK_URL  = os.environ.get(
+    "WCN_WEEK_URL",
+    "https://www.weathercaster.jp/web/member_only/weather-data/week_guidance/gui_all_daily.html",
+)
+WCN_WEEK_FACTORS = [
+    ("tmax",  "0"),  # 最高気温
+    ("tmin",  "1"),  # 最低気温
+    ("rain",  "2"),  # 日降水量
+]
+
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 R2_PREFIX  = os.environ.get("R2_PREFIX", "guidance").strip().strip("/")
 
@@ -148,6 +185,120 @@ def _load_fonts():
         return f, f, f
     except ImportError:
         return None, None, None
+
+
+# =============================================================================
+# WCN スクリーンショット（Playwright）
+# =============================================================================
+
+def _wcn_submit_and_wait(page, form_frame, factor_select: str, factor_value: str) -> None:
+    """form_area の factorNo/fuken select を選んで決定し、framenavigated を待つ。"""
+    form_frame.locator(f'select[name="{factor_select}"]').select_option(value=factor_value)
+    with page.expect_event("framenavigated", timeout=15_000):
+        form_frame.locator('input[type="submit"][name="dat"]').click()
+    page.wait_for_timeout(WCN_WAIT_MS)
+
+
+def _wcn_scroll_to_pref(data_frame, pref: str) -> None:
+    """data_area iframe 内の府県リンクへスクロール（秋田県など）。"""
+    link = data_frame.locator(f"a:text('{pref}')")
+    if link.count() > 0:
+        link.first.scroll_into_view_if_needed()
+        # スクロール確定待ち
+        import time; time.sleep(0.3)
+
+
+def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
+    """WCN 各ページをスクリーンショットして [(filename, bytes), ...] を返す。
+
+    取得画像:
+      wcn_msm_d0.png       MSM 府県時別 秋田県 今日
+      wcn_msm_d1.png       MSM 府県時別 秋田県 明日
+      wcn_bunpu_tenki.png  分布予報 天気
+      wcn_bunpu_rain3h.png 分布予報 3時間降水量
+      wcn_bunpu_snow3h.png 分布予報 3時間降雪量
+      wcn_bunpu_temp.png   分布予報 気温
+      wcn_week_tmax.png    週間ガイダンス 最高気温
+      wcn_week_tmin.png    週間ガイダンス 最低気温
+      wcn_week_rain.png    週間ガイダンス 日降水量
+    """
+    if not (WCN_USER and WCN_PASS):
+        print("[SKIP] WEATHERCASTER_USER/PASS 未設定 — WCN スクリーンショットをスキップ")
+        return []
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[WARN] playwright 未インストール — WCN スクリーンショットをスキップ")
+        return []
+
+    results: List[Tuple[str, bytes]] = []
+
+    def _grab_form_data(page, base_url: str, select_name: str, factors: list,
+                        fname_prefix: str, scroll_to_pref: bool = False) -> None:
+        """共通: フォームで要素選択 → 決定 → data_area 撮影 を factors 分繰り返す。"""
+        for suffix, value in factors:
+            try:
+                page.goto(base_url, wait_until="networkidle", timeout=60_000)
+                ff = page.frame(name="form_area")
+                if not ff:
+                    raise RuntimeError("form_area not found")
+                _wcn_submit_and_wait(page, ff, select_name, value)
+                df = page.frame(name="data_area")
+                if not df:
+                    raise RuntimeError("data_area not found")
+                if scroll_to_pref:
+                    _wcn_scroll_to_pref(df, WCN_PREF)
+                img = df.screenshot()          # visible viewport
+                fname = f"{fname_prefix}_{suffix}.png"
+                results.append((fname, img))
+                print(f"[OK] {fname}  {len(img):,} bytes")
+            except Exception as e:
+                print(f"[WARN] {fname_prefix}_{suffix} 撮影失敗: {e}")
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            ctx = browser.new_context(
+                http_credentials={"username": WCN_USER, "password": WCN_PASS},
+                viewport={"width": WCN_VP_W, "height": WCN_VP_H},
+            )
+            page = ctx.new_page()
+
+            # ── MSM 府県時別 今日 (date=0) ・明日 (date=1) ──────────
+            for day_offset, label in [(0, "d0"), (1, "d1")]:
+                try:
+                    page.goto(WCN_MSM_URL, wait_until="networkidle", timeout=60_000)
+                    ff = page.frame(name="form_area")
+                    if not ff:
+                        raise RuntimeError("form_area not found")
+                    ff.locator('select[name="fuken"]').select_option(label=WCN_PREF)
+                    ff.locator('select[name="date"]').select_option(value=str(day_offset))
+                    with page.expect_event("framenavigated", timeout=15_000):
+                        ff.locator('input[type="submit"][name="dat"]').click()
+                    page.wait_for_timeout(WCN_WAIT_MS)
+                    df = page.frame(name="data_area")
+                    if not df:
+                        raise RuntimeError("data_area not found")
+                    img = df.locator("body").screenshot()
+                    fname = f"wcn_msm_{label}.png"
+                    results.append((fname, img))
+                    print(f"[OK] {fname}  {len(img):,} bytes")
+                except Exception as e:
+                    print(f"[WARN] MSM {label} 撮影失敗: {e}")
+
+            # ── 分布予報 (factorNo 0–3) ──────────────────────────────
+            _grab_form_data(page, WCN_BUNPU_URL, "factorNo",
+                            WCN_BUNPU_FACTORS, "wcn_bunpu", scroll_to_pref=True)
+
+            # ── 週間ガイダンス日データ (factorNo 0–2) ────────────────
+            _grab_form_data(page, WCN_WEEK_URL, "factorNo",
+                            WCN_WEEK_FACTORS, "wcn_week", scroll_to_pref=True)
+
+            browser.close()
+    except Exception as e:
+        print(f"[WARN] WCN セッション失敗: {e}")
+
+    return results
 
 
 # =============================================================================
@@ -695,6 +846,52 @@ def _post_image(image_bytes: bytes, filename: str, content: str = ""):
         print(f"[ERR] Discord post: {e}")
 
 
+def _post_images_bulk(images: List[Tuple[str, bytes]], content: str = "") -> None:
+    """(filename, bytes) リストを最大10枚ずつ Discord に投稿する。"""
+    if not DISCORD_GUIDANCE_WEBHOOK_URL or not images:
+        return
+
+    chunk_size = 10
+    for chunk_start in range(0, len(images), chunk_size):
+        chunk = images[chunk_start: chunk_start + chunk_size]
+        boundary = f"----GuidanceBotBulk{chunk_start}"
+        payload = {
+            "content": content if chunk_start == 0 else "",
+            "attachments": [{"id": i, "filename": fn} for i, (fn, _) in enumerate(chunk)],
+        }
+
+        def _part_json(d: str) -> bytes:
+            h = (f"--{boundary}\r\n"
+                 f'Content-Disposition: form-data; name="payload_json"\r\n'
+                 f"Content-Type: application/json\r\n\r\n")
+            return h.encode() + d.encode() + b"\r\n"
+
+        def _part_file(i: int, data: bytes, name: str) -> bytes:
+            h = (f"--{boundary}\r\n"
+                 f'Content-Disposition: form-data; name="files[{i}]"; filename="{name}"\r\n'
+                 f"Content-Type: image/png\r\n\r\n")
+            return h.encode() + data + b"\r\n"
+
+        body = _part_json(json.dumps(payload))
+        for i, (fn, data) in enumerate(chunk):
+            body += _part_file(i, data, fn)
+        body += f"--{boundary}--\r\n".encode()
+
+        req = urllib.request.Request(
+            DISCORD_GUIDANCE_WEBHOOK_URL, data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "User-Agent":   "akita-guidance-bot/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                print(f"[OK] Discord bulk HTTP {r.status} ({len(chunk)} files)")
+        except Exception as e:
+            print(f"[ERR] Discord bulk post: {e}")
+
+
 # =============================================================================
 # main
 # =============================================================================
@@ -742,7 +939,7 @@ def main():
               if report_dt else _jst_now().strftime("%Y/%m/%d %H:%M"))
     _notion_write(f"ガイダンス / {ts_str} JST", r2_urls, report_dt)
 
-    # Discord: 画像投稿
+    # Discord: JMA Pillow 画像投稿（1枚ずつ）
     if img1:
         _post_image(img1, "guidance_municipality.png",
                     content=f"<{JMA_FORECAST_PORTAL}>")
@@ -750,6 +947,13 @@ def main():
         _post_image(img2, "guidance_tanki.png")
     if img3:
         _post_image(img3, "guidance_shuukan.png")
+
+    # WCN スクリーンショット（MSM今日/明日・分布予報4要素・週間3要素）
+    wcn_images = screenshot_wcn_all()
+    if wcn_images:
+        _post_images_bulk(wcn_images, content="**WCN ガイダンス（MSM・分布予報・週間）**")
+    else:
+        print("[INFO] WCN スクリーンショットなし（スキップ）")
 
     # Discord: 参考リンク
     _post_text(
