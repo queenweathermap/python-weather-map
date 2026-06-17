@@ -216,31 +216,78 @@ def _wcn_click_pref(data_frame, pref: str) -> None:
         import time; time.sleep(0.4)
 
 
-def _tile_columns(img_bytes: bytes, n_cols: int = 5, header_px: int = 0) -> bytes:
-    """縦長画像を n_cols 列に分割して横並びにする。
-    header_px > 0 の場合、先頭 header_px ピクセルをヘッダーとして各タイルの先頭に複製する。
+def _tile_columns(img_bytes: bytes, n_cols: int = 5, header_px: int = 60) -> bytes:
+    """縦長画像をステーション境界で切って n_cols 列に横並びする。
+
+    ステーションヘッダー行（オレンジ/赤系）を検出し、
+    等分割目標に最も近い境界で切ることで途中切れを防ぐ。
+    header_px 行分をヘッダーとして各タイルに複製する。
     """
     try:
         from PIL import Image
         import io as _io
         img = Image.open(_io.BytesIO(img_bytes))
         W, H = img.size
-        hdr_h  = header_px
-        body_h = H - hdr_h
-        tile_h = -(-body_h // n_cols)  # ceil division
-        new_w  = W * n_cols
-        new_h  = hdr_h + tile_h
-        tiled  = Image.new("RGB", (new_w, new_h), (255, 255, 255))
-        if hdr_h > 0:
-            hdr = img.crop((0, 0, W, hdr_h))
-        for i in range(n_cols):
+        px = img.load()
+
+        # ── ステーションヘッダー行を検出 ──────────────────────
+        # WCN MSM のステーション見出しはオレンジ/赤系の帯
+        sample_xs = [max(1, W * k // 8) for k in range(1, 8)]  # 7点サンプル
+
+        def _is_orange_row(y: int) -> bool:
+            cnt = 0
+            for x in sample_xs:
+                try:
+                    rgb = px[x, y]
+                    r, g, b = rgb[0], rgb[1], rgb[2]
+                    if r > 180 and g < 150 and b < 120:
+                        cnt += 1
+                except Exception:
+                    pass
+            return cnt >= 4  # 7点中4点以上
+
+        # header_px 行より下でスキャン（先頭はヘッダー区画）
+        station_bounds: list[int] = []
+        prev_orange = False
+        for y in range(header_px, H):
+            cur = _is_orange_row(y)
+            if cur and not prev_orange:
+                station_bounds.append(y)
+            prev_orange = cur
+
+        print(f"[INFO] tile_columns: detected {len(station_bounds)} station boundaries")
+
+        # ── 等分割に最も近い境界で分割点を決定 ──────────────
+        body_h = H - header_px
+        split_ys: list[int] = [header_px]
+        for col in range(1, n_cols):
+            target_y = header_px + col * body_h // n_cols
+            # target_y を超えない中で最も近い station boundary
+            candidates = [b for b in station_bounds if b <= target_y]
+            if candidates:
+                best = max(candidates)  # target_y 直前の境界
+            else:
+                best = header_px  # フォールバック
+            if best != split_ys[-1]:
+                split_ys.append(best)
+        split_ys.append(H)
+
+        # 実際の列数（境界が足りない場合は減る可能性あり）
+        actual_cols = len(split_ys) - 1
+        tile_heights = [split_ys[i + 1] - split_ys[i] for i in range(actual_cols)]
+        max_tile_h = max(tile_heights) if tile_heights else body_h
+
+        hdr_img = img.crop((0, 0, W, header_px))
+        new_w = W * actual_cols
+        new_h = header_px + max_tile_h
+        tiled = Image.new("RGB", (new_w, new_h), (255, 255, 255))
+
+        for i in range(actual_cols):
             x = i * W
-            if hdr_h > 0:
-                tiled.paste(hdr, (x, 0))
-            y0 = hdr_h + i * tile_h
-            y1 = min(y0 + tile_h, H)
-            strip = img.crop((0, y0, W, y1))
-            tiled.paste(strip, (x, hdr_h))
+            tiled.paste(hdr_img, (x, 0))
+            strip = img.crop((0, split_ys[i], W, split_ys[i + 1]))
+            tiled.paste(strip, (x, header_px))
+
         buf = _io.BytesIO()
         tiled.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
