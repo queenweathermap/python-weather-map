@@ -45,6 +45,8 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
       R2_PREFIX: "amedas"
+      R2_RETENTION_DAYS: "21"
+      R2_CLEANUP_DRY_RUN: "0"
 
       # ------------------------------------------------------------
       # Notion（ログ保存）
@@ -88,3 +90,8 @@ jobs:
       - name: Run JMA Amedas
         run: |
           python scripts/jma_amedas.py
+
+      - name: Cleanup old R2 objects
+        if: always()
+        run: |
+          python scripts/r2_cleanup.py
