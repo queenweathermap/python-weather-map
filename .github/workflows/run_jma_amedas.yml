@@ -21,6 +21,19 @@ jobs:
 
       AMEDAS_RANK_TOP_N: "10"
 
+      # ------------------------------------------------------------
+      # WCN（気象キャスターネットワーク）会員ページの Basic 認証
+      # ------------------------------------------------------------
+      WEATHERCASTER_USER: ${{ secrets.WEATHERCASTER_USER }}
+      WEATHERCASTER_PASS: ${{ secrets.WEATHERCASTER_PASS }}
+
+      # ------------------------------------------------------------
+      # スクリーンショット設定
+      # ------------------------------------------------------------
+      GUIDANCE_VIEWPORT_WIDTH: "1400"
+      GUIDANCE_VIEWPORT_HEIGHT: "1200"
+      GUIDANCE_WAIT_MS: "3000"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,9 +45,19 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get install -y fonts-noto-cjk
-          pip install Pillow
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
+          fc-cache -f
+          pip install Pillow requests playwright
+
+      - name: Install Playwright browsers
+        run: |
+          playwright install chromium
 
       - name: Run JMA Amedas
         run: |
           python scripts/jma_amedas.py
+
+      - name: Screenshot WCN Amedas pages
+        run: |
+          python scripts/wcn_amedas.py
