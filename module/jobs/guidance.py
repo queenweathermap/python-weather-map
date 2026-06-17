@@ -355,39 +355,57 @@ def screenshot_wcn_all() -> List[Tuple[str, bytes]]:
 
             # ── MSM 府県時別 今日 (date=0) ・明日 (date=1) ──────────
             msm_day_labels = {0: "MSM 時別ガイダンス 今日", 1: "MSM 時別ガイダンス 明日"}
+
+            # MSM フォームの選択肢を最初の1回だけ確認
+            page.goto(WCN_MSM_URL, wait_until="networkidle", timeout=60_000)
+            _ff0 = page.frame(name="form_area")
+            if _ff0:
+                _fuken_opts = _ff0.locator('select[name="fuken"] option').all()
+                print("[DEBUG] fuken options:")
+                for _o in _fuken_opts:
+                    print(f"  value={_o.get_attribute('value')!r:20s}  text={_o.inner_text()!r}")
+                _date_opts = _ff0.locator('select[name="date"] option').all()
+                print("[DEBUG] date options:")
+                for _o in _date_opts:
+                    print(f"  value={_o.get_attribute('value')!r:20s}  text={_o.inner_text()!r}")
+
             for day_offset, day_lbl in [(0, "d0"), (1, "d1")]:
                 try:
                     page.goto(WCN_MSM_URL, wait_until="networkidle", timeout=60_000)
                     ff = page.frame(name="form_area")
                     if not ff:
                         raise RuntimeError("form_area not found")
-                    # fuken: label で試みて失敗したら options を列挙してデバッグ出力
+
+                    # fuken: label → 失敗したら部分一致
                     fuken_sel = ff.locator('select[name="fuken"]')
                     try:
                         fuken_sel.select_option(label=WCN_PREF)
                     except Exception:
                         opts = fuken_sel.locator("option").all_text_contents()
-                        print(f"[DEBUG] fuken options: {opts}")
-                        # 部分一致で選択（秋田県 → 秋田 など）
                         pref_short = WCN_PREF.replace("県", "").replace("府", "").replace("都", "")
                         matched = [o for o in opts if pref_short in o]
                         if matched:
                             fuken_sel.select_option(label=matched[0])
                         else:
                             raise RuntimeError(f"fuken option not found: {WCN_PREF}")
-                    ff.locator('select[name="date"]').select_option(value=str(day_offset))
+
+                    # date: index で選択（value が日付文字列のケースに対応）
+                    date_sel = ff.locator('select[name="date"]')
+                    date_sel.select_option(index=day_offset)
+
                     with page.expect_event("framenavigated", timeout=15_000):
-                        # submit ボタンは name 属性なしのケースも考慮
                         ff.locator('input[type="submit"]').first.click()
                     page.wait_for_timeout(WCN_WAIT_MS)
-                    # body 全体撮影（八森〜東成瀬 全地点）→ 横タイルに組み替え
+
+                    # body 全体撮影 → 横タイルに組み替え
                     raw = _shot_fullbody(page)
-                    # ヘッダー高さ: 指定がなければ画像高の約5%を使用
                     from PIL import Image as _PILImage
                     import io as _pil_io
                     _tmp = _PILImage.open(_pil_io.BytesIO(raw))
-                    hdr_px = WCN_MSM_HDR_PX if WCN_MSM_HDR_PX > 0 else max(30, _tmp.height // 20)
-                    print(f"[INFO] MSM tile: {WCN_MSM_COLS} cols, header={hdr_px}px, total_h={_tmp.height}px")
+                    # ヘッダーはタイトル行+時刻ラベル行のみ（約60px）
+                    # WCN_MSM_HEADER_PX で上書き可能
+                    hdr_px = WCN_MSM_HDR_PX if WCN_MSM_HDR_PX > 0 else 60
+                    print(f"[INFO] MSM {day_lbl} tile: {WCN_MSM_COLS} cols, header={hdr_px}px, total_h={_tmp.height}px")
                     tiled = _tile_columns(raw, n_cols=WCN_MSM_COLS, header_px=hdr_px)
                     img = _add_label_banner(tiled, msm_day_labels[day_offset])
                     fname = f"wcn_msm_{day_lbl}.png"
