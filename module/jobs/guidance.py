@@ -1105,19 +1105,105 @@ def _post_images_bulk(images: List[Tuple[str, bytes]], content: str = "") -> Non
 
 
 # =============================================================================
+# MSM R2 投稿ヘルパー
+# =============================================================================
+
+def _make_thumbnail(img_bytes: bytes, max_width: int = 1200) -> bytes:
+    """Discord 確認用サムネイル（JPEG）を生成する。"""
+    try:
+        from PIL import Image
+        import io as _io
+        img = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
+        if img.width > max_width:
+            new_h = max(1, int(img.height * (max_width / img.width)))
+            img = img.resize((max_width, new_h), Image.LANCZOS)
+        buf = _io.BytesIO()
+        img.save(buf, format="JPEG", quality=84, optimize=True, progressive=True)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[WARN] thumbnail 生成失敗: {e}")
+        return img_bytes
+
+
+def _post_msm_r2(img_bytes: bytes, thumb_name: str, content: str) -> None:
+    """MSM サムネイルを Discord に添付し、本文に R2 URL を記載する。
+    flags=4 (SUPPRESS_EMBEDS) で URL の自動プレビューを抑制し、
+    添付サムネイルだけをインライン表示する。
+    """
+    if not DISCORD_GUIDANCE_WEBHOOK_URL:
+        return
+    thumb = _make_thumbnail(img_bytes)
+    boundary = "----GuidanceMSMR2Thumb"
+    payload = {
+        "content": content,
+        "flags": 4,  # SUPPRESS_EMBEDS: URL プレビュー抑制、添付画像は表示
+        "attachments": [{"id": 0, "filename": thumb_name}],
+    }
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="payload_json"\r\n'
+        f"Content-Type: application/json\r\n\r\n"
+    ).encode() + json.dumps(payload).encode() + b"\r\n"
+    body += (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="files[0]"; filename="{thumb_name}"\r\n'
+        f"Content-Type: image/jpeg\r\n\r\n"
+    ).encode() + thumb + b"\r\n"
+    body += f"--{boundary}--\r\n".encode()
+
+    req = urllib.request.Request(
+        DISCORD_GUIDANCE_WEBHOOK_URL, data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "akita-guidance-bot/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            print(f"[OK] Discord MSM R2 thumb HTTP {r.status} ({thumb_name})")
+    except Exception as e:
+        print(f"[ERR] Discord MSM R2 thumb: {e}")
+
+
+# =============================================================================
 # main
 # =============================================================================
 
 def main():
     print("=== Start Guidance (WCN Screenshot) ===")
 
-    # WCN スクリーンショット一式
-    # MSM今日/明日・分布予報・週間ガイダンス・気象庁予報短期/週間
     wcn_images = screenshot_wcn_all()
-    if wcn_images:
-        _post_images_bulk(wcn_images, content="**WCN ガイダンス（MSM・分布予報・週間・気象庁予報）**")
-    else:
+    if not wcn_images:
         print("[INFO] WCN スクリーンショットなし（スキップ）")
+        print("=== Done ===")
+        return
+
+    retention = os.environ.get("R2_RETENTION_DAYS", "21")
+
+    # MSM（今日・明日）: R2 アップ → サムネイル + URL を Discord に投稿
+    msm_images  = [(fn, data) for fn, data in wcn_images if fn.startswith("wcn_msm_")]
+    other_images = [(fn, data) for fn, data in wcn_images if not fn.startswith("wcn_msm_")]
+
+    if msm_images:
+        msm_urls = _upload_r2(msm_images)
+        for (fname, data), url in zip(msm_images, msm_urls):
+            day_label = "今日" if "d0" in fname else "明日"
+            if url:
+                content = (
+                    f"**MSM 時別ガイダンス {day_label}（秋田県全地点）**\n"
+                    f"高解像度PNG（R2 / {retention}日保存）:\n"
+                    f"{url}"
+                )
+                thumb_name = fname.replace(".png", "_thumb.jpg")
+                _post_msm_r2(data, thumb_name, content)
+            else:
+                # R2 失敗時はそのまま Discord に直接投稿
+                _post_images_bulk([(fname, data)], content=f"**MSM 時別ガイダンス {day_label}**")
+
+    # 分布予報・週間ガイダンス・JMA予報: 直接 Discord 投稿
+    if other_images:
+        _post_images_bulk(other_images, content="**WCN ガイダンス（分布予報・週間・気象庁予報）**")
 
     print("=== Done ===")
 
