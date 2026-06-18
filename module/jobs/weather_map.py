@@ -1268,8 +1268,6 @@ def notify_discord_images(
         else:
             print(f"[WARN] Discord post skipped: no file and no URL for {filename}")
 
-    # NotionリンクはDiscordへ出さない。必要な入口リンクだけ最後に出す。
-    post_discord_text(discord_links_text())
 
 
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
