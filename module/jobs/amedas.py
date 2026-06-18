@@ -1118,7 +1118,7 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                 print(f"[DEBUG] factorNo labels={factor_labels}")
 
                 WANT_KEYWORDS = {
-                    "rain3h": ["降水量", "3時間", "rain3", "雨量", "precipitation"],
+                    "rain3h": ["3時間降水量", "3時間降水", "3時間", "rain3"],
                     "tmax":   ["最高気温", "最高", "tmax"],
                     "tmin":   ["最低気温", "最低", "tmin"],
                     "wmax":   ["最大風速", "最大風", "wmax", "風速"],
