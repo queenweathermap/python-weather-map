@@ -49,7 +49,15 @@ def take_screenshots():
                 page.wait_for_load_state("networkidle", timeout=30000)
             except Exception:
                 pass
-            time.sleep(4)  # JS描画の待機
+            # SPA のハッシュルーティングが処理されるまで待つ。
+            # 404テキストが消えるか、最大20秒待機。
+            for _ in range(10):
+                time.sleep(2)
+                is_404 = page.evaluate(
+                    "() => document.body.innerText.includes('指定されたページは存在しません')"
+                )
+                if not is_404:
+                    break
             img_bytes = page.screenshot(full_page=True)
             screenshots.append({**item, "data": img_bytes})
         browser.close()
