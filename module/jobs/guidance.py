@@ -1456,7 +1456,7 @@ def main():
     # JMA アドバイザー ガイダンス帳票
     adv_images = screenshot_jma_advisor()
     if adv_images:
-        _post_images_bulk(adv_images, content="**気象防災アドバイザー ガイダンス帳票**")
+        _post_images_bulk(adv_images, content="**気象防災アドバイザー ガイダンス帳票**\n[気象防災アドバイザー向け資料集](<https://www.jma.go.jp/bosai/advisor/>)")
 
     print("=== Done ===")
 
