@@ -973,18 +973,19 @@ def main() -> None:
                         f"{model_name} {item.label}: {e}"
                     )
 
-    try:
-        notify_discord_adv_complete(
-            page_id=page_id,
-            errors=errors,
-            attach_count=total_gifs,
-        )
+    if errors:
+        try:
+            notify_discord_adv_complete(
+                page_id=page_id,
+                errors=errors,
+                attach_count=total_gifs,
+            )
 
-        if discord_adv_enabled():
-            print("[OK] Discord complete sent")
+            if discord_adv_enabled():
+                print("[OK] Discord complete sent")
 
-    except Exception as e:
-        print(f"[WARN] Discord complete send failed: {e}")
+        except Exception as e:
+            print(f"[WARN] Discord complete send failed: {e}")
 
     print(
         "\n=== Done ADV JMA TGV GIF ===\n"
