@@ -753,7 +753,7 @@ def _post_image(image_bytes: bytes, filename: str, content: str = ""):
 # main
 # =============================================================================
 
-def main():
+def main(post_discord: bool = True) -> List[Tuple[str, bytes]]:
     print("=== Start Amedas ===")
 
     jst_now, latest_utc = _parse_latest()
@@ -781,21 +781,7 @@ def main():
     detail_headers = ["日時", "気温℃", "前1h降水mm", "日積算降水mm", "風向", "風速m/s", "日照h", "湿度%"]
     detail_right   = {1, 2, 3, 5, 6, 7}
 
-    # 秋田県一覧
-    headers, rows = _fmt_akita_rows(results)
-    img1 = _draw_table_img(
-        title=f"アメダス 秋田県  {ts_hourly_str}  （日最高/日最低は0:00〜現在）",
-        headers=headers,
-        rows=rows,
-        right_align_cols={1, 2, 3, 4, 6, 7},
-    )
-    print(f"[INFO] akita image: {len(img1)} bytes")
-
-    # 全国ランキング
-    img2 = _draw_ranking_img(rankings, ts_hourly_jst)
-    print(f"[INFO] ranking image: {len(img2)} bytes")
-
-    # 3地点 時系列詳細
+    # 3地点 時系列詳細（鷹巣・秋田・横手）
     detail_imgs: List[Tuple[str, bytes]] = []
     for code, name in DETAIL_STATIONS:
         rows_d = _station_detail_rows(maps, ts_list, code, jst_today_start_utc)
@@ -809,11 +795,7 @@ def main():
         detail_imgs.append((f"amedas_detail_{name}.png", img_d))
 
     # R2 アップロード
-    img_items: List[Tuple[str, bytes]] = [
-        ("amedas_akita.png",    img1),
-        ("amedas_ranking.png",  img2),
-    ] + detail_imgs
-    r2_urls = _upload_r2(img_items, jst_now)
+    r2_urls = _upload_r2(detail_imgs, jst_now)
 
     # Notion 書き込み
     _notion_write(
@@ -822,11 +804,13 @@ def main():
         jst_now,
     )
 
-    # Discord 投稿（順序は変わらず）
-    _post_image(img1, "amedas_akita.png", content=f"<{JMA_AMEDAS_URL}>")
-    _post_image(img2, "amedas_ranking.png")
-    for fname, img_d in detail_imgs:
-        _post_image(img_d, fname)
+    # Discord 投稿（呼び出し元が制御する場合は skip）
+    if post_discord:
+        for i, (fname, img_d) in enumerate(detail_imgs):
+            content = f"<{JMA_AMEDAS_URL}>" if i == 0 else ""
+            _post_image(img_d, fname, content=content)
+
+    return detail_imgs
 
     print("=== Done ===")
 
@@ -946,22 +930,62 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
             return False
 
     def _shot_pref_section(page) -> bytes:
-        """data_area を秋田アンカーへスクロールしてビューポート撮影。"""
+        """秋田セクションだけを切り抜いて返す。
+        秋田アンカー → 次都道府県アンカー直前までを PIL でクロップ。
+        """
         df = page.frame(name="data_area")
         if not df:
             raise RuntimeError("data_area not found")
-        # アンカー ID でスクロール（location.hash 経由）
-        try:
-            df.evaluate(f"location.hash = '#{ALLAMEDAS_ANCHOR}'")
-            page.wait_for_timeout(400)
-            df.evaluate("window.scrollBy(0, -40)")
-        except Exception:
-            pass
+
+        # 全高展開してから Y 座標を取得（scroll=0 にすると getBoundingClientRect が絶対Y値になる）
+        scroll_h = df.evaluate("document.body.scrollHeight")
         page.evaluate(
-            f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{WCN_VP_H}px'"
+            f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{scroll_h}px'"
         )
+        page.wait_for_timeout(300)
+        df.evaluate("window.scrollTo(0, 0)")
         page.wait_for_timeout(200)
-        return page.locator('iframe[name="data_area"]').screenshot()
+
+        # 秋田アンカーと次都道府県アンカーの Y 位置を取得
+        pos = df.evaluate(f"""
+            (() => {{
+                const anchor = '{ALLAMEDAS_ANCHOR}';
+                const all = Array.from(document.querySelectorAll('a[name], [id]'));
+                let akitaY = null, nextY = null;
+                for (let i = 0; i < all.length; i++) {{
+                    const name = all[i].getAttribute('name') || all[i].id;
+                    if (name === anchor) {{
+                        akitaY = all[i].getBoundingClientRect().top;
+                    }} else if (akitaY !== null && nextY === null) {{
+                        const y = all[i].getBoundingClientRect().top;
+                        if (y > akitaY + 80) nextY = y;
+                    }}
+                }}
+                return {{
+                    akita: akitaY ?? 0,
+                    next: nextY ?? document.body.scrollHeight
+                }};
+            }})()
+        """)
+        akita_y = int(pos.get("akita", 0))
+        next_y  = int(pos.get("next",  scroll_h))
+        print(f"[DEBUG] allamedas 秋田Y={akita_y} 次県Y={next_y}")
+
+        # 全高撮影してから PIL でクロップ
+        raw_full = page.locator('iframe[name="data_area"]').screenshot()
+
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.open(io.BytesIO(raw_full))
+            y0 = max(0, akita_y - 20)         # 秋田ヘッダーの少し上から
+            y1 = min(img.height, next_y + 10)  # 次都道府県ヘッダーの直後で切る
+            cropped = img.crop((0, y0, img.width, y1))
+            buf = io.BytesIO()
+            cropped.save(buf, "PNG")
+            return buf.getvalue()
+        except Exception as e:
+            print(f"[WARN] PIL crop failed: {e} — 全高撮影を返す")
+            return raw_full
 
     def _compose_2x2(img_bytes_list: List[bytes], pad: int = 6) -> bytes:
         """4枚以内の画像を 2列グリッドに合成して PNG バイト列を返す。"""
@@ -984,7 +1008,10 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         return buf.getvalue()
 
     def _shot_ranking_tables(page) -> List[bytes]:
-        """ranking data_area の12テーブルを個別撮影して返す。"""
+        """ranking data_area のランキングテーブルを個別撮影して返す。
+        「順位」列ヘッダーを持つテーブルだけを対象にすることで
+        ナビゲーション等の余分なテーブルを除外する。
+        """
         df = page.frame(name="data_area")
         if not df:
             raise RuntimeError("data_area not found")
@@ -996,17 +1023,26 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         page.wait_for_timeout(500)
         table_imgs: List[bytes] = []
         tables = df.locator("table").all()
-        print(f"[DEBUG] ranking tables found: {len(tables)}")
+        print(f"[DEBUG] total tables in data_area: {len(tables)}")
         for i, tbl in enumerate(tables):
             try:
                 bb = tbl.bounding_box()
-                if not bb or bb["height"] < 80:
+                if not bb:
+                    continue
+                # ランキングテーブルは「順位」か「地点名」列ヘッダーを持つ
+                # （空の積雪深テーブルもヘッダーは存在するため捕捉できる）
+                is_ranking = tbl.locator(
+                    "th:has-text('順位'), th:has-text('地点名')"
+                ).count() > 0
+                if not is_ranking:
+                    print(f"[DEBUG] table[{i}] h={bb['height']:.0f} → skip (no rank header)")
                     continue
                 raw = tbl.screenshot()
                 table_imgs.append(raw)
-                print(f"[DEBUG] table[{i}] {bb['width']:.0f}x{bb['height']:.0f}")
+                print(f"[DEBUG] table[{i}] h={bb['height']:.0f} → captured")
             except Exception as e:
-                print(f"[WARN] table[{i}] skip: {e}")
+                print(f"[WARN] table[{i}] error: {e}")
+        print(f"[DEBUG] ranking tables captured: {len(table_imgs)}")
         return table_imgs
 
     with sync_playwright() as pw:
