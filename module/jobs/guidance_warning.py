@@ -187,6 +187,11 @@ def amedas_name_map():
 #   exceed: {地点名: set(要素キー)}            … 差分判定用
 #   lines:  {(地点名, 要素キー): 表示行}        … しきい値超えの表示文
 #   ref:    [(ソート値, 参考表示行), ...]        … 予想ピーク参考（しきい値未満も含む）
+def _row(area, label, peak, when, thresh):
+    """lines dict の共通構造。"""
+    return {"area": area, "label": label, "peak": peak, "when": when, "thresh": thresh}
+
+
 def scan_rain(data, init_iso):
     name_map = area_name_map()
     exceed, lines, ref = {}, {}, []
@@ -202,14 +207,13 @@ def scan_rain(data, init_iso):
             name = name_map.get(code, code)
             peak = max(values)
             label_e = ELEM_LABEL.get(elem, elem)
-            ref.append((peak, f"・{name} {label_e}：最大 {peak}mm"))
+            ref.append((peak, {"label": f"{name} {label_e}", "peak": f"{peak}mm"}))
             if peak >= th:
                 idx = values.index(peak)
                 lab = fmt_jst(labels[idx]) if labels and idx < len(labels) else None
                 when = f"（{lab}頃）" if lab else ""
                 exceed.setdefault(name, set()).add(elem)
-                lines[(name, elem)] = (
-                    f"{name} {label_e}：最大 {peak}mm{when}予想 ※しきい値 {th}mm")
+                lines[(name, elem)] = _row(name, label_e, f"{peak}mm", when, f"{th}mm")
     return exceed, lines, ref
 
 
@@ -232,12 +236,11 @@ def scan_wind(data):
         dirs = area.get("windDirections", [])
         wdir = dirs[idx] if idx < len(dirs) else ""
         name = name_map.get(code, code)
-        ref.append((peak, f"・{name} 風：最大 {peak:.1f}m/s"))
+        ref.append((peak, {"label": f"{name} 風", "peak": f"{peak:.1f}m/s"}))
         if peak >= WIND_MS:
             exceed.setdefault(name, set()).add("wind")
             wd = f"（{wdir}）" if wdir else ""
-            lines[(name, "wind")] = (
-                f"{name} 風：最大風速 {peak:.1f}m/s{wd} 予想 ※しきい値 {WIND_MS:.0f}m/s")
+            lines[(name, "wind")] = _row(name, "最大風速", f"{peak:.1f}m/s", wd, f"{WIND_MS:.0f}m/s")
     return exceed, lines, ref
 
 
@@ -287,16 +290,15 @@ def scan_cold(series):
         if not pts:
             continue
         parts = []
-        # 気温（絶対値）。期間内の最低＝最も強い寒気。
         dt_min, vmin = min(pts, key=lambda p: p[1])
         parts.append(f"気温 最低 {vmin:.1f}℃")
         tthr = COLD_THRESHOLDS.get(lv)
         if tthr is not None and vmin <= tthr:
             e = f"cold{lv}"
             exceed.setdefault(name, set()).add(e)
-            lines[(name, e)] = (f"{name} {lv}hPa気温：最低 {vmin:.1f}℃"
-                                f"（{fmt_jst(dt_min)}頃）予想 ※しきい値 {tthr:.0f}℃以下")
-        # 平年差 = 予報℃ − (平年K − 273.15)。期間内で最も平年を下回るコマ。
+            lines[(name, e)] = _row(
+                name, f"{lv}hPa気温", f"{vmin:.1f}℃",
+                f"（{fmt_jst(dt_min)}頃）", f"{tthr:.0f}℃以下")
         clim = (tave or {}).get(lv, {}).get(COLD_WMO)
         if clim:
             devs = [(dt, val - (clim[_tave_index(dt)] - 273.15))
@@ -308,9 +310,10 @@ def scan_cold(series):
                 if dthr is not None and dmin <= dthr:
                     e = f"colddev{lv}"
                     exceed.setdefault(name, set()).add(e)
-                    lines[(name, e)] = (f"{name} {lv}hPa平年差：最低 {dmin:+.1f}℃"
-                                        f"（{fmt_jst(dt_d)}頃）予想 ※しきい値 {dthr:+.0f}℃以下")
-        ref.append((order, f"・{name} {lv}hPa：" + " ／ ".join(parts)))
+                    lines[(name, e)] = _row(
+                        name, f"{lv}hPa平年差", f"{dmin:+.1f}℃",
+                        f"（{fmt_jst(dt_d)}頃）", f"{dthr:+.0f}℃以下")
+        ref.append((order, {"label": f"{name} {lv}hPa", "peak": " ／ ".join(parts)}))
     return exceed, lines, ref
 
 
@@ -418,31 +421,147 @@ def main():
         save_state(exceed)
         return
 
-    def disp(a, e):
-        return lines.get((a, e), f"{a} {ELEM_LABEL.get(e, e)}")
+    def _tbl(headers, rows):
+        sep = "|" + "|".join(":---" for _ in headers) + "|"
+        hdr = "|" + "|".join(headers) + "|"
+        body = "\n".join("|" + "|".join(str(c) for c in r) + "|" for r in rows)
+        return f"{hdr}\n{sep}\n{body}"
+
+    # 沿岸・内陸の列名を lines から自動検出（秋田県沿岸→沿岸、秋田県内陸→内陸）
+    all_areas = sorted({k[0] for k in lines})
+    coast_areas  = [a for a in all_areas if "沿岸" in a]
+    inland_areas = [a for a in all_areas if "内陸" in a]
+    area_cols = coast_areas + inland_areas   # 沿岸 → 内陸 の順
+    area_short = {a: a.replace("秋田県", "") for a in area_cols}  # 表示用短縮名
+
+    def _rain_pivot_tbl(src_pairs):
+        """降水: 行=要素, 列=沿岸/内陸。src_pairs = [(area,elem),...] のうち rain 要素のみ。"""
+        by_elem: dict = {}
+        thresh_by: dict = {}
+        for area, elem in src_pairs:
+            if elem not in ELEMENTS:
+                continue
+            d = lines.get((area, elem))
+            if isinstance(d, dict):
+                by_elem.setdefault(elem, {})[area] = d
+                thresh_by[elem] = d["thresh"]
+        if not by_elem:
+            return None
+        cols = area_cols or sorted({a for v in by_elem.values() for a in v})
+        short = {a: area_short.get(a, a) for a in cols}
+        hdrs = ["要素"] + [short[a] for a in cols] + ["※しきい値"]
+        rows = []
+        for elem in ELEMENTS:
+            if elem not in by_elem:
+                continue
+            row = [ELEM_LABEL.get(elem, elem)]
+            for area in cols:
+                d = by_elem[elem].get(area)
+                row.append(f"{d['peak']}{d['when']}" if d else "−")
+            row.append(thresh_by.get(elem, "−"))
+            rows.append(row)
+        return _tbl(hdrs, rows) if rows else None
+
+    def _wind_tbl(src_pairs):
+        """風: 行=地点, 列=予想/しきい値。"""
+        rows = []
+        for area, elem in sorted(src_pairs):
+            if elem != "wind":
+                continue
+            d = lines.get((area, elem))
+            if isinstance(d, dict):
+                rows.append([d["area"], f"{d['peak']}{d['when']}", d["thresh"]])
+        return _tbl(["地点", "予想最大", "※しきい値"], rows) if rows else None
+
+    def _cold_tbl(src_pairs):
+        """寒気: 行=気圧面, 列=予想/しきい値。"""
+        rows = []
+        for area, elem in sorted(src_pairs):
+            if not elem.startswith("cold"):
+                continue
+            d = lines.get((area, elem))
+            if isinstance(d, dict):
+                rows.append([d["label"], f"{d['peak']}{d['when']}", d["thresh"]])
+        return _tbl(["気圧面・種別", "予想最低", "※しきい値"], rows) if rows else None
+
+    def _section(title, pairs):
+        """タイトル + 降水/風/寒気 のテーブルをまとめてブロック文字列に。"""
+        tbls = []
+        rt = _rain_pivot_tbl(pairs)
+        if rt:
+            tbls.append("降水\n" + rt)
+        wt = _wind_tbl(pairs)
+        if wt:
+            tbls.append("風\n" + wt)
+        ct = _cold_tbl(pairs)
+        if ct:
+            tbls.append("寒気\n" + ct)
+        if not tbls:
+            return None
+        return title + "\n" + "\n".join(tbls)
 
     # --- アラートテキスト組み立て ---
-    blocks = []
-    if added:
-        blocks.append("🆕 **しきい値到達（予想）**\n" + "\n".join(
-            disp(a, e) for a, e in sorted(added)))
-    if cleared:
-        blocks.append("✅ **しきい値を下回った（予想）**\n" + "\n".join(
-            f"{a} {ELEM_LABEL.get(e, e)}：しきい値未満に" for a, e in sorted(cleared)))
-    if exceed:
-        now = ["・" + disp(a, e) for a in sorted(exceed) for e in sorted(exceed[a])]
-        blocks.append("**現在しきい値超えの予想**\n" + "\n".join(now))
-    if ref:
-        blocks.append("**参考：予想ピーク**\n" + "\n".join(t for _, t in ref))
+    note = (f"-# 数値予報ガイダンス {MODEL.upper()}（降水={FILTER}）"
+            f"・予測値で正式警報ではありません／初期時刻 {init_iso}")
+    blocks = [note]
 
-    footer_line = (f"数値予報ガイダンス {MODEL.upper()}（降水={FILTER}）"
-                   f" ・予測値で正式警報ではありません／初期時刻 {init_iso}")
+    if added:
+        b = _section("🆕 **しきい値到達（予想）**", sorted(added))
+        if b:
+            blocks.append(b)
+    if cleared:
+        rows = [[f"{ELEM_LABEL.get(e, e)}", a.replace("秋田県", ""), "しきい値未満に"]
+                for a, e in sorted(cleared)]
+        blocks.append("✅ **しきい値を下回った（予想）**\n"
+                      + _tbl(["要素", "地域", "状態"], rows))
+    if exceed:
+        pairs = [(a, e) for a in sorted(exceed) for e in sorted(exceed[a])]
+        b = _section("**現在しきい値超えの予想**", pairs)
+        if b:
+            blocks.append(b)
+    if ref:
+        rain_ref = [(sv, r) for sv, r in ref
+                    if not any(k in r["label"] for k in ("hPa", "風"))]
+        wind_ref = [(sv, r) for sv, r in ref if "風" in r["label"]]
+        cold_ref = [(sv, r) for sv, r in ref if "hPa" in r["label"]]
+        ref_tbls = []
+        if rain_ref:
+            # 降水参考: 行=要素, 列=沿岸/内陸 にピボット
+            by_elem_ref: dict = {}
+            for _, r in rain_ref:
+                lbl = r["label"]  # "秋田県沿岸 降水1時間" など
+                for area in area_cols:
+                    short_a = area_short.get(area, area)
+                    if area in lbl or short_a in lbl:
+                        elem_name = lbl.replace(area, "").replace(short_a, "").strip()
+                        by_elem_ref.setdefault(elem_name, {})[area] = r["peak"]
+                        break
+                else:
+                    # マッチしない場合はそのまま
+                    by_elem_ref.setdefault(lbl, {})[""] = r["peak"]
+            if by_elem_ref:
+                cols = area_cols or [""]
+                short = {a: area_short.get(a, a) for a in cols}
+                hdrs = ["要素"] + [short.get(a, a) for a in cols]
+                rows = []
+                for elem_name, col_data in by_elem_ref.items():
+                    row = [elem_name] + [col_data.get(a, "−") for a in cols]
+                    rows.append(row)
+                ref_tbls.append("降水\n" + _tbl(hdrs, rows))
+        if wind_ref:
+            rows = [[r["label"].replace(" 風", ""), r["peak"]] for _, r in wind_ref[:8]]
+            ref_tbls.append("風\n" + _tbl(["地点", "予想最大"], rows))
+        if cold_ref:
+            rows = [[r["label"], r["peak"]] for _, r in cold_ref]
+            ref_tbls.append("寒気\n" + _tbl(["気圧面", "気温 ／ 平年差"], rows))
+        if ref_tbls:
+            blocks.append("**参考：予想ピーク**\n" + "\n".join(ref_tbls))
+
     payload = {
         "embeds": [{
             "title": "🌧️💨🥶 秋田県 ガイダンス予測アラート（降水・風・寒気）",
             "description": "\n\n".join(blocks)[:4000],
             "color": 0x1E88E5,
-            "footer": {"text": footer_line[:2048]},
         }]
     }
     print("通知:", send_discord(payload))
