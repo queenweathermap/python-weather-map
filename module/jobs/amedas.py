@@ -1097,13 +1097,40 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                 form_action = ff.evaluate(
                     "document.querySelector('form')?.action || ''"
                 )
-                select_name_attr = ff.evaluate(
-                    "document.querySelector('select')?.name || 'element'"
-                )
-                form_opts = ff.evaluate("""
-                    Array.from(document.querySelector('select')?.options || [])
-                        .map(o => ({v: o.value, t: o.text.trim()}))
+                # 全 select を読んで年選択以外（要素種別）の select を探す
+                all_selects = ff.evaluate("""
+                    Array.from(document.querySelectorAll('select')).map(sel => ({
+                        name: sel.name,
+                        opts: Array.from(sel.options).map(o => ({v: o.value, t: o.text.trim()}))
+                    }))
                 """)
+                print(f"[DEBUG] allamedas all_selects={all_selects}")
+
+                # 年選択（value が 4桁数字）以外を要素種別 select とみなす
+                elem_select = None
+                for sel_info in all_selects:
+                    opts = sel_info["opts"]
+                    if opts and not opts[0]["v"].isdigit():
+                        elem_select = sel_info
+                        break
+                    # 4桁でない値を含む select なら要素種別
+                    if opts and len(opts[0]["v"]) != 4:
+                        elem_select = sel_info
+                        break
+                # 見つからなければ年以外の最初の select
+                if elem_select is None:
+                    for sel_info in all_selects:
+                        if sel_info["name"] != "nen":
+                            elem_select = sel_info
+                            break
+                # それでも見つからなければ 2番目の select
+                if elem_select is None and len(all_selects) >= 2:
+                    elem_select = all_selects[1]
+
+                if elem_select:
+                    select_name_attr = elem_select["name"]
+                    form_opts = elem_select["opts"]
+
                 print(
                     f"[DEBUG] allamedas form: method={form_method} "
                     f"action={form_action} select={select_name_attr}"
@@ -1139,10 +1166,13 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         def _switch_element(opt_value: str) -> None:
             """フォーム送信 or data_area 直接ナビゲートで要素を切り替える。"""
             if ff and form_method == "post":
-                # POST フォーム: select を書き換えてから form.submit()
+                # POST フォーム: 要素種別 select を書き換えてから form.submit()
                 ff.evaluate(f"""
                     (() => {{
-                        const sel = document.querySelector('select');
+                        const sname = {repr(select_name_attr)};
+                        const sel = document.querySelector('select[name="' + sname + '"]')
+                                 || document.querySelectorAll('select')[1]
+                                 || document.querySelector('select');
                         if (sel) sel.value = '{opt_value}';
                         const frm = document.querySelector('form');
                         if (frm) frm.submit();
