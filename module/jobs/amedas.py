@@ -1029,11 +1029,12 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                 bb = tbl.bounding_box()
                 if not bb:
                     continue
-                # ランキングテーブルは「順位」か「地点名」列ヘッダーを持つ
-                # （空の積雪深テーブルもヘッダーは存在するため捕捉できる）
-                is_ranking = tbl.locator(
-                    "th:has-text('順位'), th:has-text('地点名')"
-                ).count() > 0
+                # ランキングテーブルの判定:
+                # th/td 問わず「順位」または「地点名」テキストを持つセルがある
+                is_ranking = (
+                    tbl.locator("th, td").filter(has_text="順位").count() > 0
+                    or tbl.locator("th, td").filter(has_text="地点名").count() > 0
+                )
                 if not is_ranking:
                     print(f"[DEBUG] table[{i}] h={bb['height']:.0f} → skip (no rank header)")
                     continue
@@ -1054,25 +1055,86 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         page = ctx.new_page()
 
         # ---- 1. allamedas.html ----------------------------------------
-        # allamedas_2.cgi は要素別ページ直接URL方式で取得
-        # form_area でページを開いたあと select を変更して送信
+        # 最初のロードでフォームオプションを読み、キーワードで value を特定する。
+        # その後 data_area に直接 URL ナビゲートして確実に切り替える。
         ALLAMEDAS_ITEMS = [
-            ("rain3h", "wcn_amedas_rain3h.png", "アメダス 3時間降水量"),
-            ("tmax",   "wcn_amedas_tmax.png",   "アメダス 最高気温"),
-            ("tmin",   "wcn_amedas_tmin.png",   "アメダス 最低気温"),
-            ("wmax",   "wcn_amedas_wmax.png",   "アメダス 最大風速"),
-            ("humin",  "wcn_amedas_humin.png",  "アメダス 最小湿度"),
-            ("snow",   "wcn_amedas_snow.png",   "アメダス 積雪深"),
+            ("rain3h", "wcn_amedas_rain3h.png", "アメダス 3時間降水量",
+             ["降水量", "3時間降水", "rain3", "雨量"]),
+            ("tmax",   "wcn_amedas_tmax.png",   "アメダス 最高気温",
+             ["最高気温", "tmax", "最高"]),
+            ("tmin",   "wcn_amedas_tmin.png",   "アメダス 最低気温",
+             ["最低気温", "tmin", "最低"]),
+            ("wmax",   "wcn_amedas_wmax.png",   "アメダス 最大風速",
+             ["最大風速", "wmax", "風速"]),
+            ("humin",  "wcn_amedas_humin.png",  "アメダス 最小湿度",
+             ["最小湿度", "humin", "湿度"]),
+            ("snow",   "wcn_amedas_snow.png",   "アメダス 積雪深",
+             ["積雪深", "snow", "積雪"]),
         ]
-        _debug_done = False
-        for value, fname, lbl in ALLAMEDAS_ITEMS:
+
+        # 最初のロードでフォーム構造を解析
+        page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
+        _wait(page)
+        _debug_form(page)
+
+        ff = page.frame(name="form_area")
+        form_opts: List[dict] = []
+        data_cgi_base = ""
+        select_name_attr = "element"
+        if ff:
             try:
-                page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
-                _wait(page)
-                if not _debug_done:
-                    _debug_form(page)
-                    _debug_done = True
-                _submit_form_value(page, "element", value)
+                form_opts = ff.evaluate("""
+                    Array.from(document.querySelector('select')?.options || [])
+                        .map(o => ({v: o.value, t: o.text.trim()}))
+                """)
+                select_name_attr = ff.evaluate(
+                    "document.querySelector('select')?.name || 'element'"
+                )
+                action = ff.evaluate(
+                    "document.querySelector('form')?.action || ''"
+                )
+                print(f"[DEBUG] form action={action} select_name={select_name_attr}")
+                print(f"[DEBUG] form_opts={form_opts}")
+                # data_area の現在 URL からベースを取得
+                df_tmp = page.frame(name="data_area")
+                if df_tmp:
+                    data_cgi_base = df_tmp.url.split("?")[0]
+                if not data_cgi_base and action:
+                    data_cgi_base = action
+            except Exception as e:
+                print(f"[WARN] form parse failed: {e}")
+
+        # キーワードで option value を特定
+        elem_value_map: dict = {}
+        for elem_key, _, _, keywords in ALLAMEDAS_ITEMS:
+            for opt in form_opts:
+                if any(kw in opt["t"] for kw in keywords):
+                    elem_value_map[elem_key] = opt["v"]
+                    print(f"[INFO] {elem_key} → value={opt['v']} ({opt['t']})")
+                    break
+            if elem_key not in elem_value_map:
+                print(f"[WARN] {elem_key}: form option not found, using key as-is")
+                elem_value_map[elem_key] = elem_key
+
+        for elem_key, fname, lbl, _ in ALLAMEDAS_ITEMS:
+            try:
+                opt_value = elem_value_map[elem_key]
+
+                if data_cgi_base:
+                    # data_area に直接ナビゲート（最も確実）
+                    df = page.frame(name="data_area")
+                    target_url = (
+                        f"{data_cgi_base}?{select_name_attr}={opt_value}"
+                        f"#{ALLAMEDAS_ANCHOR}"
+                    )
+                    df.goto(target_url, wait_until="networkidle", timeout=30_000)
+                    page.wait_for_timeout(WCN_WAIT_MS)
+                else:
+                    # フォールバック: フォーム送信
+                    page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
+                    _wait(page)
+                    _submit_form_value(page, select_name_attr, opt_value)
+
                 raw = _shot_pref_section(page)
                 img = _wcn_label_banner(raw, lbl)
                 results.append((fname, img))
