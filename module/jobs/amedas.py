@@ -753,7 +753,7 @@ def _post_image(image_bytes: bytes, filename: str, content: str = ""):
 # main
 # =============================================================================
 
-def main(post_discord: bool = True) -> List[Tuple[str, bytes]]:
+def main(post_discord: bool = True, post_notion: bool = True) -> List[Tuple[str, bytes]]:
     print("=== Start Amedas ===")
 
     jst_now, latest_utc = _parse_latest()
@@ -798,11 +798,12 @@ def main(post_discord: bool = True) -> List[Tuple[str, bytes]]:
     r2_urls = _upload_r2(detail_imgs, jst_now)
 
     # Notion 書き込み
-    _notion_write(
-        f"AMeDAS 秋田 / {ts_hourly_str}",
-        r2_urls,
-        jst_now,
-    )
+    if post_notion:
+        _notion_write(
+            f"AMeDAS 秋田 / {ts_hourly_str}",
+            r2_urls,
+            jst_now,
+        )
 
     # Discord 投稿（呼び出し元が制御する場合は skip）
     if post_discord:
@@ -810,7 +811,7 @@ def main(post_discord: bool = True) -> List[Tuple[str, bytes]]:
             content = f"<{JMA_AMEDAS_URL}>" if i == 0 else ""
             _post_image(img_d, fname, content=content)
 
-    return detail_imgs
+    return detail_imgs, r2_urls
 
     print("=== Done ===")
 
@@ -1227,23 +1228,26 @@ def post_wcn_amedas_to_discord(images: List[Tuple[str, bytes]]) -> None:
         _post_multipart([item], content="**アメダスランキング（WCN）**" if i == 0 else "")
 
 
-def main_wcn() -> None:
+def main_wcn(post_notion: bool = True) -> Tuple[List[Tuple[str, bytes]], List[str]]:
     """WCN アメダス観測値・ランキング: スクリーンショット → R2 → Discord → Notion。"""
     jst_now = datetime.now(JST)
     images = screenshot_wcn_amedas_pages()
     if not images:
         print("[INFO] WCN アメダス画像なし — スキップ")
-        return
+        return [], []
 
     r2_urls = _upload_r2(images, jst_now)
     post_wcn_amedas_to_discord(images)
 
-    ts = jst_now.strftime("%m/%d %H:%M")
-    _notion_write(
-        title=f"WCN アメダス観測値・ランキング / {ts}",
-        r2_urls=r2_urls,
-        jst_now=jst_now,
-    )
+    if post_notion:
+        ts = jst_now.strftime("%m/%d %H:%M")
+        _notion_write(
+            title=f"WCN アメダス観測値・ランキング / {ts}",
+            r2_urls=r2_urls,
+            jst_now=jst_now,
+        )
+
+    return images, r2_urls
 
 
 if __name__ == "__main__":
