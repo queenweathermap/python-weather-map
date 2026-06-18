@@ -1141,30 +1141,20 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         else:
             print("[WARN] form_area frame not found")
 
-        # data_area の構造を調べる（要素切り替えリンク / ラジオボタン / ヘッダーの確認）
-        df_check = page.frame(name="data_area")
-        if df_check:
+        # form_area の hidden inputs と全入力要素を確認（要素種別の hidden field 探し）
+        if ff:
             try:
-                nav_links = df_check.evaluate("""
-                    Array.from(document.querySelectorAll('a[href]')).slice(0,30).map(a => ({
-                        href: a.href,
-                        text: a.innerText.trim().slice(0,40)
+                all_inputs = ff.evaluate("""
+                    Array.from(document.querySelectorAll('input,button')).map(el => ({
+                        tag: el.tagName, type: el.type, name: el.name, value: el.value
                     }))
                 """)
-                print(f"[DEBUG] data_area links={nav_links}")
-                radio_inputs = df_check.evaluate("""
-                    Array.from(document.querySelectorAll('input[type=radio],input[type=submit],select')).map(el => ({
-                        tag: el.tagName, name: el.name, value: el.value, text: (el.innerText||'').slice(0,20)
-                    }))
-                """)
-                print(f"[DEBUG] data_area inputs={radio_inputs}")
-                # h2/h3/th で要素名が出ているか
-                headers = df_check.evaluate("""
-                    Array.from(document.querySelectorAll('h1,h2,h3,caption,th')).slice(0,20).map(el => el.innerText.trim().slice(0,40))
-                """)
-                print(f"[DEBUG] data_area headers={headers}")
+                print(f"[DEBUG] form_area all_inputs={all_inputs}")
+                # ページ全体の HTML（最初の 3000 文字）
+                form_html = ff.evaluate("document.body.innerHTML.slice(0,3000)")
+                print(f"[DEBUG] form_area HTML={form_html}")
             except Exception as e:
-                print(f"[WARN] data_area structure check: {e}")
+                print(f"[WARN] form_area inputs check: {e}")
 
         # キーワードで option value を特定
         WANT_KEYWORDS = {
