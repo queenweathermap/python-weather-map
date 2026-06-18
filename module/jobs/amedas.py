@@ -1075,66 +1075,98 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         # 最初のロードでフォーム構造を解析
         page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
         _wait(page)
-        _debug_form(page)
+
+        # 全フレームをログ出力（form_area/data_area の存在確認）
+        for frm in page.frames:
+            print(f"[DEBUG] frame name={repr(frm.name)} url={frm.url[:100]}")
 
         ff = page.frame(name="form_area")
+        df0 = page.frame(name="data_area")
+
         form_opts: List[dict] = []
-        data_cgi_base = ""
+        form_method = "get"
+        form_action = ""
         select_name_attr = "element"
+        data_cgi_base = df0.url.split("?")[0] if df0 else ""
+
         if ff:
             try:
+                form_method = ff.evaluate(
+                    "(document.querySelector('form')?.method || 'get').toLowerCase()"
+                )
+                form_action = ff.evaluate(
+                    "document.querySelector('form')?.action || ''"
+                )
+                select_name_attr = ff.evaluate(
+                    "document.querySelector('select')?.name || 'element'"
+                )
                 form_opts = ff.evaluate("""
                     Array.from(document.querySelector('select')?.options || [])
                         .map(o => ({v: o.value, t: o.text.trim()}))
                 """)
-                select_name_attr = ff.evaluate(
-                    "document.querySelector('select')?.name || 'element'"
+                print(
+                    f"[DEBUG] allamedas form: method={form_method} "
+                    f"action={form_action} select={select_name_attr}"
                 )
-                action = ff.evaluate(
-                    "document.querySelector('form')?.action || ''"
-                )
-                print(f"[DEBUG] form action={action} select_name={select_name_attr}")
-                print(f"[DEBUG] form_opts={form_opts}")
-                # data_area の現在 URL からベースを取得
-                df_tmp = page.frame(name="data_area")
-                if df_tmp:
-                    data_cgi_base = df_tmp.url.split("?")[0]
-                if not data_cgi_base and action:
-                    data_cgi_base = action
+                print(f"[DEBUG] allamedas form_opts={form_opts}")
             except Exception as e:
-                print(f"[WARN] form parse failed: {e}")
+                print(f"[WARN] form parse: {e}")
+        else:
+            print("[WARN] form_area frame not found")
 
         # キーワードで option value を特定
+        WANT_KEYWORDS = {
+            "rain3h": ["降水量", "3時間降水", "rain3", "雨量"],
+            "tmax":   ["最高気温", "tmax"],
+            "tmin":   ["最低気温", "tmin"],
+            "wmax":   ["最大風速", "wind", "wmax"],
+            "humin":  ["最小湿度", "湿度", "hum"],
+            "snow":   ["積雪深", "snow", "積雪"],
+        }
         elem_value_map: dict = {}
-        for elem_key, _, _, keywords in ALLAMEDAS_ITEMS:
+        for key, kws in WANT_KEYWORDS.items():
             for opt in form_opts:
-                if any(kw in opt["t"] for kw in keywords):
-                    elem_value_map[elem_key] = opt["v"]
-                    print(f"[INFO] {elem_key} → value={opt['v']} ({opt['t']})")
+                if any(kw in opt["t"] for kw in kws):
+                    elem_value_map[key] = opt["v"]
+                    print(f"[INFO] {key} → value={opt['v']} ({opt['t']})")
                     break
-            if elem_key not in elem_value_map:
-                print(f"[WARN] {elem_key}: form option not found, using key as-is")
-                elem_value_map[elem_key] = elem_key
+            if key not in elem_value_map:
+                # フォームオプションが読めなかった場合はインデックス順で推測
+                idx = list(WANT_KEYWORDS.keys()).index(key)
+                elem_value_map[key] = str(idx)
+                print(f"[WARN] {key}: option not found, fallback index={idx}")
+
+        def _switch_element(opt_value: str) -> None:
+            """フォーム送信 or data_area 直接ナビゲートで要素を切り替える。"""
+            if ff and form_method == "post":
+                # POST フォーム: select を書き換えてから form.submit()
+                ff.evaluate(f"""
+                    (() => {{
+                        const sel = document.querySelector('select');
+                        if (sel) sel.value = '{opt_value}';
+                        const frm = document.querySelector('form');
+                        if (frm) frm.submit();
+                    }})()
+                """)
+                page.wait_for_load_state("networkidle", timeout=30_000)
+                page.wait_for_timeout(WCN_WAIT_MS)
+            elif data_cgi_base:
+                # GET / data_area URL が判明している場合は直接ナビゲート
+                df = page.frame(name="data_area")
+                if df:
+                    target = f"{data_cgi_base}?{select_name_attr}={opt_value}#{ALLAMEDAS_ANCHOR}"
+                    print(f"[DEBUG] navigate data_area → {target}")
+                    df.goto(target, wait_until="networkidle", timeout=30_000)
+                    page.wait_for_timeout(WCN_WAIT_MS)
+            else:
+                # フォールバック: 毎回メインページをリロードしてフォーム送信
+                page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
+                _wait(page)
+                _submit_form_value(page, select_name_attr, opt_value)
 
         for elem_key, fname, lbl, _ in ALLAMEDAS_ITEMS:
             try:
-                opt_value = elem_value_map[elem_key]
-
-                if data_cgi_base:
-                    # data_area に直接ナビゲート（最も確実）
-                    df = page.frame(name="data_area")
-                    target_url = (
-                        f"{data_cgi_base}?{select_name_attr}={opt_value}"
-                        f"#{ALLAMEDAS_ANCHOR}"
-                    )
-                    df.goto(target_url, wait_until="networkidle", timeout=30_000)
-                    page.wait_for_timeout(WCN_WAIT_MS)
-                else:
-                    # フォールバック: フォーム送信
-                    page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
-                    _wait(page)
-                    _submit_form_value(page, select_name_attr, opt_value)
-
+                _switch_element(elem_value_map[elem_key])
                 raw = _shot_pref_section(page)
                 img = _wcn_label_banner(raw, lbl)
                 results.append((fname, img))
