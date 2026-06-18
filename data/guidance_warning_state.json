@@ -3,10 +3,11 @@
     "colddev500"
   ],
   "秋田県内陸": [
-    "rain24"
+    "rain1",
+    "rain24",
+    "rain3"
   ],
   "秋田県沿岸": [
-    "rain1",
-    "rain3"
+    "rain24"
   ]
 }
