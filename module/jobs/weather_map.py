@@ -1165,8 +1165,22 @@ def notion_write_db(
     return page_id
 
 
+IMAGE_EXTRA_LINKS: dict = {
+    "01_EMAGRAM": [
+        ("秋田地方気象台", "https://www.jma-net.go.jp/akita/"),
+    ],
+    "04_LAYOUT_4_WEEKLY": [
+        ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
+    ],
+    "06_LAYOUT_5_DASHBOARD": [
+        ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
+        ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
+    ],
+}
+
+
 def discord_links_text() -> str:
-    return "\n\n".join(["**参考リンク**"] + [f"・{t}\n{u}" for t, u in DISCORD_LINKS])
+    return "\n".join(["**参考リンク**"] + [f"・[{t}](<{u}>)" for t, u in DISCORD_LINKS])
 
 
 def notify_discord_images(
@@ -1184,6 +1198,9 @@ def notify_discord_images(
 
     for idx, filename in enumerate(OUTPUT_FILENAMES):
         title = OUTPUT_TITLES[idx] if idx < len(OUTPUT_TITLES) else f"資料 {idx + 1}"
+        extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
+        if extra_links:
+            title += "\n" + "\n".join(f"・[{t}](<{u}>)" for t, u in extra_links)
         src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
 
         # 4枚目・5枚目の結合画像は、Discordには軽量サムネイルを1枚だけ添付する。
