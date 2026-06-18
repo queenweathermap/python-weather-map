@@ -1,40 +1,34 @@
-name: Akita Weather Warning
+name: Akita Weather Screenshot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # 15分ごと（GitHub側の都合で多少遅延することあり）
-  workflow_dispatch:           # 手動実行も可能
+    # 5時・11時・17時 JST（= UTC 20/2/8時）
+    - cron: "15 2,8,20 * * *"
+  workflow_dispatch:
 
 permissions:
-  contents: write              # 状態ファイルをコミットして戻すため
+  contents: read
 
 concurrency:
   group: weather-warning
   cancel-in-progress: false
 
 jobs:
-  check:
+  screenshot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run weather warning
+      - name: Install Japanese fonts
+        run: sudo apt-get install -y fonts-noto-cjk
+
+      - name: Install Python dependencies
+        run: pip install playwright
+
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+
+      - name: Send weather screenshots
         env:
           DISCORD_WARNING_WEBHOOK_URL: ${{ secrets.DISCORD_WARNING_WEBHOOK_URL }}
-          AREA_FILTER: ""                          # 区域で絞るなら二次細分区域名（例: "秋田中央"）
-          STATE_FILE: "data/weather_warning_state.json"   # 状態ファイルの保存先
         run: python module/jobs/weather_warning.py
-
-      - name: Commit state
-        run: |
-          # -f で .gitignore を上書きして強制ステージ（data/*.json 等で除外されていても
-          # 状態ファイルを必ずコミットできるようにする）。ステージ後の差分で要否を判定。
-          git add -f data/weather_warning_state.json
-          if git diff --cached --quiet; then
-            echo "no state change"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git commit -m "update weather state [skip ci]"
-            git push
-          fi
