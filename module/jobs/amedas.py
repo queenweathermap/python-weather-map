@@ -1089,129 +1089,79 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         select_name_attr = "element"
         data_cgi_base = df0.url.split("?")[0] if df0 else ""
 
+        # factorNo ラジオボタンのラベルを読んで要素種別を特定する
+        factor_map: dict = {}   # elem_key → factorNo value (str)
         if ff:
             try:
-                form_method = ff.evaluate(
-                    "(document.querySelector('form')?.method || 'get').toLowerCase()"
-                )
-                form_action = ff.evaluate(
-                    "document.querySelector('form')?.action || ''"
-                )
-                # 全 select を読んで年選択以外（要素種別）の select を探す
-                all_selects = ff.evaluate("""
-                    Array.from(document.querySelectorAll('select')).map(sel => ({
-                        name: sel.name,
-                        opts: Array.from(sel.options).map(o => ({v: o.value, t: o.text.trim()}))
-                    }))
+                # 各 factorNo ラジオの隣接テキストを取得
+                factor_labels = ff.evaluate("""
+                    Array.from(document.querySelectorAll('input[name="factorNo"]')).map(r => {
+                        // label 要素 or 隣の TextNode を探す
+                        let lbl = '';
+                        const lel = document.querySelector('label[for="' + r.id + '"]');
+                        if (lel) { lbl = lel.innerText.trim(); }
+                        else {
+                            // 親 label
+                            let p = r.parentElement;
+                            while (p && p.tagName !== 'LABEL' && p.tagName !== 'FORM') p = p.parentElement;
+                            if (p && p.tagName === 'LABEL') lbl = p.innerText.trim();
+                        }
+                        if (!lbl) {
+                            // 次の TextNode
+                            let n = r.nextSibling;
+                            while (n && n.nodeType !== 3) n = n.nextSibling;
+                            if (n) lbl = n.textContent.trim();
+                        }
+                        return {v: r.value, t: lbl};
+                    })
                 """)
-                print(f"[DEBUG] allamedas all_selects={all_selects}")
+                print(f"[DEBUG] factorNo labels={factor_labels}")
 
-                # 年選択（value が 4桁数字）以外を要素種別 select とみなす
-                elem_select = None
-                for sel_info in all_selects:
-                    opts = sel_info["opts"]
-                    if opts and not opts[0]["v"].isdigit():
-                        elem_select = sel_info
-                        break
-                    # 4桁でない値を含む select なら要素種別
-                    if opts and len(opts[0]["v"]) != 4:
-                        elem_select = sel_info
-                        break
-                # 見つからなければ年以外の最初の select
-                if elem_select is None:
-                    for sel_info in all_selects:
-                        if sel_info["name"] != "nen":
-                            elem_select = sel_info
+                WANT_KEYWORDS = {
+                    "rain3h": ["降水量", "3時間", "rain3", "雨量", "precipitation"],
+                    "tmax":   ["最高気温", "最高", "tmax"],
+                    "tmin":   ["最低気温", "最低", "tmin"],
+                    "wmax":   ["最大風速", "最大風", "wmax", "風速"],
+                    "humin":  ["最小湿度", "最小", "湿度", "humin"],
+                    "snow":   ["積雪深", "積雪", "snow"],
+                }
+                for key, kws in WANT_KEYWORDS.items():
+                    for entry in factor_labels:
+                        if any(kw in entry["t"] for kw in kws):
+                            factor_map[key] = entry["v"]
+                            print(f"[INFO] {key} → factorNo={entry['v']} ({entry['t']})")
                             break
-                # それでも見つからなければ 2番目の select
-                if elem_select is None and len(all_selects) >= 2:
-                    elem_select = all_selects[1]
-
-                if elem_select:
-                    select_name_attr = elem_select["name"]
-                    form_opts = elem_select["opts"]
-
-                print(
-                    f"[DEBUG] allamedas form: method={form_method} "
-                    f"action={form_action} select={select_name_attr}"
-                )
-                print(f"[DEBUG] allamedas form_opts={form_opts}")
             except Exception as e:
-                print(f"[WARN] form parse: {e}")
-        else:
-            print("[WARN] form_area frame not found")
+                print(f"[WARN] factorNo parse: {e}")
 
-        # form_area の hidden inputs と全入力要素を確認（要素種別の hidden field 探し）
-        if ff:
-            try:
-                all_inputs = ff.evaluate("""
-                    Array.from(document.querySelectorAll('input,button')).map(el => ({
-                        tag: el.tagName, type: el.type, name: el.name, value: el.value
-                    }))
-                """)
-                print(f"[DEBUG] form_area all_inputs={all_inputs}")
-                # ページ全体の HTML（最初の 3000 文字）
-                form_html = ff.evaluate("document.body.innerHTML.slice(0,3000)")
-                print(f"[DEBUG] form_area HTML={form_html}")
-            except Exception as e:
-                print(f"[WARN] form_area inputs check: {e}")
+        # ラベルで取れなかった要素はデータタイトルで確認しつつインデックスで推測
+        # WCN allamedas のデフォルト順: 0=最高気温,1=最低気温,2=降水量,3=最大風速,4=最小湿度,5=積雪深 (推測)
+        FALLBACK_ORDER = ["tmax", "tmin", "rain3h", "wmax", "humin", "snow"]
+        for i, key in enumerate(FALLBACK_ORDER):
+            if key not in factor_map:
+                factor_map[key] = str(i)
+                print(f"[WARN] {key}: label not found, fallback factorNo={i}")
 
-        # キーワードで option value を特定
-        WANT_KEYWORDS = {
-            "rain3h": ["降水量", "3時間降水", "rain3", "雨量"],
-            "tmax":   ["最高気温", "tmax"],
-            "tmin":   ["最低気温", "tmin"],
-            "wmax":   ["最大風速", "wind", "wmax"],
-            "humin":  ["最小湿度", "湿度", "hum"],
-            "snow":   ["積雪深", "snow", "積雪"],
-        }
-        elem_value_map: dict = {}
-        for key, kws in WANT_KEYWORDS.items():
-            for opt in form_opts:
-                if any(kw in opt["t"] for kw in kws):
-                    elem_value_map[key] = opt["v"]
-                    print(f"[INFO] {key} → value={opt['v']} ({opt['t']})")
-                    break
-            if key not in elem_value_map:
-                # フォームオプションが読めなかった場合はインデックス順で推測
-                idx = list(WANT_KEYWORDS.keys()).index(key)
-                elem_value_map[key] = str(idx)
-                print(f"[WARN] {key}: option not found, fallback index={idx}")
-
-        def _switch_element(opt_value: str) -> None:
-            """フォーム送信 or data_area 直接ナビゲートで要素を切り替える。"""
-            if ff and form_method == "post":
-                # POST フォーム: 要素種別 select を書き換えてから form.submit()
-                ff.evaluate(f"""
-                    (() => {{
-                        const sname = {repr(select_name_attr)};
-                        const sel = document.querySelector('select[name="' + sname + '"]')
-                                 || document.querySelectorAll('select')[1]
-                                 || document.querySelector('select');
-                        if (sel) sel.value = '{opt_value}';
-                        const frm = document.querySelector('form');
-                        if (frm) frm.submit();
-                    }})()
-                """)
-                page.wait_for_load_state("networkidle", timeout=30_000)
-                page.wait_for_timeout(WCN_WAIT_MS)
-            elif data_cgi_base:
-                # GET / data_area URL が判明している場合は直接ナビゲート
-                df = page.frame(name="data_area")
-                if df:
-                    target = f"{data_cgi_base}?{select_name_attr}={opt_value}#{ALLAMEDAS_ANCHOR}"
-                    print(f"[DEBUG] navigate data_area → {target}")
-                    df.goto(target, wait_until="networkidle", timeout=30_000)
-                    page.wait_for_timeout(WCN_WAIT_MS)
-            else:
-                # フォールバック: 毎回メインページをリロードしてフォーム送信
-                page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
-                _wait(page)
-                _submit_form_value(page, select_name_attr, opt_value)
+        def _switch_element(factor_no: str) -> None:
+            """factorNo ラジオを変更してフォームを POST 送信、data_area を更新する。"""
+            if not ff:
+                return
+            ff.evaluate(f"""
+                (() => {{
+                    // factorNo ラジオをセット
+                    const radios = document.querySelectorAll('input[name="factorNo"]');
+                    radios.forEach(r => {{ r.checked = (r.value === '{factor_no}'); }});
+                    // フォームを submit（target="data_area" なので data_area だけ更新）
+                    const frm = document.querySelector('form');
+                    if (frm) frm.submit();
+                }})()
+            """)
+            page.wait_for_load_state("networkidle", timeout=30_000)
+            page.wait_for_timeout(WCN_WAIT_MS)
 
         for elem_key, fname, lbl, _ in ALLAMEDAS_ITEMS:
             try:
-                _switch_element(elem_value_map[elem_key])
+                _switch_element(factor_map[elem_key])
                 raw = _shot_pref_section(page)
                 img = _wcn_label_banner(raw, lbl)
                 results.append((fname, img))
