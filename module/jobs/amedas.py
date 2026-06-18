@@ -889,7 +889,7 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
             name = sel.get_attribute("name") or f"[{si}]"
             opts = [(o.get_attribute("value"), o.inner_text())
                     for o in sel.locator("option").all()]
-            print(f"[DEBUG] form select name={name} opts={opts}")
+            pass
 
     def _submit_form_value(page, select_name: str, value: str) -> bool:
         """form_area の select[name] を value に変更して送信。成功時 True。"""
@@ -969,7 +969,6 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         """)
         akita_y = int(pos.get("akita", 0))
         next_y  = int(pos.get("next",  scroll_h))
-        print(f"[DEBUG] allamedas 秋田Y={akita_y} 次県Y={next_y}")
 
         # 全高撮影してから PIL でクロップ
         raw_full = page.locator('iframe[name="data_area"]').screenshot()
@@ -1023,27 +1022,21 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         page.wait_for_timeout(500)
         table_imgs: List[bytes] = []
         tables = df.locator("table").all()
-        print(f"[DEBUG] total tables in data_area: {len(tables)}")
         for i, tbl in enumerate(tables):
             try:
                 bb = tbl.bounding_box()
                 if not bb:
                     continue
-                # ランキングテーブルの判定:
-                # th/td 問わず「順位」または「地点名」テキストを持つセルがある
                 is_ranking = (
                     tbl.locator("th, td").filter(has_text="順位").count() > 0
                     or tbl.locator("th, td").filter(has_text="地点名").count() > 0
                 )
                 if not is_ranking:
-                    print(f"[DEBUG] table[{i}] h={bb['height']:.0f} → skip (no rank header)")
                     continue
                 raw = tbl.screenshot()
                 table_imgs.append(raw)
-                print(f"[DEBUG] table[{i}] h={bb['height']:.0f} → captured")
             except Exception as e:
                 print(f"[WARN] table[{i}] error: {e}")
-        print(f"[DEBUG] ranking tables captured: {len(table_imgs)}")
         return table_imgs
 
     with sync_playwright() as pw:
@@ -1076,38 +1069,23 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
         _wait(page)
 
-        # 全フレームをログ出力（form_area/data_area の存在確認）
-        for frm in page.frames:
-            print(f"[DEBUG] frame name={repr(frm.name)} url={frm.url[:100]}")
-
         ff = page.frame(name="form_area")
-        df0 = page.frame(name="data_area")
-
-        form_opts: List[dict] = []
-        form_method = "get"
-        form_action = ""
-        select_name_attr = "element"
-        data_cgi_base = df0.url.split("?")[0] if df0 else ""
 
         # factorNo ラジオボタンのラベルを読んで要素種別を特定する
         factor_map: dict = {}   # elem_key → factorNo value (str)
         if ff:
             try:
-                # 各 factorNo ラジオの隣接テキストを取得
                 factor_labels = ff.evaluate("""
                     Array.from(document.querySelectorAll('input[name="factorNo"]')).map(r => {
-                        // label 要素 or 隣の TextNode を探す
                         let lbl = '';
                         const lel = document.querySelector('label[for="' + r.id + '"]');
                         if (lel) { lbl = lel.innerText.trim(); }
                         else {
-                            // 親 label
                             let p = r.parentElement;
                             while (p && p.tagName !== 'LABEL' && p.tagName !== 'FORM') p = p.parentElement;
                             if (p && p.tagName === 'LABEL') lbl = p.innerText.trim();
                         }
                         if (!lbl) {
-                            // 次の TextNode
                             let n = r.nextSibling;
                             while (n && n.nodeType !== 3) n = n.nextSibling;
                             if (n) lbl = n.textContent.trim();
@@ -1115,8 +1093,6 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                         return {v: r.value, t: lbl};
                     })
                 """)
-                print(f"[DEBUG] factorNo labels={factor_labels}")
-
                 WANT_KEYWORDS = {
                     "rain3h": ["3時間降水量", "3時間降水", "3時間", "rain3"],
                     "tmax":   ["最高気温", "最高", "tmax"],
@@ -1129,7 +1105,6 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                     for entry in factor_labels:
                         if any(kw in entry["t"] for kw in kws):
                             factor_map[key] = entry["v"]
-                            print(f"[INFO] {key} → factorNo={entry['v']} ({entry['t']})")
                             break
             except Exception as e:
                 print(f"[WARN] factorNo parse: {e}")
