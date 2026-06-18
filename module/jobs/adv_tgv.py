@@ -656,9 +656,9 @@ def notify_discord_adv_start(*, init_dt: datetime, rjtd: str) -> None:
 
     description = (
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🚀  **ここからスタート**\n"
+        f"# 🚀 **RJTD: {rjtd}**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"初期時刻: **{init_jst}**　RJTD: {rjtd}\n"
+        f"初期時刻: {init_jst}\n"
         f"[📋  気象防災アドバイザー向け資料集]({ADV_ADVISOR_URL})"
     )
 
