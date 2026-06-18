@@ -29,5 +29,5 @@ if __name__ == "__main__":
 
     # JMA 3地点詳細を WCN の後に Discord 投稿
     for i, (fname, img_d) in enumerate(detail_imgs):
-        content = f"<{JMA_AMEDAS_URL}>" if i == 0 else ""
+        content = f"[秋田アメダスマップ](<{JMA_AMEDAS_URL}>)" if i == 0 else ""
         _post_image(img_d, fname, content=content)
