@@ -1141,6 +1141,31 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         else:
             print("[WARN] form_area frame not found")
 
+        # data_area の構造を調べる（要素切り替えリンク / ラジオボタン / ヘッダーの確認）
+        df_check = page.frame(name="data_area")
+        if df_check:
+            try:
+                nav_links = df_check.evaluate("""
+                    Array.from(document.querySelectorAll('a[href]')).slice(0,30).map(a => ({
+                        href: a.href,
+                        text: a.innerText.trim().slice(0,40)
+                    }))
+                """)
+                print(f"[DEBUG] data_area links={nav_links}")
+                radio_inputs = df_check.evaluate("""
+                    Array.from(document.querySelectorAll('input[type=radio],input[type=submit],select')).map(el => ({
+                        tag: el.tagName, name: el.name, value: el.value, text: (el.innerText||'').slice(0,20)
+                    }))
+                """)
+                print(f"[DEBUG] data_area inputs={radio_inputs}")
+                # h2/h3/th で要素名が出ているか
+                headers = df_check.evaluate("""
+                    Array.from(document.querySelectorAll('h1,h2,h3,caption,th')).slice(0,20).map(el => el.innerText.trim().slice(0,40))
+                """)
+                print(f"[DEBUG] data_area headers={headers}")
+            except Exception as e:
+                print(f"[WARN] data_area structure check: {e}")
+
         # キーワードで option value を特定
         WANT_KEYWORDS = {
             "rain3h": ["降水量", "3時間降水", "rain3", "雨量"],
