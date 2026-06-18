@@ -562,9 +562,7 @@ def find_working_init_dt(
 GUIDE_ENABLE = env_bool("GUIDE_ENABLE", "1")
 
 GUIDE_LINKS: List[Tuple[str, str]] = [
-    ("ガイダンス（降水）", "https://www.jma.go.jp/bosai/advisor/guid_table.html"),
-    ("ガイダンス（風）", "https://www.jma.go.jp/bosai/advisor/guid_table_wind.html"),
-    ("ガイダンス（寒気）", "https://www.jma.go.jp/bosai/advisor/cold_table.html"),
+    ("気象防災アドバイザー向け資料集", "https://www.jma.go.jp/bosai/advisor/"),
 ]
 
 
@@ -802,8 +800,6 @@ def main() -> None:
     print(f"[OK] Notion URL: {notion_page_url(page_id)}")
 
     if GUIDE_ENABLE:
-        append_heading(page_id, "ガイダンス（リンク）", level=2)
-
         for caption, url in GUIDE_LINKS:
             append_bookmark(page_id, url, caption=caption)
 
@@ -836,15 +832,6 @@ def main() -> None:
 
         append_heading(page_id, model_name, level=2)
         model_parent: str = page_id
-
-        if model_name == "GSM":
-            append_callout(
-                page_id,
-                "ここからスタート ▶ 気象防災アドバイザー向け資料集",
-                url="https://www.jma.go.jp/bosai/advisor/",
-                emoji="🚀",
-                color="yellow_background",
-            )
 
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(
