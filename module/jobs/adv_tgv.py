@@ -60,6 +60,65 @@ from module.utils.r2_utils import make_url, put_bytes
 
 
 # =============================================================================
+# Notion callout helper
+# =============================================================================
+
+def append_callout(
+    parent_id: str,
+    text: str,
+    url: Optional[str] = None,
+    emoji: str = "🚀",
+    color: str = "yellow_background",
+) -> None:
+    """
+    Notionにcalloutブロックを追加する。
+
+    color: Notion APIの有効値
+      例: yellow_background / red_background / green_background /
+          blue_background / purple_background / gray_background
+    """
+    token = os.getenv("NOTION_TOKEN", "").strip()
+    if not token:
+        return
+
+    rich_text: dict = {
+        "type": "text",
+        "text": {
+            "content": text,
+            **({"link": {"url": url}} if url else {}),
+        },
+        "annotations": {"bold": True},
+    }
+
+    payload = {
+        "children": [
+            {
+                "object": "block",
+                "type": "callout",
+                "callout": {
+                    "rich_text": [rich_text],
+                    "icon": {"type": "emoji", "emoji": emoji},
+                    "color": color,
+                },
+            }
+        ]
+    }
+
+    resp = requests.patch(
+        f"https://api.notion.com/v1/blocks/{parent_id}/children",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+    if not resp.ok:
+        print(f"[WARN] append_callout failed: {resp.status_code} {resp.text[:200]}")
+
+
+# =============================================================================
 # 型定義
 # =============================================================================
 
@@ -581,13 +640,44 @@ def append_notion_images(
 # Discord
 # =============================================================================
 
+ADV_ADVISOR_URL = "https://www.jma.go.jp/bosai/advisor/"
+
+
+def notify_discord_adv_start(*, init_dt: datetime, rjtd: str) -> None:
+    """
+    ADV配信の冒頭に1回だけ送る「ここからスタート」メッセージ。
+    embedを使いテキストリンクを実現する。以降のGIFには初期時刻を出さない。
+    """
+    if not discord_adv_enabled():
+        return
+
+    jst = timezone(timedelta(hours=9))
+    init_jst = init_dt.astimezone(jst).strftime("%Y-%m-%d %H:%M JST")
+
+    description = (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🚀  **ここからスタート**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"初期時刻: **{init_jst}**　RJTD: {rjtd}\n"
+        f"[📋  気象防災アドバイザー向け資料集]({ADV_ADVISOR_URL})"
+    )
+
+    payload = {
+        "embeds": [{"description": description}],
+        "allowed_mentions": {"parse": []},
+    }
+
+    try:
+        requests.post(discord_adv_webhook_url(), json=payload, timeout=60).raise_for_status()
+    except Exception as e:
+        print(f"[WARN] Discord start message failed: {e}")
+
+
 def notify_discord_adv_gif(
     *,
     model_name: str,
     item_label: str,
     gif_urls: List[str],
-    init_dt: datetime,
-    rjtd: str,
 ) -> None:
     """
     ADV item単位のDiscord投稿。
@@ -599,16 +689,13 @@ def notify_discord_adv_gif(
     if not discord_adv_enabled() or not gif_urls:
         return
 
-    jst = timezone(timedelta(hours=9))
-    init_jst = init_dt.astimezone(jst).strftime("%Y-%m-%d %H:%M JST")
-
     post_discord_item_image_urls(
         webhook_url=discord_adv_webhook_url(),
         title=f"ADV TGV {model_name} / {item_label} GIF",
         image_urls=gif_urls,
         notion_url="",
-        rjtd=rjtd,
-        init_jst=init_jst,
+        rjtd="",
+        init_jst="",
     )
 
 
@@ -722,6 +809,11 @@ def main() -> None:
 
     first_cover_url: Optional[str] = None
 
+    notify_discord_adv_start(
+        init_dt=init_dt_for_title,
+        rjtd=rjtd_for_title,
+    )
+
     for model_name in ("GSM", "MSM", "LFM"):
         cfg: ModelCfg = groups[model_name]
 
@@ -744,6 +836,15 @@ def main() -> None:
 
         append_heading(page_id, model_name, level=2)
         model_parent: str = page_id
+
+        if model_name == "GSM":
+            append_callout(
+                page_id,
+                "ここからスタート ▶ 気象防災アドバイザー向け資料集",
+                url="https://www.jma.go.jp/bosai/advisor/",
+                emoji="🚀",
+                color="yellow_background",
+            )
 
         for item in cfg.items:
             atts, auth_failed = fetch_item_images(
@@ -866,16 +967,14 @@ def main() -> None:
             )
 
             # -----------------------------------------------------------------
-            # 4. DiscordにはGIFだけ投稿する
+            # 4. DiscordにはGIFだけ投稿する（LFMはNotion専用のため除外）
             # -----------------------------------------------------------------
-            if gif_urls:
+            if gif_urls and model_name != "LFM":
                 try:
                     notify_discord_adv_gif(
                         model_name=model_name,
                         item_label=item.label,
                         gif_urls=gif_urls,
-                        init_dt=init_dt,
-                        rjtd=rjtd,
                     )
 
                     if discord_adv_enabled():
