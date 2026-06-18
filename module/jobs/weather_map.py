@@ -1318,7 +1318,8 @@ def main() -> None:
                 issue_dt_jst=issue_dt_jst,
                 notion_url=notion_url,
             )
-            notify_discord_complete(errors=errors, attach_count=len(images))
+            if errors:
+                notify_discord_complete(errors=errors, attach_count=len(images))
         except Exception as e:
             print(f"[WARN] Discord failed: {e}")
 
