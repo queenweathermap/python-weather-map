@@ -1034,7 +1034,14 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                 )
                 if not is_ranking:
                     continue
+                # テーブルをビューに入れてからレンダリング待ち
+                tbl.scroll_into_view_if_needed()
+                page.wait_for_timeout(200)
                 raw = tbl.screenshot()
+                # 空/白紙スクリーンショットは除外（正常なテーブル画像は最低数KB）
+                if len(raw) < 2000:
+                    print(f"[WARN] table[{i}] screenshot too small ({len(raw)} bytes), skipping")
+                    continue
                 table_imgs.append(raw)
             except Exception as e:
                 print(f"[WARN] table[{i}] error: {e}")
