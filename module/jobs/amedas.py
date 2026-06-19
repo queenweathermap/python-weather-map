@@ -1008,25 +1008,35 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
         return buf.getvalue()
 
     def _shot_ranking_tables(page) -> List[bytes]:
-        """ranking data_area のランキングテーブルを個別撮影して返す。
-        「順位」列ヘッダーを持つテーブルだけを対象にすることで
-        ナビゲーション等の余分なテーブルを除外する。
+        """ranking data_area のランキングテーブルを切り出して返す。
+
+        テーブルごとに個別 screenshot() を撮ると最初のテーブルがブランクに
+        なる問題があるため、data_area iframe を全高で一枚撮影してから
+        PIL で各テーブルの bounding_box をクロップする方式に変更。
         """
+        from PIL import Image as PILImage
+
         df = page.frame(name="data_area")
         if not df:
             raise RuntimeError("data_area not found")
-        # 全高展開
+
+        # iframe を全高に展開
         scroll_h = df.evaluate("document.body.scrollHeight")
         page.evaluate(
             f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{scroll_h}px'"
         )
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(800)  # JS レンダリング完了を待つ
+
+        # data_area 全体を一枚撮影
+        raw_full = page.locator('iframe[name="data_area"]').screenshot()
+        full_img = PILImage.open(io.BytesIO(raw_full))
+
         table_imgs: List[bytes] = []
         tables = df.locator("table").all()
         for i, tbl in enumerate(tables):
             try:
                 bb = tbl.bounding_box()
-                if not bb:
+                if not bb or bb["width"] < 10 or bb["height"] < 10:
                     continue
                 is_ranking = (
                     tbl.locator("th, td").filter(has_text="順位").count() > 0
@@ -1034,15 +1044,16 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                 )
                 if not is_ranking:
                     continue
-                # テーブルをビューに入れてからレンダリング待ち
-                tbl.scroll_into_view_if_needed()
-                page.wait_for_timeout(200)
-                raw = tbl.screenshot()
-                # 空/白紙スクリーンショットは除外（正常なテーブル画像は最低数KB）
-                if len(raw) < 2000:
-                    print(f"[WARN] table[{i}] screenshot too small ({len(raw)} bytes), skipping")
-                    continue
-                table_imgs.append(raw)
+                # 全体画像から bounding_box でクロップ
+                x0 = int(bb["x"])
+                y0 = int(bb["y"])
+                x1 = int(bb["x"] + bb["width"])
+                y1 = int(bb["y"] + bb["height"])
+                cropped = full_img.crop((x0, y0, x1, y1))
+                buf = io.BytesIO()
+                cropped.save(buf, "PNG")
+                table_imgs.append(buf.getvalue())
+                print(f"[INFO] ranking table[{i}] cropped {x0},{y0}-{x1},{y1}")
             except Exception as e:
                 print(f"[WARN] table[{i}] error: {e}")
         return table_imgs
