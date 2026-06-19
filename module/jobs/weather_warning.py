@@ -33,7 +33,7 @@ PAGES = [
     {
         "title": "林野火災注意報・警報用 気象情報収集支援 konno-system",
         "url": "https://konno-system.wew.jp/forest_fire_alert/portal.php",
-        "screenshot_url": "https://konno-system.wew.jp/forest_fire_alert/get_information_today.php",
+        "screenshot_url": "https://konno-system.wew.jp/forest_fire_alert/akita_get_information_today.php",
         "filename": "forest_fire.png",
     },
 ]
