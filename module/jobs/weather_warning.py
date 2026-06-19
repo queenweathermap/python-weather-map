@@ -30,6 +30,12 @@ PAGES = [
         "url": "https://www.jma.go.jp/bosai/information/#area_type=offices&area_code=050000&format=table&offices_page=0",
         "filename": "information.png",
     },
+    {
+        "title": "林野火災注意報・警報用 気象情報収集支援 konno-system",
+        "url": "https://konno-system.wew.jp/forest_fire_alert/portal.php",
+        "screenshot_url": "https://konno-system.wew.jp/forest_fire_alert/get_information_today.php",
+        "filename": "forest_fire.png",
+    },
 ]
 
 
@@ -44,7 +50,7 @@ def take_screenshots():
         page = context.new_page()
         for item in PAGES:
             print(f"撮影中: {item['title']}", flush=True)
-            page.goto(item["url"])
+            page.goto(item.get("screenshot_url", item["url"]))
             try:
                 page.wait_for_load_state("networkidle", timeout=30000)
             except Exception:
