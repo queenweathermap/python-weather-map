@@ -421,33 +421,48 @@ def main():
         save_state(exceed)
         return
 
-    def _tbl(headers, rows):
-        """コードブロック等幅テーブル（embed 内でも確実に整形される）。"""
+    import re as _re
+    _ANSI_STRIP = _re.compile(r'\x1b\[[0-9;]*m')
+    RED  = "\x1b[2;31m"   # ANSI dark-red (```ansi ブロック用)
+    RST  = "\x1b[0m"
+
+    def _tbl(headers, rows, red_cols=None):
+        """等幅コードブロックテーブル。red_cols={列インデックス} の非ダッシュ値を赤字に。"""
         if not rows:
             return ""
+        red_cols = red_cols or set()
+        def _vis(s):  # 表示幅（ANSIコード除去）
+            return len(_ANSI_STRIP.sub("", str(s)))
         cols = len(headers)
         widths = [len(h) for h in headers]
         for row in rows:
             for i in range(cols):
-                widths[i] = max(widths[i], len(str(row[i])) if i < len(row) else 0)
-        def _line(cells):
+                widths[i] = max(widths[i], _vis(row[i]) if i < len(row) else 0)
+        def _fmt(cell, i):
+            s = str(cell)
+            pad = " " * (widths[i] - _vis(s))
+            if i in red_cols and s not in ("−", "-", ""):
+                return f"{RED}{s}{RST}{pad}"
+            return s + pad
+        def _line(cells, hdr=False):
             return "  ".join(
-                str(cells[i]).ljust(widths[i]) if i < len(cells) else " " * widths[i]
+                headers[i].ljust(widths[i]) if hdr
+                else _fmt(cells[i] if i < len(cells) else "", i)
                 for i in range(cols)
             )
-        sep = "  ".join("-" * w for w in widths)
-        body = "\n".join([_line(headers), sep] + [_line(r) for r in rows])
-        return f"```\n{body}\n```"
+        sep  = "  ".join("-" * w for w in widths)
+        body = "\n".join([_line(headers, True), sep] + [_line(r) for r in rows])
+        return f"```ansi\n{body}\n```"
 
-    # 沿岸・内陸の列名を lines から自動検出（秋田県沿岸→沿岸、秋田県内陸→内陸）
-    all_areas = sorted({k[0] for k in lines})
+    # 沿岸・内陸の列名を lines から自動検出
+    all_areas    = sorted({k[0] for k in lines})
     coast_areas  = [a for a in all_areas if "沿岸" in a]
     inland_areas = [a for a in all_areas if "内陸" in a]
-    area_cols = coast_areas + inland_areas   # 沿岸 → 内陸 の順
-    area_short = {a: a.replace("秋田県", "") for a in area_cols}  # 表示用短縮名
+    area_cols    = coast_areas + inland_areas
+    area_short   = {a: a.replace("秋田県", "") for a in area_cols}
 
-    def _rain_pivot_tbl(src_pairs):
-        """降水: 行=要素, 列=沿岸/内陸。src_pairs = [(area,elem),...] のうち rain 要素のみ。"""
+    def _rain_pivot_tbl(src_pairs, red=False):
+        """降水: 行=要素, 列=沿岸/内陸。しきい値は欄外注記で返す。"""
         by_elem: dict = {}
         thresh_by: dict = {}
         for area, elem in src_pairs:
@@ -458,10 +473,11 @@ def main():
                 by_elem.setdefault(elem, {})[area] = d
                 thresh_by[elem] = d["thresh"]
         if not by_elem:
-            return None
+            return None, ""
         cols = area_cols or sorted({a for v in by_elem.values() for a in v})
         short = {a: area_short.get(a, a) for a in cols}
-        hdrs = ["要素"] + [short[a] for a in cols] + ["※しきい値"]
+        hdrs  = ["要素"] + [short[a] for a in cols]
+        area_col_idxs = set(range(1, len(cols) + 1))  # 値列をすべて赤候補に
         rows = []
         for elem in ELEMENTS:
             if elem not in by_elem:
@@ -470,47 +486,57 @@ def main():
             for area in cols:
                 d = by_elem[elem].get(area)
                 row.append(f"{d['peak']}{d['when']}" if d else "−")
-            row.append(thresh_by.get(elem, "−"))
             rows.append(row)
-        return _tbl(hdrs, rows) if rows else None
+        note_parts = [f"{ELEM_LABEL.get(e,e)} {thresh_by[e]}" for e in ELEMENTS if e in thresh_by]
+        note = "※しきい値: " + "／".join(note_parts) if note_parts else ""
+        tbl  = _tbl(hdrs, rows, red_cols=area_col_idxs if red else set())
+        return tbl, note
 
-    def _wind_tbl(src_pairs):
-        """風: 行=地点, 列=予想/しきい値。"""
-        rows = []
+    def _wind_tbl(src_pairs, red=False):
+        """風: 行=地点。しきい値は欄外注記。"""
+        rows, thresh_set = [], set()
         for area, elem in sorted(src_pairs):
             if elem != "wind":
                 continue
             d = lines.get((area, elem))
             if isinstance(d, dict):
-                rows.append([d["area"], f"{d['peak']}{d['when']}", d["thresh"]])
-        return _tbl(["地点", "予想最大", "※しきい値"], rows) if rows else None
+                rows.append([d["area"], f"{d['peak']}{d['when']}"])
+                thresh_set.add(d["thresh"])
+        if not rows:
+            return None, ""
+        note = f"※しきい値: {next(iter(thresh_set))}" if thresh_set else ""
+        return _tbl(["地点", "予想最大風速"], rows, red_cols={1} if red else set()), note
 
-    def _cold_tbl(src_pairs):
-        """寒気: 行=気圧面, 列=予想/しきい値。"""
-        rows = []
+    def _cold_tbl(src_pairs, red=False):
+        """寒気: 行=気圧面。しきい値は欄外注記。"""
+        rows, notes = [], []
         for area, elem in sorted(src_pairs):
             if not elem.startswith("cold"):
                 continue
             d = lines.get((area, elem))
             if isinstance(d, dict):
-                rows.append([d["label"], f"{d['peak']}{d['when']}", d["thresh"]])
-        return _tbl(["気圧面・種別", "予想最低", "※しきい値"], rows) if rows else None
+                rows.append([d["label"], f"{d['peak']}{d['when']}"])
+                notes.append(f"{d['label']} {d['thresh']}")
+        if not rows:
+            return None, ""
+        note = "※しきい値: " + "／".join(notes) if notes else ""
+        return _tbl(["気圧面・種別", "予想最低"], rows, red_cols={1} if red else set()), note
 
-    def _section(title, pairs):
-        """タイトル + 降水/風/寒気 のテーブルをまとめてブロック文字列に。"""
-        tbls = []
-        rt = _rain_pivot_tbl(pairs)
+    def _section(title, pairs, red=False):
+        """タイトル + 降水/風/寒気 テーブル + 欄外しきい値注記。"""
+        parts = []
+        rt, rn = _rain_pivot_tbl(pairs, red=red)
         if rt:
-            tbls.append("降水\n" + rt)
-        wt = _wind_tbl(pairs)
+            parts.append("降水\n" + rt + (f"\n{rn}" if rn else ""))
+        wt, wn = _wind_tbl(pairs, red=red)
         if wt:
-            tbls.append("風\n" + wt)
-        ct = _cold_tbl(pairs)
+            parts.append("風\n" + wt + (f"\n{wn}" if wn else ""))
+        ct, cn = _cold_tbl(pairs, red=red)
         if ct:
-            tbls.append("寒気\n" + ct)
-        if not tbls:
+            parts.append("寒気\n" + ct + (f"\n{cn}" if cn else ""))
+        if not parts:
             return None
-        return title + "\n" + "\n".join(tbls)
+        return title + "\n" + "\n".join(parts)
 
     # --- アラートテキスト組み立て ---
     note = (f"-# 数値予報ガイダンス {MODEL.upper()}（降水={FILTER}）"
@@ -518,17 +544,17 @@ def main():
     blocks = [note]
 
     if added:
-        b = _section("🆕 **しきい値到達（予想）**", sorted(added))
+        b = _section("🆕 **しきい値到達（予想）**", sorted(added), red=True)
         if b:
             blocks.append(b)
     if cleared:
-        rows = [[f"{ELEM_LABEL.get(e, e)}", a.replace("秋田県", ""), "しきい値未満に"]
+        rows = [[ELEM_LABEL.get(e, e), a.replace("秋田県", ""), "しきい値未満に"]
                 for a, e in sorted(cleared)]
         blocks.append("✅ **しきい値を下回った（予想）**\n"
                       + _tbl(["要素", "地域", "状態"], rows))
     if exceed:
         pairs = [(a, e) for a in sorted(exceed) for e in sorted(exceed[a])]
-        b = _section("**現在しきい値超えの予想**", pairs)
+        b = _section("**現在しきい値超えの予想**", pairs, red=True)
         if b:
             blocks.append(b)
     if ref:
