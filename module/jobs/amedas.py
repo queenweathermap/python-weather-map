@@ -1036,11 +1036,14 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
                 if not is_ranking:
                     continue
                 raw = tbl.screenshot()
-                # 空白画像（再レンダリング中に撮影された可能性）はスキップ
-                if len(raw) < 2000:
-                    print(f"[WARN] table[{i}] screenshot blank ({len(raw)} bytes), skip")
+                from PIL import Image as _PIL
+                tmp = _PIL.open(io.BytesIO(raw))
+                tw, th = tmp.width, tmp.height
+                print(f"[INFO] ranking table[{i}] {len(raw)} bytes {tw}x{th}")
+                # ヘッダー行だけ（データなし）のテーブルはスキップ
+                if th < 50:
+                    print(f"[WARN] table[{i}] too short ({th}px), skip")
                     continue
-                print(f"[INFO] ranking table[{i}] {len(raw)} bytes")
                 table_imgs.append(raw)
             except Exception as e:
                 print(f"[WARN] table[{i}] error: {e}")
