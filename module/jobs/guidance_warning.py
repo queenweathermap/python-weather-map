@@ -422,10 +422,22 @@ def main():
         return
 
     def _tbl(headers, rows):
-        sep = "|" + "|".join(":---" for _ in headers) + "|"
-        hdr = "|" + "|".join(headers) + "|"
-        body = "\n".join("|" + "|".join(str(c) for c in r) + "|" for r in rows)
-        return f"{hdr}\n{sep}\n{body}"
+        """コードブロック等幅テーブル（embed 内でも確実に整形される）。"""
+        if not rows:
+            return ""
+        cols = len(headers)
+        widths = [len(h) for h in headers]
+        for row in rows:
+            for i in range(cols):
+                widths[i] = max(widths[i], len(str(row[i])) if i < len(row) else 0)
+        def _line(cells):
+            return "  ".join(
+                str(cells[i]).ljust(widths[i]) if i < len(cells) else " " * widths[i]
+                for i in range(cols)
+            )
+        sep = "  ".join("-" * w for w in widths)
+        body = "\n".join([_line(headers), sep] + [_line(r) for r in rows])
+        return f"```\n{body}\n```"
 
     # 沿岸・内陸の列名を lines から自動検出（秋田県沿岸→沿岸、秋田県内陸→内陸）
     all_areas = sorted({k[0] for k in lines})
