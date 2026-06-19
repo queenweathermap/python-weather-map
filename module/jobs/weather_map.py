@@ -86,20 +86,29 @@ DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "8
 
 Attachment = Tuple[str, bytes, str]
 
-OUTPUT_TITLES = [
-    "① エマグラム",
-    "② AXJP140",
-    "③ AUPA20",
-    "④ 週間4列結合",
-    "⑤ 全部入り",
-]
-
 OUTPUT_FILENAMES = [
     "01_EMAGRAM",
     "02_AXJP140",
     "03_AUPA20",
     "04_LAYOUT_4_WEEKLY",
     "06_LAYOUT_5_DASHBOARD",
+]
+
+# Discord に送る画像とタイトル（AXJP140・AUPA20 は Notion のみ）
+DISCORD_TITLES = {
+    "01_EMAGRAM":        "① エマグラム",
+    "04_LAYOUT_4_WEEKLY": "② 週間4列結合",
+    "06_LAYOUT_5_DASHBOARD": "③ 全部入り",
+}
+DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
+
+# Notion に流し込む順序とラベル（まる数字なし）
+NOTION_ORDER = [
+    ("01_EMAGRAM",           "エマグラム"),
+    ("04_LAYOUT_4_WEEKLY",   "週間4列結合"),
+    ("06_LAYOUT_5_DASHBOARD","全部入り"),
+    ("03_AUPA20",            "AUPA20"),
+    ("02_AXJP140",           "AXJP140"),
 ]
 
 
@@ -1103,6 +1112,7 @@ def notion_write_db(
     run_prefix: str,
     rep_url: Optional[str],
     all_urls: List[str],
+    notion_items: List[Tuple[str, str]],
     errors: List[str],
 ) -> Optional[str]:
     if not notion_enabled():
@@ -1137,13 +1147,14 @@ def notion_write_db(
         print(f"[WARN] links failed: {e}")
 
     try:
-        if all_urls:
+        ordered_urls = [url for _, url in notion_items if url]
+        if ordered_urls:
             if NOTION_IMPORT_IMAGES:
-                items = []
-                for idx, url in enumerate(all_urls):
-                    fname = f"{OUTPUT_FILENAMES[idx]}.png" if idx < len(OUTPUT_FILENAMES) else f"image_{idx + 1}.png"
-                    items.append((fname, url, "image/png"))
-
+                items = [
+                    (f"{fname}.png", url, "image/png")
+                    for fname, url in notion_items
+                    if url
+                ]
                 append_imported_images_from_urls(
                     page_id,
                     items,
@@ -1152,7 +1163,7 @@ def notion_write_db(
                     poll_seconds=NOTION_IMPORT_POLL_SECONDS,
                 )
             else:
-                append_images(page_id, all_urls, chunk=30)
+                append_images(page_id, ordered_urls, chunk=30)
     except Exception as e:
         print(f"[WARN] Notion image append/import failed: {e}")
         # 移行中の安全策: Notion取り込みに失敗したら従来の外部URL埋め込みへ戻す
@@ -1197,7 +1208,9 @@ def notify_discord_images(
     webhook_url = discord_jma_webhook_url()
 
     for idx, filename in enumerate(OUTPUT_FILENAMES):
-        title = OUTPUT_TITLES[idx] if idx < len(OUTPUT_TITLES) else f"資料 {idx + 1}"
+        if filename in DISCORD_SKIP_FILENAMES:
+            continue
+        title = DISCORD_TITLES.get(filename, filename)
         extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
         if extra_links:
             title += "\n" + "\n".join(f"・[{t}](<{u}>)" for t, u in extra_links)
@@ -1298,12 +1311,16 @@ def main() -> None:
         images, errors = build_outputs()
         all_urls, rep_url = upload_to_r2(run_prefix, images)
 
+        url_map = dict(zip(OUTPUT_FILENAMES, all_urls))
+        notion_items = [(fname, url_map.get(fname, "")) for fname, _label in NOTION_ORDER]
+
         page_id = notion_write_db(
             issue_dt_jst=issue_dt_jst,
             rjtd=rjtd,
             run_prefix=run_prefix,
             rep_url=rep_url,
             all_urls=all_urls,
+            notion_items=notion_items,
             errors=errors,
         )
 
