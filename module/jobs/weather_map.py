@@ -102,13 +102,13 @@ DISCORD_TITLES = {
 }
 DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
 
-# Notion に流し込む順序とラベル（まる数字なし）
+# Notion に流し込む順序・ラベル・ファイル名（まる数字なし）
 NOTION_ORDER = [
-    ("01_EMAGRAM",           "エマグラム"),
-    ("04_LAYOUT_4_WEEKLY",   "週間4列結合"),
-    ("06_LAYOUT_5_DASHBOARD","全部入り"),
-    ("03_AUPA20",            "AUPA20"),
-    ("02_AXJP140",           "AXJP140"),
+    ("01_EMAGRAM",            "エマグラム",   "EMAGRAM"),
+    ("04_LAYOUT_4_WEEKLY",    "週間4列結合",  "LAYOUT_4_WEEKLY"),
+    ("06_LAYOUT_5_DASHBOARD", "全部入り",     "LAYOUT_DASHBOARD"),
+    ("03_AUPA20",             "AUPA20",       "AUPA20"),
+    ("02_AXJP140",            "AXJP140",      "AXJP140"),
 ]
 
 
@@ -1112,7 +1112,7 @@ def notion_write_db(
     run_prefix: str,
     rep_url: Optional[str],
     all_urls: List[str],
-    notion_items: List[Tuple[str, str]],
+    notion_items: List[Tuple[str, str, str, str]],
     errors: List[str],
 ) -> Optional[str]:
     if not notion_enabled():
@@ -1147,12 +1147,12 @@ def notion_write_db(
         print(f"[WARN] links failed: {e}")
 
     try:
-        ordered_urls = [url for _, url in notion_items if url]
+        ordered_urls = [url for _, _label, _nfname, url in notion_items if url]
         if ordered_urls:
             if NOTION_IMPORT_IMAGES:
                 items = [
-                    (f"{fname}.png", url, "image/png")
-                    for fname, url in notion_items
+                    (f"{nfname}.png", url, "image/png")
+                    for _fname, _label, nfname, url in notion_items
                     if url
                 ]
                 append_imported_images_from_urls(
@@ -1312,7 +1312,7 @@ def main() -> None:
         all_urls, rep_url = upload_to_r2(run_prefix, images)
 
         url_map = dict(zip(OUTPUT_FILENAMES, all_urls))
-        notion_items = [(fname, url_map.get(fname, "")) for fname, _label in NOTION_ORDER]
+        notion_items = [(fname, label, nfname, url_map.get(fname, "")) for fname, label, nfname in NOTION_ORDER]
 
         page_id = notion_write_db(
             issue_dt_jst=issue_dt_jst,
