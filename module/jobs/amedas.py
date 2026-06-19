@@ -630,10 +630,10 @@ def _upload_r2(items: List[Tuple[str, bytes]], jst_now: datetime) -> List[str]:
         print("[WARN] r2_utils not available")
         return []
 
-    day  = jst_now.strftime("%Y%m%d")
+    day_hm = jst_now.strftime("%Y%m%d/%H%M")
     urls: List[str] = []
     for fname, data in items:
-        key = f"{R2_PREFIX}/{day}/{fname}"
+        key = f"{R2_PREFIX}/{day_hm}/{fname}"
         try:
             put_bytes(key, data, content_type="image/png")
             urls.append(make_url(key))
