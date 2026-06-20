@@ -1,7 +1,6 @@
 {
   "秋田": [
-    "colddev500",
-    "colddev850"
+    "colddev500"
   ],
   "秋田県内陸": [
     "rain1",
@@ -12,8 +11,5 @@
     "rain1",
     "rain24",
     "rain3"
-  ],
-  "能代": [
-    "wind"
   ]
 }
