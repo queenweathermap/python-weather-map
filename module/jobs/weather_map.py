@@ -293,6 +293,7 @@ DISCORD_LINKS = [
 ]
 
 NOTION_LINKS = [
+    ("気象庁 専門家向け資料", "https://www.jma.go.jp/jma/kishou/know/expert/index.html"),
     ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
     ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
     ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
@@ -1184,6 +1185,7 @@ IMAGE_EXTRA_LINKS: dict = {
         ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
     ],
     "06_LAYOUT_5_DASHBOARD": [
+        ("気象庁 専門家向け資料", "https://www.jma.go.jp/jma/kishou/know/expert/index.html"),
         ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
         ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
     ],
