@@ -1,0 +1,85 @@
+name: Run JMA Advisor Guidance
+
+on:
+  schedule:
+    # 04:00 / 16:00  JST
+    # 19:00 / 07:00  UTC
+    - cron: "0 20,8 * * *"
+
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    env:
+      TZ: Asia/Tokyo
+
+      # ------------------------------------------------------------
+      # R2
+      # ------------------------------------------------------------
+      R2_ENABLE: "1"
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
+      R2_PREFIX: "adv-guidance"
+      R2_RETENTION_DAYS: "21"
+      R2_CLEANUP_DRY_RUN: "0"
+
+      # ------------------------------------------------------------
+      # Discord（ADV専用チャンネル）
+      # ------------------------------------------------------------
+      DISCORD_ENABLE: "1"
+      DISCORD_ADV_WEBHOOK_URL: ${{ secrets.DISCORD_ADV_WEBHOOK_URL }}
+      DISCORD_MAX_IMAGES_PER_MESSAGE: "10"
+      DISCORD_SLEEP_SEC: "1.0"
+
+      # ------------------------------------------------------------
+      # JMA 気象防災アドバイザー（Basic認証）
+      # ------------------------------------------------------------
+      JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}
+      JMA_ADV_PASS: ${{ secrets.JMA_ADV_PASS }}
+      JMA_ADV_AREA: "秋田県"
+      JMA_ADV_COLD_STATION: "秋田"
+
+      # ------------------------------------------------------------
+      # スクリーンショット設定
+      # ------------------------------------------------------------
+      GUIDANCE_VIEWPORT_WIDTH: "1600"
+      GUIDANCE_VIEWPORT_HEIGHT: "1200"
+      GUIDANCE_WAIT_MS: "2500"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pillow playwright boto3
+
+      - name: Install Japanese fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
+          fc-cache -f
+
+      - name: Install Playwright browsers
+        run: |
+          playwright install chromium
+
+      - name: Run JMA Advisor Guidance
+        run: |
+          python scripts/advisor_weathermap.py
+
+      - name: Cleanup old R2 objects
+        if: always()
+        run: |
+          python scripts/r2_cleanup.py
