@@ -2,9 +2,9 @@ name: Run JMA ADV TGV
 
 on:
   schedule:
-    # 03:10 / 09:10 / 15:10 / 21:10 JST
-    # 18:10 / 00:10 / 06:10 / 12:10 UTC
-    - cron: "10 18,0,6,12 * * *"
+    # 05:10 / 17:10 JST
+    # 20:10 / 08:10 UTC
+    - cron: "10 20,8 * * *"
 
   workflow_dispatch:
 
