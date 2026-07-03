@@ -19,6 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fix broken Microsoft apt repos
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+                     /etc/apt/sources.list.d/azure-cli.list
+          sudo apt-get update -qq || true
+
       - name: Install Japanese fonts
         run: sudo apt-get install -y fonts-noto-cjk
 
