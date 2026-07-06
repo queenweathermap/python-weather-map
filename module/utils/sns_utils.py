@@ -2,19 +2,17 @@
 # =============================================================================
 # module/utils/sns_utils.py
 #
-# SNS 自動投稿ユーティリティ
-#   ・Bluesky（AT Protocol / 無料）: 画像付き投稿
+# SNS 自動投稿ユーティリティ（複数画像対応 = 1投稿に複数枚）
+#   ・Bluesky（AT Protocol / 無料）      : embed.images に最大4枚
+#   ・X（従量課金）                       : media_ids に最大4枚
+#   ・Threads（Meta / 無料）             : 1枚=単一投稿 / 2枚以上=カルーセル
 #
-# 使い方:
-#   from module.utils.sns_utils import post_bluesky
-#   post_bluesky(text="...", png=png_bytes, alt="代替テキスト")
+# 画像は images=[(png_bytes, alt), ...] の形で渡す。
 #
 # 必要な環境変数（GitHub Actions secrets 推奨）:
-#   BLUESKY_ENABLE=1
-#   BLUESKY_HANDLE=xxxxx.bsky.social   （またはカスタムドメイン）
-#   BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx  （アプリパスワード。通常のログインPW不可）
-#
-# アプリパスワードは Bluesky の Settings → App Passwords で発行する。
+#   Bluesky : BLUESKY_ENABLE / BLUESKY_HANDLE / BLUESKY_APP_PASSWORD
+#   X       : X_ENABLE / X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_SECRET
+#   Threads : THREADS_ENABLE / THREADS_USER_ID / THREADS_ACCESS_TOKEN
 # =============================================================================
 
 from __future__ import annotations
@@ -23,13 +21,19 @@ import io
 import os
 import time
 from datetime import datetime, timezone
+from typing import List, Tuple
 
 import requests
 
+Image_ = Tuple[bytes, str]  # (png_bytes, alt)
+
 BSKY_PDS = os.environ.get("BLUESKY_PDS", "https://bsky.social").rstrip("/")
-BSKY_BLOB_LIMIT = 950_000  # Bluesky の blob 上限(約1MB)より少し小さめに収める
+BSKY_BLOB_LIMIT = 950_000  # Bluesky の blob 上限(約1MB)より少し小さめ
 
 
+# =============================================================================
+# Bluesky
+# =============================================================================
 def bluesky_enabled() -> bool:
     return (
         os.environ.get("BLUESKY_ENABLE", "0").lower() in ("1", "true", "yes", "on")
@@ -38,81 +42,66 @@ def bluesky_enabled() -> bool:
     )
 
 
-def _fit_blob(png: bytes) -> tuple[bytes, str]:
-    """
-    Bluesky の blob 上限に収める。
-    上限内の PNG はそのまま、超える場合は JPEG 化→必要なら段階的に品質/画素を落とす。
-    """
+def _fit_blob(png: bytes) -> Tuple[bytes, str]:
+    """Bluesky の blob 上限に収める。超える場合は JPEG 化→品質/画素を落とす。"""
     if len(png) <= BSKY_BLOB_LIMIT:
         return png, "image/png"
-
     try:
         from PIL import Image
     except Exception:
-        # PIL が無い場合はそのまま返す（失敗しても投稿側で握りつぶす）
         return png, "image/png"
-
     im = Image.open(io.BytesIO(png)).convert("RGB")
     for q in (90, 85, 80, 72, 65):
         buf = io.BytesIO()
         im.save(buf, format="JPEG", quality=q, optimize=True)
         if buf.tell() <= BSKY_BLOB_LIMIT:
             return buf.getvalue(), "image/jpeg"
-
-    # まだ大きければ画素を落とす
     while im.width > 1000:
         im = im.resize((int(im.width * 0.85), int(im.height * 0.85)))
         buf = io.BytesIO()
         im.save(buf, format="JPEG", quality=72, optimize=True)
         if buf.tell() <= BSKY_BLOB_LIMIT:
             return buf.getvalue(), "image/jpeg"
-
     return buf.getvalue(), "image/jpeg"
 
 
-def post_bluesky(*, text: str, png: bytes, alt: str = "") -> bool:
-    """Bluesky に画像1枚付きで投稿する。成功で True。"""
+def post_bluesky(*, text: str, images: List[Image_]) -> bool:
+    """Bluesky に画像付きで投稿（images=[(png, alt), ...] 最大4枚）。成功で True。"""
     if not bluesky_enabled():
         print("[INFO] Bluesky 無効（BLUESKY_ENABLE / HANDLE / APP_PASSWORD 未設定）")
+        return False
+    images = list(images)[:4]
+    if not images:
         return False
 
     handle = os.environ["BLUESKY_HANDLE"].strip()
     app_pw = os.environ["BLUESKY_APP_PASSWORD"].strip()
-
     try:
-        # 1. セッション作成
         s = requests.post(
             f"{BSKY_PDS}/xrpc/com.atproto.server.createSession",
-            json={"identifier": handle, "password": app_pw},
-            timeout=60,
+            json={"identifier": handle, "password": app_pw}, timeout=60,
         )
         s.raise_for_status()
         sess = s.json()
-        jwt = sess["accessJwt"]
+        auth = {"Authorization": f"Bearer {sess['accessJwt']}"}
         did = sess["did"]
-        auth = {"Authorization": f"Bearer {jwt}"}
 
-        # 2. 画像アップロード（blob）
-        blob_bytes, mime = _fit_blob(png)
-        up = requests.post(
-            f"{BSKY_PDS}/xrpc/com.atproto.repo.uploadBlob",
-            headers={**auth, "Content-Type": mime},
-            data=blob_bytes,
-            timeout=120,
-        )
-        up.raise_for_status()
-        blob = up.json()["blob"]
+        img_records = []
+        for png, alt in images:
+            blob_bytes, mime = _fit_blob(png)
+            up = requests.post(
+                f"{BSKY_PDS}/xrpc/com.atproto.repo.uploadBlob",
+                headers={**auth, "Content-Type": mime}, data=blob_bytes, timeout=120,
+            )
+            up.raise_for_status()
+            img_records.append({"alt": alt or text[:280], "image": up.json()["blob"]})
 
-        # 3. 投稿レコード作成
         record = {
             "$type": "app.bsky.feed.post",
             "text": text,
             "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "langs": ["ja"],
-            "embed": {
-                "$type": "app.bsky.embed.images",
-                "images": [{"alt": alt or text[:280], "image": blob}],
-            },
+            "embed": {"$type": "app.bsky.embed.images", "images": img_records},
         }
         cr = requests.post(
             f"{BSKY_PDS}/xrpc/com.atproto.repo.createRecord",
@@ -121,20 +110,15 @@ def post_bluesky(*, text: str, png: bytes, alt: str = "") -> bool:
             timeout=60,
         )
         cr.raise_for_status()
-        print("[OK] Bluesky posted")
+        print(f"[OK] Bluesky posted ({len(images)} images)")
         return True
-
     except Exception as e:
         print(f"[ERR] Bluesky post failed: {e}")
         return False
 
 
 # =============================================================================
-# X (旧Twitter)  ※2026年2月以降は従量課金。tweepy で v1.1メディアアップ→v2投稿。
-#   必要な環境変数:
-#     X_ENABLE=1
-#     X_API_KEY / X_API_SECRET            （consumer key/secret）
-#     X_ACCESS_TOKEN / X_ACCESS_SECRET    （access token/secret）
+# X (旧Twitter) ※2026-02以降は従量課金。tweepy で v1.1メディアアップ→v2投稿。
 # =============================================================================
 def x_enabled() -> bool:
     return (
@@ -144,8 +128,8 @@ def x_enabled() -> bool:
     )
 
 
-def post_x(*, text: str, png: bytes, alt: str = "") -> bool:
-    """X に画像1枚付きで投稿する。成功で True。"""
+def post_x(*, text: str, images: List[Image_]) -> bool:
+    """X に画像付きで投稿（最大4枚）。成功で True。"""
     if not x_enabled():
         print("[INFO] X 無効（X_ENABLE / キー未設定）")
         return False
@@ -155,27 +139,30 @@ def post_x(*, text: str, png: bytes, alt: str = "") -> bool:
         print(f"[ERR] tweepy 未インストール: {e}")
         return False
 
+    images = list(images)[:4]
     api_key = os.environ["X_API_KEY"].strip()
     api_secret = os.environ["X_API_SECRET"].strip()
     access_token = os.environ["X_ACCESS_TOKEN"].strip()
     access_secret = os.environ["X_ACCESS_SECRET"].strip()
-
     try:
         auth = tweepy.OAuth1UserHandler(api_key, api_secret, access_token, access_secret)
-        api = tweepy.API(auth)  # v1.1: メディアアップロード用
-        media = api.media_upload(filename="post.png", file=io.BytesIO(png))
-        if alt:
-            try:
-                api.create_media_metadata(media.media_id, alt)
-            except Exception as e:
-                print(f"[WARN] X alt設定失敗: {e}")
+        api = tweepy.API(auth)  # v1.1: メディアアップロード
+        media_ids = []
+        for idx, (png, alt) in enumerate(images):
+            media = api.media_upload(filename=f"post_{idx}.png", file=io.BytesIO(png))
+            if alt:
+                try:
+                    api.create_media_metadata(media.media_id, alt)
+                except Exception as e:
+                    print(f"[WARN] X alt設定失敗: {e}")
+            media_ids.append(media.media_id)
 
         client = tweepy.Client(
             consumer_key=api_key, consumer_secret=api_secret,
             access_token=access_token, access_token_secret=access_secret,
-        )  # v2: 投稿作成用
-        client.create_tweet(text=text[:280], media_ids=[media.media_id])
-        print("[OK] X posted")
+        )  # v2: 投稿作成
+        client.create_tweet(text=text[:280], media_ids=media_ids)
+        print(f"[OK] X posted ({len(media_ids)} images)")
         return True
     except Exception as e:
         print(f"[ERR] X post failed: {e}")
@@ -183,12 +170,7 @@ def post_x(*, text: str, png: bytes, alt: str = "") -> bool:
 
 
 # =============================================================================
-# Threads (Meta)  ※無料。画像は「公開URL」からMetaが取得する。
-#   必要な環境変数:
-#     THREADS_ENABLE=1
-#     THREADS_USER_ID
-#     THREADS_ACCESS_TOKEN   （長期トークン）
-#   仕様: 画像は幅320〜1440px / 8MB以下 / JPEG or PNG。作成→30秒以上待つ→publish。
+# Threads (Meta) ※無料。画像は公開URL(R2)からMetaが取得。2枚以上はカルーセル。
 # =============================================================================
 def threads_enabled() -> bool:
     return (
@@ -213,9 +195,9 @@ def _threads_fit_png(png: bytes) -> bytes:
     return buf.getvalue()
 
 
-def post_threads(*, text: str, png: bytes, r2_upload) -> bool:
+def post_threads(*, text: str, images: List[Image_], r2_upload) -> bool:
     """
-    Threads に画像1枚付きで投稿する。成功で True。
+    Threads に投稿。1枚=単一投稿 / 2枚以上=カルーセル。成功で True。
     画像は公開URLが必須のため、r2_upload(key, bytes)->url で一旦R2に上げてURLを渡す。
     """
     if not threads_enabled():
@@ -225,36 +207,63 @@ def post_threads(*, text: str, png: bytes, r2_upload) -> bool:
         print("[ERR] Threads: 公開URLが必要（r2_upload 未指定）")
         return False
 
-    uid = os.environ["THREADS_USER_ID"].strip()
-    token = os.environ["THREADS_ACCESS_TOKEN"].strip()
-
-    img = _threads_fit_png(png)
-    key = f"threads/{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.png"
-    image_url = r2_upload(key, img)
-    if not image_url:
-        print("[ERR] Threads: R2アップロード失敗（公開URLを用意できず）")
+    images = list(images)
+    if not images:
         return False
 
+    uid = os.environ["THREADS_USER_ID"].strip()
+    token = os.environ["THREADS_ACCESS_TOKEN"].strip()
     base = "https://graph.threads.net/v1.0"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+    # 各画像をR2の公開URLへ
+    urls: List[Tuple[str, str]] = []  # (image_url, alt)
+    for i, (png, alt) in enumerate(images):
+        u = r2_upload(f"threads/{ts}_{i}.png", _threads_fit_png(png))
+        if not u:
+            print("[ERR] Threads: R2アップロード失敗（公開URLを用意できず）")
+            return False
+        urls.append((u, alt))
+
     try:
-        c = requests.post(
-            f"{base}/{uid}/threads",
-            params={"media_type": "IMAGE", "image_url": image_url, "text": text, "access_token": token},
-            timeout=60,
-        )
-        c.raise_for_status()
-        creation_id = c.json()["id"]
+        if len(urls) == 1:
+            image_url, alt = urls[0]
+            params = {"media_type": "IMAGE", "image_url": image_url, "text": text, "access_token": token}
+            if alt:
+                params["alt_text"] = alt
+            c = requests.post(f"{base}/{uid}/threads", params=params, timeout=60)
+            c.raise_for_status()
+            creation_id = c.json()["id"]
+        else:
+            # カルーセル: 各画像をitemコンテナ化 → CAROUSEL親
+            child_ids = []
+            for image_url, alt in urls:
+                params = {"media_type": "IMAGE", "image_url": image_url,
+                          "is_carousel_item": "true", "access_token": token}
+                if alt:
+                    params["alt_text"] = alt
+                cc = requests.post(f"{base}/{uid}/threads", params=params, timeout=60)
+                cc.raise_for_status()
+                child_ids.append(cc.json()["id"])
+            c = requests.post(
+                f"{base}/{uid}/threads",
+                params={"media_type": "CAROUSEL", "children": ",".join(child_ids),
+                        "text": text, "access_token": token},
+                timeout=60,
+            )
+            c.raise_for_status()
+            creation_id = c.json()["id"]
 
         time.sleep(35)  # Metaの処理待ち（30秒以上）
 
         p = requests.post(
             f"{base}/{uid}/threads_publish",
-            params={"creation_id": creation_id, "access_token": token},
-            timeout=60,
+            params={"creation_id": creation_id, "access_token": token}, timeout=60,
         )
         p.raise_for_status()
-        print("[OK] Threads posted")
+        print(f"[OK] Threads posted ({len(urls)} images{' carousel' if len(urls) > 1 else ''})")
         return True
     except Exception as e:
-        print(f"[ERR] Threads post failed: {e}")
+        body = getattr(getattr(e, "response", None), "text", "")
+        print(f"[ERR] Threads post failed: {e} {body}")
         return False
