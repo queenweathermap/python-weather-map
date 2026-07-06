@@ -58,6 +58,14 @@ ELEMENTS = [
     ("snow", "最深積雪 (cm)"),
 ]
 
+# 最深積雪の列を出す月（12〜3月のみ）。それ以外は気温2列だけにする。
+SNOW_MONTHS = {12, 1, 2, 3}
+
+
+def elements_for_month(month: int):
+    """対象月に応じて描画する項目を返す（積雪は12〜3月のみ）。"""
+    return [e for e in ELEMENTS if e[0] != "snow" or month in SNOW_MONTHS]
+
 # 年ごとの色（新しい年→青 / 中→金 / 古→赤：お手本に合わせる）
 YEAR_COLORS = ["#1f6fd6", "#eaa800", "#e0331f"]
 
@@ -102,8 +110,13 @@ def resolve_window() -> Tuple[int, int, int, int, List[int]]:
     """
     n = now_jst()
 
-    year = int(os.environ.get("CLIMATE_TARGET_YEAR", n.year))
-    month = int(os.environ.get("CLIMATE_TARGET_MONTH", n.month))
+    # env は workflow_dispatch 未入力時に空文字 "" で来るため、空は「未指定」として扱う。
+    def _int_env(name: str, default: int) -> int:
+        v = os.environ.get(name, "").strip()
+        return int(v) if v else default
+
+    year = _int_env("CLIMATE_TARGET_YEAR", n.year)
+    month = _int_env("CLIMATE_TARGET_MONTH", n.month)
 
     half = os.environ.get("CLIMATE_TARGET_HALF", "").strip().lower()
     if half not in ("first", "second"):
@@ -286,10 +299,13 @@ def build_figure(
     n_years = len(comparison_years)
     n_st = len(STATIONS)
 
-    fig, axes = plt.subplots(n_st, 3, figsize=(15, 3.9 * n_st), squeeze=False)
+    elements = elements_for_month(month)  # 積雪は12〜3月のみ
+    n_col = len(elements)
+
+    fig, axes = plt.subplots(n_st, n_col, figsize=(5.0 * n_col, 3.9 * n_st), squeeze=False)
 
     for r, (name, _p, _b, _k) in enumerate(STATIONS):
-        for c, (ekey, etitle) in enumerate(ELEMENTS):
+        for c, (ekey, etitle) in enumerate(elements):
             ax = axes[r][c]
             st_years = data.get(name, {})
 
@@ -329,10 +345,12 @@ def build_figure(
     labels = [str(y) for y in comparison_years]
     fig.legend(handles, labels, loc="upper right", ncol=n_years, frameon=False, fontsize=10)
 
+    elem_names = {"tmax": "最高気温", "tmin": "最低気温", "snow": "最深積雪"}
+    subtitle_elems = "・".join(elem_names[k] for k, _t in elements)
     fig.suptitle(
         f"過去3年比較 {month}/{start_day}〜{month}/{end_day}"
         f"（{comparison_years[0]}・{comparison_years[1]}・{comparison_years[2]}）"
-        f" ／ 最高・最低気温・最深積雪",
+        f" ／ {subtitle_elems}",
         fontsize=13,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.96])
@@ -408,9 +426,11 @@ def main() -> None:
     key = f"{year}{month:02d}/climate_{half_label}_{start_day:02d}-{end_day:02d}.png"
     r2_url = upload_r2(key, png)
 
-    title = (f"📊 過去3年 気象比較（秋田・鷹巣・横手）\n"
+    elem_names = {"tmax": "最高気温", "tmin": "最低気温", "snow": "最深積雪"}
+    elem_label = "・".join(elem_names[k] for k, _t in elements_for_month(month))
+    title = (f"📊 過去3年 気象比較（鷹巣・秋田・横手）\n"
              f"{month}月{half_label}（{month}/{start_day}〜{month}/{end_day}）"
-             f"／最高・最低気温・最深積雪")
+             f"／{elem_label}")
     post_discord(png, title, r2_url)
 
     print("=== Done ===")
