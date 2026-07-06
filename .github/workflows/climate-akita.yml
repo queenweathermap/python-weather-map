@@ -58,7 +58,7 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
       R2_PREFIX: "climate"
-      R2_RETENTION_DAYS: "400"
+      R2_RETENTION_DAYS: "30"
       R2_CLEANUP_DRY_RUN: "0"
 
     steps:
@@ -88,3 +88,8 @@ jobs:
       - name: Run Daylength (日の出・日の入り)
         run: |
           python scripts/daylength.py
+
+      - name: Cleanup old R2 objects
+        if: always()
+        run: |
+          python scripts/r2_cleanup.py
