@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import calendar
 import io
+import math
 import os
 import re
 import sys
@@ -302,6 +303,21 @@ def build_figure(
     elements = elements_for_month(month)  # 積雪は12〜3月のみ
     n_col = len(elements)
 
+    # 気温は最高・最低で目盛りを完全に揃える（全地点の最高/最低をまとめて共通レンジに）。
+    temp_vals = [
+        v
+        for (name, _p, _b, _k) in STATIONS
+        for y in comparison_years
+        for ekey in ("tmax", "tmin")
+        for v in data.get(name, {}).get(y, {}).get(ekey, {}).values()
+        if v is not None
+    ]
+    if temp_vals:
+        tlo = math.floor((min(temp_vals) - 1) / 5) * 5
+        thi = math.ceil((max(temp_vals) + 1) / 5) * 5
+    else:
+        tlo, thi = 0, 35
+
     fig, axes = plt.subplots(n_st, n_col, figsize=(5.0 * n_col, 3.9 * n_st), squeeze=False)
 
     for r, (name, _p, _b, _k) in enumerate(STATIONS):
@@ -321,6 +337,7 @@ def build_figure(
                     ax.plot(days, ys, marker="o", ms=3, lw=1.6,
                             color=YEAR_COLORS[yi % len(YEAR_COLORS)], label=str(y))
                 ax.axhline(0, color="#888", lw=0.8, zorder=0)  # 0℃線
+                ax.set_ylim(tlo, thi)  # 最高・最低で目盛りを揃える
             else:  # snow: 年ごとの棒グラフ（平年線なし）
                 width = 0.8 / max(1, n_years)
                 for yi, y in enumerate(comparison_years):
@@ -333,7 +350,10 @@ def build_figure(
             if r == 0:
                 ax.set_title(etitle, fontsize=11)
             if c == 0:
-                ax.set_ylabel(f"● {name}", fontsize=12, rotation=90, labelpad=8)
+                # 地名は「●／1文字ずつ縦積み」で表示する（例: ●\n鷹\n巣）。
+                vlabel = "●\n" + "\n".join(name)
+                ax.set_ylabel(vlabel, rotation=0, ha="center", va="center",
+                              labelpad=18, fontsize=12, linespacing=1.2)
             ax.grid(True, axis="y", alpha=0.3)
             ax.set_xlim(start_day - 0.6, end_day + 0.6)
             ax.set_xticks(days)
