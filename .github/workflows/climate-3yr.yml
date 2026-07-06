@@ -1,4 +1,4 @@
-name: Run Climate 3yr
+name: Run Climate
 
 on:
   schedule:
