@@ -62,7 +62,8 @@ LAYOUT_GAP = int(os.environ.get("LAYOUT_GAP", "24"))
 LAYOUT5_TRIM_PAD = int(os.environ.get("LAYOUT5_TRIM_PAD", "0"))
 
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
-R2_PREFIX = os.environ.get("R2_PREFIX", "jma").strip().strip("/")
+# R2キー先頭の prefix（weathermap 等）は r2_utils.normalize_key() が R2_PREFIX env から
+# 自動付与する。ここで付けると weathermap/weathermap/... のように二重になるため付けない。
 
 NOTION_IMPORT_IMAGES = os.environ.get("NOTION_IMPORT_IMAGES", "0").lower() in ("1", "true", "yes", "on")
 NOTION_IMPORT_TIMEOUT_SECONDS = int(os.environ.get("NOTION_IMPORT_TIMEOUT_SECONDS", "180"))
@@ -1226,8 +1227,7 @@ def notify_discord_images(
                 highres_url = all_urls[idx]
                 content = (
                     f"{init_jst} / {title}\n"
-                    f"高解像度PNG（R2 / 30日保存）:\n"
-                    f"{highres_url}"
+                    f"**[★高解像度PNG（R2 / 30日保存）を表示](<{highres_url}>)**"
                 )
 
                 if os.path.exists(src_path):
@@ -1308,7 +1308,8 @@ def main() -> None:
         issue_dt_jst = issue_base_jst()
         rjtd = issue_dt_jst.strftime("%d%H%M")
         day = issue_dt_jst.strftime("%Y%m%d")
-        run_prefix = f"{R2_PREFIX}/{day}/RJTD_{rjtd}"
+        # 先頭prefixは normalize_key() が付けるので、ここは日付/RJTD だけにする。
+        run_prefix = f"{day}/RJTD_{rjtd}"
 
         images, errors = build_outputs()
         all_urls, rep_url = upload_to_r2(run_prefix, images)
