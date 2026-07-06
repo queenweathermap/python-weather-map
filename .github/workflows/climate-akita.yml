@@ -97,13 +97,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pandas lxml matplotlib boto3 astral tzdata pillow tweepy
 
-      - name: Run Climate 3yr
+      - name: Run Climate Akita (2枚まとめ投稿)
         run: |
-          python scripts/climate_3yr.py
-
-      - name: Run Daylength (日の出・日の入り)
-        run: |
-          python scripts/daylength.py
+          python scripts/climate_akita.py
 
       - name: Cleanup old R2 objects
         if: always()
