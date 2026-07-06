@@ -49,6 +49,22 @@ jobs:
       BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
 
       # ------------------------------------------------------------
+      # X（旧Twitter・従量課金）: tweepy でメディア付き投稿
+      # ------------------------------------------------------------
+      X_ENABLE: "1"
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+
+      # ------------------------------------------------------------
+      # Threads（Meta・無料）: 画像は公開URL(R2)から取得される
+      # ------------------------------------------------------------
+      THREADS_ENABLE: "1"
+      THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+
+      # ------------------------------------------------------------
       # R2（任意・高解像度PNGの置き場）
       # ------------------------------------------------------------
       R2_ENABLE: "1"
@@ -79,7 +95,7 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas lxml matplotlib boto3 astral tzdata pillow
+          pip install requests pandas lxml matplotlib boto3 astral tzdata pillow tweepy
 
       - name: Run Climate 3yr
         run: |
