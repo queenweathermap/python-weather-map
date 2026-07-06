@@ -70,8 +70,12 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas lxml matplotlib boto3
+          pip install requests pandas lxml matplotlib boto3 astral tzdata
 
       - name: Run Climate 3yr
         run: |
           python scripts/climate_3yr.py
+
+      - name: Run Daylength (日の出・日の入り)
+        run: |
+          python scripts/daylength.py
