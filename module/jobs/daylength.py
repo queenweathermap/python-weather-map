@@ -292,6 +292,14 @@ def main() -> None:
              f"{month}月{half}（{month}/{start_day}〜{month}/{end_day}）")
     post_discord(png, title, r2_url)
 
+    # Bluesky（有効時のみ）
+    from module.utils.sns_utils import post_bluesky
+    post_bluesky(
+        text=f"秋田県 昼の長さ（日の出・日の入り） {month}月{half}\n#秋田 #日の出 #日の入り",
+        png=png,
+        alt=f"秋田県 日の出・日の入り・昼の長さ {month}/{start_day}〜{month}/{end_day}",
+    )
+
     print("=== Done ===")
 
 
