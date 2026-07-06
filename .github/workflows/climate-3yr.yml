@@ -40,6 +40,15 @@ jobs:
       DISCORD_CLIMATE_WEBHOOK_URL: ${{ secrets.DISCORD_CLIMATE_WEBHOOK_URL }}
 
       # ------------------------------------------------------------
+      # Bluesky 自動投稿（無料 / AT Protocol）
+      #   BLUESKY_HANDLE 例: yourname.bsky.social
+      #   BLUESKY_APP_PASSWORD は Settings→App Passwords で発行したもの
+      # ------------------------------------------------------------
+      BLUESKY_ENABLE: "1"
+      BLUESKY_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
+      BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
+
+      # ------------------------------------------------------------
       # R2（任意・高解像度PNGの置き場）
       # ------------------------------------------------------------
       R2_ENABLE: "1"
@@ -70,7 +79,7 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas lxml matplotlib boto3 astral tzdata
+          pip install requests pandas lxml matplotlib boto3 astral tzdata pillow
 
       - name: Run Climate 3yr
         run: |
