@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import os
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -125,4 +126,135 @@ def post_bluesky(*, text: str, png: bytes, alt: str = "") -> bool:
 
     except Exception as e:
         print(f"[ERR] Bluesky post failed: {e}")
+        return False
+
+
+# =============================================================================
+# X (旧Twitter)  ※2026年2月以降は従量課金。tweepy で v1.1メディアアップ→v2投稿。
+#   必要な環境変数:
+#     X_ENABLE=1
+#     X_API_KEY / X_API_SECRET            （consumer key/secret）
+#     X_ACCESS_TOKEN / X_ACCESS_SECRET    （access token/secret）
+# =============================================================================
+def x_enabled() -> bool:
+    return (
+        os.environ.get("X_ENABLE", "0").lower() in ("1", "true", "yes", "on")
+        and all(os.environ.get(k, "").strip() for k in
+                ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"))
+    )
+
+
+def post_x(*, text: str, png: bytes, alt: str = "") -> bool:
+    """X に画像1枚付きで投稿する。成功で True。"""
+    if not x_enabled():
+        print("[INFO] X 無効（X_ENABLE / キー未設定）")
+        return False
+    try:
+        import tweepy
+    except Exception as e:
+        print(f"[ERR] tweepy 未インストール: {e}")
+        return False
+
+    api_key = os.environ["X_API_KEY"].strip()
+    api_secret = os.environ["X_API_SECRET"].strip()
+    access_token = os.environ["X_ACCESS_TOKEN"].strip()
+    access_secret = os.environ["X_ACCESS_SECRET"].strip()
+
+    try:
+        auth = tweepy.OAuth1UserHandler(api_key, api_secret, access_token, access_secret)
+        api = tweepy.API(auth)  # v1.1: メディアアップロード用
+        media = api.media_upload(filename="post.png", file=io.BytesIO(png))
+        if alt:
+            try:
+                api.create_media_metadata(media.media_id, alt)
+            except Exception as e:
+                print(f"[WARN] X alt設定失敗: {e}")
+
+        client = tweepy.Client(
+            consumer_key=api_key, consumer_secret=api_secret,
+            access_token=access_token, access_token_secret=access_secret,
+        )  # v2: 投稿作成用
+        client.create_tweet(text=text[:280], media_ids=[media.media_id])
+        print("[OK] X posted")
+        return True
+    except Exception as e:
+        print(f"[ERR] X post failed: {e}")
+        return False
+
+
+# =============================================================================
+# Threads (Meta)  ※無料。画像は「公開URL」からMetaが取得する。
+#   必要な環境変数:
+#     THREADS_ENABLE=1
+#     THREADS_USER_ID
+#     THREADS_ACCESS_TOKEN   （長期トークン）
+#   仕様: 画像は幅320〜1440px / 8MB以下 / JPEG or PNG。作成→30秒以上待つ→publish。
+# =============================================================================
+def threads_enabled() -> bool:
+    return (
+        os.environ.get("THREADS_ENABLE", "0").lower() in ("1", "true", "yes", "on")
+        and bool(os.environ.get("THREADS_USER_ID", "").strip())
+        and bool(os.environ.get("THREADS_ACCESS_TOKEN", "").strip())
+    )
+
+
+def _threads_fit_png(png: bytes) -> bytes:
+    """Threadsの幅上限(1440px)に収める。"""
+    try:
+        from PIL import Image
+    except Exception:
+        return png
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    if im.width > 1440:
+        h = max(1, int(im.height * 1440 / im.width))
+        im = im.resize((1440, h))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def post_threads(*, text: str, png: bytes, r2_upload) -> bool:
+    """
+    Threads に画像1枚付きで投稿する。成功で True。
+    画像は公開URLが必須のため、r2_upload(key, bytes)->url で一旦R2に上げてURLを渡す。
+    """
+    if not threads_enabled():
+        print("[INFO] Threads 無効（THREADS_ENABLE / USER_ID / TOKEN 未設定）")
+        return False
+    if r2_upload is None:
+        print("[ERR] Threads: 公開URLが必要（r2_upload 未指定）")
+        return False
+
+    uid = os.environ["THREADS_USER_ID"].strip()
+    token = os.environ["THREADS_ACCESS_TOKEN"].strip()
+
+    img = _threads_fit_png(png)
+    key = f"threads/{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.png"
+    image_url = r2_upload(key, img)
+    if not image_url:
+        print("[ERR] Threads: R2アップロード失敗（公開URLを用意できず）")
+        return False
+
+    base = "https://graph.threads.net/v1.0"
+    try:
+        c = requests.post(
+            f"{base}/{uid}/threads",
+            params={"media_type": "IMAGE", "image_url": image_url, "text": text, "access_token": token},
+            timeout=60,
+        )
+        c.raise_for_status()
+        creation_id = c.json()["id"]
+
+        time.sleep(35)  # Metaの処理待ち（30秒以上）
+
+        p = requests.post(
+            f"{base}/{uid}/threads_publish",
+            params={"creation_id": creation_id, "access_token": token},
+            timeout=60,
+        )
+        p.raise_for_status()
+        print("[OK] Threads posted")
+        return True
+    except Exception as e:
+        print(f"[ERR] Threads post failed: {e}")
         return False
