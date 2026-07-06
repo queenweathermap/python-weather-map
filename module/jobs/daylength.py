@@ -292,13 +292,8 @@ def main() -> None:
              f"{month}月{half}（{month}/{start_day}〜{month}/{end_day}）")
     post_discord(png, title, r2_url)
 
-    # SNS（各サービスは有効時のみ投稿）
-    from module.utils.sns_utils import post_bluesky, post_x, post_threads
-    sns_text = f"秋田県 昼の長さ（日の出・日の入り） {month}月{half}\n#秋田 #日の出 #日の入り"
-    sns_alt = f"秋田県 日の出・日の入り・昼の長さ {month}/{start_day}〜{month}/{end_day}"
-    post_bluesky(text=sns_text, png=png, alt=sns_alt)
-    post_x(text=sns_text, png=png, alt=sns_alt)
-    post_threads(text=sns_text, png=png, r2_upload=upload_r2)
+    # SNS投稿は climate_akita.py（統合エントリ）で2枚まとめて行う。
+    # この単体実行では Discord のみ（画像確認・デバッグ用）。
 
     print("=== Done ===")
 

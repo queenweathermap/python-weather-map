@@ -453,13 +453,8 @@ def main() -> None:
              f"／{elem_label}")
     post_discord(png, title, r2_url)
 
-    # SNS（各サービスは有効時のみ投稿）
-    from module.utils.sns_utils import post_bluesky, post_x, post_threads
-    sns_text = f"秋田・鷹巣・横手 過去3年の気象比較（{month}月{half_label}）\n{elem_label}\n#秋田 #気象 #気温"
-    sns_alt = f"秋田県3地点の過去3年 {elem_label} 比較グラフ {month}/{start_day}〜{month}/{end_day}"
-    post_bluesky(text=sns_text, png=png, alt=sns_alt)
-    post_x(text=sns_text, png=png, alt=sns_alt)
-    post_threads(text=sns_text, png=png, r2_upload=upload_r2)
+    # SNS投稿は climate_akita.py（統合エントリ）で2枚まとめて行う。
+    # この単体実行では Discord のみ（画像確認・デバッグ用）。
 
     print("=== Done ===")
 
