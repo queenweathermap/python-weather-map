@@ -50,7 +50,11 @@ def take_screenshots():
         page = context.new_page()
         for item in PAGES:
             print(f"撮影中: {item['title']}", flush=True)
-            page.goto(item.get("screenshot_url", item["url"]))
+            try:
+                page.goto(item.get("screenshot_url", item["url"]), timeout=30000)
+            except Exception as e:
+                print(f"スキップ（接続失敗）: {item['title']} — {e}", flush=True)
+                continue
             try:
                 page.wait_for_load_state("networkidle", timeout=30000)
             except Exception:
