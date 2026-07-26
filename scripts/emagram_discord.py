@@ -18,6 +18,10 @@
 # Discordへはembedではなくファイル添付で送る。embedを複数並べると
 # 1枚ずつ開閉が必要な縦積みカードになってしまうが、ファイル添付なら
 # 1メッセージ内でギャラリー表示（矢印でめくれる）になる。
+#
+# 地点によっては実行時点でまだサーバー側の画像生成が間に合っていないことが
+# ある（wcn-amedas等と同様の遅延）。地点間で観測時刻がずれると混乱するため
+# 前回観測への遡りはせず、その場合は「データなし」のプレースホルダー画像を出す。
 
 from __future__ import annotations
 
@@ -26,8 +30,10 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from io import BytesIO
 
 import requests
+from PIL import Image, ImageDraw, ImageFont
 
 STATIONS = [
     ("47401", "稚内"),
@@ -100,6 +106,66 @@ def fetch_image(stnm: str, dt: datetime) -> bytes | None:
     return img_r.content
 
 
+CJK_BOLD_CANDIDATES = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+]
+CJK_REGULAR_CANDIDATES = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+]
+
+
+def load_font(candidates: list, size: int):
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def placeholder_image(name: str, dt: datetime) -> bytes:
+    """データが取得できなかった地点用の「データなし」プレースホルダー画像。"""
+    width, height = 800, 640
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    font_large = load_font(CJK_BOLD_CANDIDATES, 40)
+    font_small = load_font(CJK_REGULAR_CANDIDATES, 24)
+
+    lines = [
+        (name, font_large),
+        ("データなし", font_large),
+        (f"{dt.strftime('%Y-%m-%d %H')}Z", font_small),
+    ]
+    total_h = sum(draw.textbbox((0, 0), t, font=f)[3] for t, f in lines) + 20 * (len(lines) - 1)
+    y = (height - total_h) // 2
+    for text, font in lines:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        w = bbox[2] - bbox[0]
+        draw.text(((width - w) // 2, y), text, fill="black", font=font)
+        y += (bbox[3] - bbox[1]) + 20
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def fetch_image_with_fallback(stnm: str, name: str, dt: datetime):
+    """当該時刻の画像を確保する。無ければプレースホルダー。
+    地点間で時系列がずれるのを避けるため、前回観測への遡りはしない。
+    戻り値は (画像バイト列, ラベル用サフィックス)。"""
+    img_bytes = fetch_image(stnm, dt)
+    if img_bytes:
+        return img_bytes, ""
+
+    print(f"NO DATA: {name} はプレースホルダーを使用")
+    return placeholder_image(name, dt), "（データなし）"
+
+
 def even_chunks(items: list, max_size: int) -> list:
     """max_size以下のグループ数の最小回数で、できるだけ均等に分割する。"""
     n = len(items)
@@ -152,13 +218,8 @@ def main() -> int:
 
     available = []
     for stnm, name in STATIONS:
-        img_bytes = fetch_image(stnm, dt)
-        if img_bytes:
-            available.append((name, img_bytes))
-
-    if not available:
-        print(f"NO DATA: {dt.strftime('%Y-%m-%d %H')}Z のデータがまだありません")
-        return 0
+        img_bytes, suffix = fetch_image_with_fallback(stnm, name, dt)
+        available.append((f"{name}{suffix}", img_bytes))
 
     ok = True
     for batch in even_chunks(available, MAX_FILES_PER_MESSAGE):
