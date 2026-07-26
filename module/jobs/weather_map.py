@@ -95,8 +95,8 @@ OUTPUT_FILENAMES = [
 
 # Discord に送る画像とタイトル（AXJP140・AUPA20 は Notion のみ）
 DISCORD_TITLES = {
-    "04_LAYOUT_4_WEEKLY": "① 週間4列結合",
-    "06_LAYOUT_5_DASHBOARD": "② 全部入り",
+    "04_LAYOUT_4_WEEKLY": "週間4列結合",
+    "06_LAYOUT_5_DASHBOARD": "全部入り",
 }
 DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
 
