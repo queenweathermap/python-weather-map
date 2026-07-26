@@ -74,10 +74,13 @@ def take_screenshots():
     return screenshots
 
 
-def send_discord_with_image(title, link_url, image_bytes, filename):
+def send_discord_with_image(title, link_url, image_bytes, filename, extra_line=None):
     boundary = uuid.uuid4().hex
+    content = f"**[{title}](<{link_url}>)**"
+    if extra_line:
+        content += f"\n{extra_line}"
     payload_json = json.dumps(
-        {"content": f"**[{title}](<{link_url}>)**"},
+        {"content": content},
         ensure_ascii=False,
     )
     body = (
@@ -110,8 +113,9 @@ def main():
 
     screenshots = take_screenshots()
 
-    for s in screenshots:
-        status = send_discord_with_image(s["title"], s["url"], s["data"], s["filename"])
+    for i, s in enumerate(screenshots):
+        extra_line = "[秋田地方気象台](<https://www.jma-net.go.jp/akita/>)" if i == 0 else None
+        status = send_discord_with_image(s["title"], s["url"], s["data"], s["filename"], extra_line)
         print(f"送信: {s['title']} → {status}", flush=True)
         time.sleep(1)  # レート制限対策
 
