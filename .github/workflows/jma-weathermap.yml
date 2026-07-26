@@ -138,7 +138,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pillow pdf2image boto3 notion-client playwright
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}
+
       - name: Install Playwright browser (for WCN週間予報 screenshot)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: |
           playwright install chromium
 

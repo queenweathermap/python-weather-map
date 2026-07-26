@@ -1,0 +1,35 @@
+name: Refresh Threads Token
+
+on:
+  schedule:
+    # 毎月 5日・20日 12:00 JST（03:00 UTC）。60日失効に対し十分な余裕でトークンを延長する。
+    - cron: "0 3 5,20 * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    env:
+      # 現在の長期トークン（このジョブが延長して同じSecretを上書きする）
+      THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+      # 細粒度PAT: このリポジトリの Secrets = Read and write 権限
+      GH_PAT: ${{ secrets.GH_PAT }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pynacl
+
+      - name: Refresh Threads token & update secret
+        run: |
+          python scripts/refresh_threads_token.py
