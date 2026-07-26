@@ -101,11 +101,6 @@ jobs:
       # 発行基準時刻の推定に使うPDF
       WEATHERCASTER_ISSUE_PROBE_PDFS: "COMP12.pdf,COMP36.pdf,COMP72.pdf"
 
-      # エマグラム
-      EMAGRAM_ENABLE: "1"
-      EMAGRAM_URL: "https://bk-pro.jp/images/ema/ema_aki_00.gif"
-      EMAGRAM_FILENAME: "ema_aki_00.gif"
-
       # ------------------------------------------------------------
       # ⑤ WCN週間予報（秋田県）
       # ④週間の直後に、会員ページのスクショ1枚を差し込む。

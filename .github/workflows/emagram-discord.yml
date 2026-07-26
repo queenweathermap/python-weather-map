@@ -1,0 +1,31 @@
+name: Emagram (University of Wyoming)
+
+on:
+  schedule:
+    # JST 11:00 / 23:00（00Z=09時JST・12Z=21時JST観測の2時間後）
+    # UTC 02:00 / 14:00
+    - cron: "0 2,14 * * *"
+
+  workflow_dispatch:
+
+jobs:
+  post-emagram:
+    runs-on: ubuntu-latest
+
+    env:
+      DISCORD_EMAGRAM_WEBHOOK_URL: ${{ secrets.DISCORD_EMAGRAM_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Post emagram
+        run: python scripts/emagram_discord.py

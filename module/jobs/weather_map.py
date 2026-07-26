@@ -5,12 +5,11 @@
 # Weathercaster / JMA Weather Map
 # Custom Layout PNG Version / 5 outputs explicit / layout5 widened / JMA-left-column / JMA-left-column
 #
-# 出力は必ず次の5枚を基本にする:
-#   ① 01_EMAGRAM.png
-#   ② 02_AXJP140.png
-#   ③ 03_AUPA20.png
-#   ④ 04_LAYOUT_4_WEEKLY.png
-#   ⑤ 05_LAYOUT_5_DASHBOARD.png  ※左列AUPQ35/AUPQ78はJMA直取得
+# 出力は必ず次の4枚を基本にする（エマグラムは別リポジトリへ切り出し済み）:
+#   ① 02_AXJP140.png
+#   ② 03_AUPA20.png
+#   ③ 04_LAYOUT_4_WEEKLY.png
+#   ④ 05_LAYOUT_5_DASHBOARD.png  ※左列AUPQ35/AUPQ78はJMA直取得
 # =============================================================================
 
 from __future__ import annotations
@@ -88,7 +87,6 @@ DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "8
 Attachment = Tuple[str, bytes, str]
 
 OUTPUT_FILENAMES = [
-    "01_EMAGRAM",
     "02_AXJP140",
     "03_AUPA20",
     "04_LAYOUT_4_WEEKLY",
@@ -97,15 +95,13 @@ OUTPUT_FILENAMES = [
 
 # Discord に送る画像とタイトル（AXJP140・AUPA20 は Notion のみ）
 DISCORD_TITLES = {
-    "01_EMAGRAM":        "① エマグラム",
-    "04_LAYOUT_4_WEEKLY": "② 週間4列結合",
-    "06_LAYOUT_5_DASHBOARD": "③ 全部入り",
+    "04_LAYOUT_4_WEEKLY": "① 週間4列結合",
+    "06_LAYOUT_5_DASHBOARD": "② 全部入り",
 }
 DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
 
 # Notion に流し込む順序・ラベル・ファイル名（まる数字なし）
 NOTION_ORDER = [
-    ("01_EMAGRAM",            "エマグラム",   "EMAGRAM"),
     ("04_LAYOUT_4_WEEKLY",    "週間4列結合",  "LAYOUT_4_WEEKLY"),
     ("06_LAYOUT_5_DASHBOARD", "全部入り",     "LAYOUT_DASHBOARD"),
     ("03_AUPA20",             "AUPA20",       "AUPA20"),
@@ -281,10 +277,6 @@ def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
     return out_path, "image/jpeg"
 
 
-
-EMAGRAM_ENABLE = os.environ.get("EMAGRAM_ENABLE", "1").lower() in ("1", "true", "yes", "on")
-EMAGRAM_URL = os.environ.get("EMAGRAM_URL", "https://bk-pro.jp/images/ema/ema_aki_00.gif").strip()
-EMAGRAM_FILENAME = os.environ.get("EMAGRAM_FILENAME", "ema_aki_00.gif").strip()
 
 DISCORD_LINKS = [
     ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
@@ -1019,22 +1011,7 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
     errors: List[str] = []
 
     # -------------------------------------------------------------------------
-    # ① エマグラム 単体
-    # -------------------------------------------------------------------------
-    if EMAGRAM_ENABLE and EMAGRAM_URL:
-        blob = fetch_image_content(EMAGRAM_URL)
-        if blob:
-            try:
-                with Image.open(io.BytesIO(blob)) as im:
-                    im.seek(0)
-                    append_output(images, pil_to_attachment(im, "EMAGRAM"), 1)
-            except Exception as e:
-                errors.append(f"EMAGRAM: conversion failed ({e})")
-        else:
-            errors.append("EMAGRAM: download failed")
-
-    # -------------------------------------------------------------------------
-    # ② AXJP140.pdf 単体
+    # ① AXJP140.pdf 単体
     # -------------------------------------------------------------------------
     axjp_pages = fetch_pdf_pages(session, "AXJP140")
     if axjp_pages:
@@ -1179,9 +1156,6 @@ def notion_write_db(
 
 
 IMAGE_EXTRA_LINKS: dict = {
-    "01_EMAGRAM": [
-        ("秋田地方気象台", "https://www.jma-net.go.jp/akita/"),
-    ],
     "04_LAYOUT_4_WEEKLY": [
         ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
     ],
