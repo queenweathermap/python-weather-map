@@ -14,9 +14,14 @@
 # 直接は存在せず、/wsgi/sounding?...type=PNG:STUVE... への初回アクセス時に
 # サーバー側で遅延生成される。そのため必ず一度 /wsgi/sounding を叩いてから
 # 静的URLを参照する。
+#
+# Discordへはembedではなくファイル添付で送る。embedを複数並べると
+# 1枚ずつ開閉が必要な縦積みカードになってしまうが、ファイル添付なら
+# 1メッセージ内でギャラリー表示（矢印でめくれる）になる。
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -46,9 +51,9 @@ BASE = "https://weather.arcc.uwyo.edu"
 SOUNDING_URL = BASE + "/wsgi/sounding"
 IMG_SRC_RE = re.compile(r'<img src="(/upperair/imgs/[^"]+\.png)">')
 
-MAX_EMBEDS_PER_MESSAGE = 10
+MAX_FILES_PER_MESSAGE = 10
 REQUEST_TIMEOUT_SECONDS = 60
-DISCORD_TIMEOUT_SECONDS = 20
+DISCORD_TIMEOUT_SECONDS = 30
 
 
 def target_sounding_time() -> datetime:
@@ -58,8 +63,8 @@ def target_sounding_time() -> datetime:
     return now.replace(hour=hour, minute=0, second=0, microsecond=0)
 
 
-def fetch_image_url(stnm: str, dt: datetime) -> str | None:
-    """指定地点・時刻のStuve画像を生成させ、静的URLを返す（データが無ければNone）。"""
+def fetch_image(stnm: str, dt: datetime) -> bytes | None:
+    """指定地点・時刻のStuve画像を生成させ、PNGバイト列を返す（データが無ければNone）。"""
     params = {
         "datetime": dt.strftime("%Y-%m-%d %H:00:00"),
         "id": stnm,
@@ -81,26 +86,51 @@ def fetch_image_url(stnm: str, dt: datetime) -> str | None:
         print(f"SKIP (データなし): {stnm}")
         return None
 
-    return BASE + m.group(1)
+    img_url = BASE + m.group(1)
+    try:
+        img_r = requests.get(img_url, timeout=REQUEST_TIMEOUT_SECONDS)
+    except requests.RequestException as exc:
+        print(f"ERROR: {stnm} 画像ダウンロード中に例外が発生しました: {exc}", file=sys.stderr)
+        return None
+
+    if img_r.status_code != 200:
+        print(f"SKIP: {stnm} 画像ダウンロード status={img_r.status_code}")
+        return None
+
+    return img_r.content
+
+
+def even_chunks(items: list, max_size: int) -> list:
+    """max_size以下のグループ数の最小回数で、できるだけ均等に分割する。"""
+    n = len(items)
+    if n == 0:
+        return []
+    num_groups = -(-n // max_size)  # ceil division
+    base, remainder = divmod(n, num_groups)
+    chunks = []
+    idx = 0
+    for i in range(num_groups):
+        size = base + (1 if i < remainder else 0)
+        chunks.append(items[idx:idx + size])
+        idx += size
+    return chunks
 
 
 def post_batch(webhook_url: str, dt: datetime, batch) -> bool:
-    embeds = []
-    for name, url in batch:
-        embeds.append({
-            "title": name,
-            "image": {"url": url},
-            "color": 3066993,
-        })
-
+    names = " / ".join(name for name, _ in batch)
     payload = {
         "username": "エマグラム",
-        "content": f"🌡️ **エマグラム / {dt.strftime('%Y-%m-%d %H')}Z**",
-        "embeds": embeds,
+        "content": f"🌡️ **エマグラム / {dt.strftime('%Y-%m-%d %H')}Z**\n{names}",
     }
 
+    files = {
+        "payload_json": (None, json.dumps(payload)),
+    }
+    for i, (name, img_bytes) in enumerate(batch):
+        files[f"files[{i}]"] = (f"emagram_{i}.png", img_bytes, "image/png")
+
     try:
-        r = requests.post(webhook_url, json=payload, timeout=DISCORD_TIMEOUT_SECONDS)
+        r = requests.post(webhook_url, files=files, timeout=DISCORD_TIMEOUT_SECONDS)
     except requests.RequestException as exc:
         print(f"ERROR: Discord投稿中に例外が発生しました: {exc}", file=sys.stderr)
         return False
@@ -122,17 +152,16 @@ def main() -> int:
 
     available = []
     for stnm, name in STATIONS:
-        url = fetch_image_url(stnm, dt)
-        if url:
-            available.append((f"{name}（{stnm}）", url))
+        img_bytes = fetch_image(stnm, dt)
+        if img_bytes:
+            available.append((name, img_bytes))
 
     if not available:
         print(f"NO DATA: {dt.strftime('%Y-%m-%d %H')}Z のデータがまだありません")
         return 0
 
     ok = True
-    for i in range(0, len(available), MAX_EMBEDS_PER_MESSAGE):
-        batch = available[i:i + MAX_EMBEDS_PER_MESSAGE]
+    for batch in even_chunks(available, MAX_FILES_PER_MESSAGE):
         if post_batch(webhook_url, dt, batch):
             print(f"POSTED: {', '.join(name for name, _ in batch)}")
         else:
