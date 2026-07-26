@@ -78,7 +78,7 @@ def send_discord_with_image(title, link_url, image_bytes, filename, extra_line=N
     boundary = uuid.uuid4().hex
     content = f"**[{title}](<{link_url}>)**"
     if extra_line:
-        content += f"\n{extra_line}"
+        content = f"{extra_line}\n{content}"
     payload_json = json.dumps(
         {"content": content},
         ensure_ascii=False,
