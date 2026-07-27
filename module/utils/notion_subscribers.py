@@ -4,7 +4,13 @@
 #
 # 有料DM配信の購読者リスト（Notionデータベース）を読むユーティリティ。
 # 書き込み（行の作成・更新）はCloudflare Worker側（Stripe Webhook）が行うため、
-# ここでは読み取り専用（Status=active の Discord User ID一覧を返す）。
+# ここでは読み取り専用。
+#
+# Status の種類:
+#   active  ... Stripe課金中
+#   beta    ... 無料のβtester（BETA_CUTOFFを過ぎたら自動的に配信対象から外れる）
+#   admin   ... 運営者自身。課金なしで常に配信対象
+#   canceled... 配信対象外
 #
 # 必要な環境変数
 #   NOTION_TOKEN                    （module/utils/notion_utils.py と共有）
@@ -18,6 +24,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone, timedelta
 from typing import List
 
 import requests
@@ -25,7 +32,11 @@ import requests
 NOTION_VERSION = "2022-06-28"
 API_BASE = "https://api.notion.com/v1"
 
-ACTIVE_STATUS = "active"
+# 本格運用（課金必須）の開始日。Worker側 (src/index.ts) の BETA_CUTOFF と同じ日付。
+JST = timezone(timedelta(hours=9))
+BETA_CUTOFF = datetime(2026, 10, 1, 0, 0, tzinfo=JST)
+
+ELIGIBLE_STATUSES = ("active", "beta", "admin")
 
 
 def _env(name: str, default: str = "") -> str:
@@ -57,16 +68,22 @@ def _prop_discord_id() -> str:
 
 
 def get_active_discord_ids() -> List[str]:
-    """購読者データベースから Status=active のDiscord User IDを全件返す。"""
+    """購読者データベースから配信対象（active/beta/admin）のDiscord User IDを返す。
+    ただしbetaはBETA_CUTOFFを過ぎたら対象外にする（Notion側のStatusは
+    手動更新不要で、ここでの日付判定だけで自動的に配信が止まる）。"""
     db_id = _must_env("NOTION_SUBSCRIBERS_DATABASE_ID")
 
     payload = {
         "filter": {
-            "property": _prop_status(),
-            "select": {"equals": ACTIVE_STATUS},
+            "or": [
+                {"property": _prop_status(), "select": {"equals": status}}
+                for status in ELIGIBLE_STATUSES
+            ]
         },
         "page_size": 100,
     }
+
+    beta_still_open = datetime.now(JST) < BETA_CUTOFF
 
     ids: List[str] = []
     cursor = None
@@ -87,6 +104,11 @@ def get_active_discord_ids() -> List[str]:
 
         for page in data.get("results", []):
             props = page.get("properties", {})
+
+            status = (props.get(_prop_status(), {}).get("select") or {}).get("name", "")
+            if status == "beta" and not beta_still_open:
+                continue
+
             rich_text = props.get(_prop_discord_id(), {}).get("rich_text", [])
             if rich_text:
                 discord_id = rich_text[0].get("plain_text", "").strip()
