@@ -1017,32 +1017,32 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
     # -------------------------------------------------------------------------
     axjp_pages = fetch_pdf_pages(session, "AXJP140")
     if axjp_pages:
-        append_output(images, pil_to_attachment(axjp_pages[0], "AXJP140"), 2)
+        append_output(images, pil_to_attachment(axjp_pages[0], "AXJP140"), 1)
     else:
         errors.append("AXJP140: download failed")
 
     # -------------------------------------------------------------------------
-    # ③ 数値 AUPA20 単体
+    # ② 数値 AUPA20 単体
     # -------------------------------------------------------------------------
     aupa_pages = fetch_pdf_pages(session, "AUPA20")
     if aupa_pages:
-        append_output(images, pil_to_attachment(aupa_pages[0], "AUPA20"), 3)
+        append_output(images, pil_to_attachment(aupa_pages[0], "AUPA20"), 2)
     else:
         errors.append("AUPA20: download failed")
 
     # -------------------------------------------------------------------------
-    # ④ 週間 4列結合
+    # ③ 週間 4列結合
     # -------------------------------------------------------------------------
     layout4_att = build_layout_4(session, errors)
     if layout4_att:
-        append_output(images, layout4_att, 4)
+        append_output(images, layout4_att, 3)
 
     # -------------------------------------------------------------------------
-    # ⑤ 全部入り
+    # ④ 全部入り
     # -------------------------------------------------------------------------
     layout5_att = build_layout_5(session, errors)
     if layout5_att:
-        append_output(images, layout5_att, 5)
+        append_output(images, layout5_att, 4)
 
     # ローカルへの一時デバッグ書き出し
     for fname, data, _ in images:
