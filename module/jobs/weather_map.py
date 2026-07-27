@@ -83,6 +83,14 @@ DISCORD_R2_PNG_LINK_FILENAMES = {
     "04_LAYOUT_4_WEEKLY",
     "06_LAYOUT_5_DASHBOARD",
 }
+
+# 有料DM配信は気象庁の一般公開データのみで構成された画像に限定する。
+# 06_LAYOUT_5_DASHBOARD（全部入り）はWCN（Weathercaster.jp 会員ページ）の
+# スクリーンショットが1枚組み込まれており、会員限定コンテンツの第三者への
+# 再配信・販売にあたるおそれがあるため、DM配信の対象からは除外する。
+DM_SAFE_FILENAMES = {
+    "04_LAYOUT_4_WEEKLY",
+}
 DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
 DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "84"))
 
@@ -1237,7 +1245,8 @@ def notify_discord_images(
                             mime=thumb_mime,
                             suppress_embeds=True,
                         )
-                        notify_dm_subscribers(content, thumb_path, thumb_mime)
+                        if filename in DM_SAFE_FILENAMES:
+                            notify_dm_subscribers(content, thumb_path, thumb_mime)
                     except Exception as e:
                         print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
                         # 添付に失敗した場合だけ、R2 URLの自動プレビューに戻す。
