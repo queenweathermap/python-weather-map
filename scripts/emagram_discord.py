@@ -31,9 +31,13 @@ import re
 import sys
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 from module.utils.r2_utils import put_bytes, make_url
 
