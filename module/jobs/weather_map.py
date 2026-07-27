@@ -85,12 +85,10 @@ DISCORD_R2_PNG_LINK_FILENAMES = {
 }
 
 # 有料DM配信は気象庁の一般公開データのみで構成された画像に限定する。
-# 06_LAYOUT_5_DASHBOARD（全部入り）はWCN（Weathercaster.jp 会員ページ）の
-# スクリーンショットが1枚組み込まれており、会員限定コンテンツの第三者への
-# 再配信・販売にあたるおそれがあるため、DM配信の対象からは除外する。
-DM_SAFE_FILENAMES = {
-    "04_LAYOUT_4_WEEKLY",
-}
+# 現時点では 04_LAYOUT_4_WEEKLY / 06_LAYOUT_5_DASHBOARD の両方とも、
+# 元画像PDFの取得元が weathercaster_session()（WCN会員限定ページ）経由であり、
+# JMA直取得と確認できるまではDM配信の対象にしない（空集合＝全て対象外）。
+DM_SAFE_FILENAMES: set = set()
 DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
 DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "84"))
 
