@@ -24,6 +24,13 @@ jobs:
       R2_RETENTION_DAYS: "30"
       R2_CLEANUP_DRY_RUN: "0"
 
+      # ------------------------------------------------------------
+      # 有料DM配信
+      # ------------------------------------------------------------
+      DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4

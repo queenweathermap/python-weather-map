@@ -40,6 +40,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from module.utils.r2_utils import put_bytes, make_url
+from module.utils.notion_subscribers import get_active_discord_ids
+from module.utils.discord_dm import send_dm_to_all
 
 STATIONS = [
     ("47401", "稚内"),
@@ -218,11 +220,29 @@ def make_thumbnail(img_bytes: bytes) -> bytes:
         return buf.getvalue()
 
 
-def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:
-    content = (
+def build_content(dt: datetime, highres_url: str) -> str:
+    return (
         f"🌡️ **エマグラム / {dt.strftime('%Y-%m-%d %H')}Z**\n"
         f"**[★高解像度PNG（R2 / {R2_RETENTION_DAYS}日保存）を表示](<{highres_url}>)**"
     )
+
+
+def notify_dm_subscribers(content: str, thumb_bytes: bytes) -> None:
+    """有料DM購読者（Notion管理）へ、公開チャンネルと同じ内容をDMする。"""
+    try:
+        discord_ids = get_active_discord_ids()
+    except Exception as e:
+        print(f"[WARN] DM購読者リスト取得失敗: {e}")
+        return
+
+    if not discord_ids:
+        return
+
+    send_dm_to_all(discord_ids, content, thumb_bytes, "emagram_thumb.jpg")
+
+
+def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:
+    content = build_content(dt, highres_url)
     payload = {
         "username": "エマグラム",
         "content": content,
@@ -269,6 +289,7 @@ def main() -> int:
 
     if post_combined(webhook_url, dt, thumb, highres_url):
         print("POSTED")
+        notify_dm_subscribers(build_content(dt, highres_url), thumb)
         return 0
 
     return 1

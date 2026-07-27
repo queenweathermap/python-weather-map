@@ -39,6 +39,8 @@ from module.utils.discord_utils import (
     post_discord_item_image_urls,
     post_discord_complete,
 )
+from module.utils.notion_subscribers import get_active_discord_ids
+from module.utils.discord_dm import send_dm_to_all
 
 
 # =============================================================================
@@ -1171,6 +1173,26 @@ def discord_links_text() -> str:
     return "\n".join(["**参考リンク**"] + [f"・[{t}](<{u}>)" for t, u in DISCORD_LINKS])
 
 
+def notify_dm_subscribers(content: str, thumb_path: str, thumb_mime: str) -> None:
+    """有料DM購読者（Notion管理）へ、公開チャンネルと同じ内容をDMする。
+    購読者取得やDM送信に失敗しても、公開チャンネルへの投稿自体は
+    既に完了しているため、ここでの例外は握りつぶしてログのみ出す。"""
+    try:
+        discord_ids = get_active_discord_ids()
+    except Exception as e:
+        print(f"[WARN] DM購読者リスト取得失敗: {e}")
+        return
+
+    if not discord_ids:
+        return
+
+    with open(thumb_path, "rb") as f:
+        thumb_bytes = f.read()
+
+    filename = "thumb.jpg" if thumb_mime == "image/jpeg" else "thumb.png"
+    send_dm_to_all(discord_ids, content, thumb_bytes, filename)
+
+
 def notify_discord_images(
     *,
     all_urls: List[str],
@@ -1215,6 +1237,7 @@ def notify_discord_images(
                             mime=thumb_mime,
                             suppress_embeds=True,
                         )
+                        notify_dm_subscribers(content, thumb_path, thumb_mime)
                     except Exception as e:
                         print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
                         # 添付に失敗した場合だけ、R2 URLの自動プレビューに戻す。
