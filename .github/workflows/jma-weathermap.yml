@@ -45,11 +45,8 @@ jobs:
       NOTION_IMPORT_TIMEOUT_SECONDS: "240"
       NOTION_IMPORT_POLL_SECONDS: "2.0"
 
-      # ------------------------------------------------------------
-      # 有料DM配信
-      # ------------------------------------------------------------
-      DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-      NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
+      # 有料DM配信（全部入り・気象庁直接取得版）は
+      # jma-dashboard-direct.yml 側で別スケジュール実行するため、ここでは不要。
 
       NOTION_PROP_TITLE: "名前"
       NOTION_PROP_CATEGORY: "区分"
