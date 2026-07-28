@@ -7,10 +7,12 @@
 # ここでは読み取り専用。
 #
 # Status の種類:
-#   active  ... Stripe課金中
-#   beta    ... 無料のβtester（BETA_CUTOFFを過ぎたら自動的に配信対象から外れる）
-#   admin   ... 運営者自身。課金なしで常に配信対象
-#   canceled... 配信対象外
+#   active   ... Stripe課金中
+#   beta     ... 無料のβtester（BETA_CUTOFFを過ぎたら自動的に配信対象から外れる）
+#   admin    ... 運営者自身。課金なしで常に配信対象
+#   lifetime ... 本格運用開始より前から参加してくれた人。課金なしで常に配信対象
+#                （betaと違い期限なし。自己登録ルートは無く、Notionに手動で設定する）
+#   canceled ... 配信対象外
 #
 # 必要な環境変数
 #   NOTION_TOKEN                    （module/utils/notion_utils.py と共有）
@@ -36,7 +38,7 @@ API_BASE = "https://api.notion.com/v1"
 JST = timezone(timedelta(hours=9))
 BETA_CUTOFF = datetime(2026, 10, 1, 0, 0, tzinfo=JST)
 
-ELIGIBLE_STATUSES = ("active", "beta", "admin")
+ELIGIBLE_STATUSES = ("active", "beta", "admin", "lifetime")
 
 
 def _env(name: str, default: str = "") -> str:
