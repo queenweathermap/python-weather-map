@@ -52,6 +52,9 @@ JMA_TKAISETU_URL = os.environ.get(
     "JMA_TKAISETU_URL",
     "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_tanki_latest.pdf",
 ).strip()
+JMA_ASAS_MONO_URL = "https://www.data.jma.go.jp/yoho/data/wxchart/quick/ASAS_MONO.pdf"
+JMA_FSAS24_MONO_URL = "https://www.data.jma.go.jp/yoho/data/wxchart/quick/FSAS24_MONO_ASIA.pdf"
+JMA_FSAS48_MONO_URL = "https://www.data.jma.go.jp/yoho/data/wxchart/quick/FSAS48_MONO_ASIA.pdf"
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
@@ -82,13 +85,16 @@ DISCORD_MAX_UPLOAD_MB = float(os.environ.get("DISCORD_MAX_UPLOAD_MB", "8"))
 DISCORD_R2_PNG_LINK_FILENAMES = {
     "04_LAYOUT_4_WEEKLY",
     "06_LAYOUT_5_DASHBOARD",
+    "07_DASHBOARD_JMA_DIRECT",
 }
 
 # 有料DM配信は気象庁の一般公開データのみで構成された画像に限定する。
-# 現時点では 04_LAYOUT_4_WEEKLY / 06_LAYOUT_5_DASHBOARD の両方とも、
-# 元画像PDFの取得元が weathercaster_session()（WCN会員限定ページ）経由であり、
-# JMA直取得と確認できるまではDM配信の対象にしない（空集合＝全て対象外）。
-DM_SAFE_FILENAMES: set = set()
+# 04_LAYOUT_4_WEEKLY / 06_LAYOUT_5_DASHBOARD はWCN（Weathercaster.jp会員限定ページ）
+# 経由のため対象外。07_DASHBOARD_JMA_DIRECTはWCNを一切経由せず気象庁の
+# 公開データのみで組み立てているため、これだけをDM配信の対象にする。
+DM_SAFE_FILENAMES = {
+    "07_DASHBOARD_JMA_DIRECT",
+}
 DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
 DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "84"))
 
@@ -99,12 +105,14 @@ OUTPUT_FILENAMES = [
     "03_AUPA20",
     "04_LAYOUT_4_WEEKLY",
     "06_LAYOUT_5_DASHBOARD",
+    "07_DASHBOARD_JMA_DIRECT",
 ]
 
 # Discord に送る画像とタイトル（AXJP140・AUPA20 は Notion のみ）
 DISCORD_TITLES = {
     "04_LAYOUT_4_WEEKLY": "週間4列結合",
     "06_LAYOUT_5_DASHBOARD": "全部入り",
+    "07_DASHBOARD_JMA_DIRECT": "全部入り（気象庁データのみ版）",
 }
 DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
 
@@ -112,6 +120,7 @@ DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
 NOTION_ORDER = [
     ("04_LAYOUT_4_WEEKLY",    "週間4列結合",  "LAYOUT_4_WEEKLY"),
     ("06_LAYOUT_5_DASHBOARD", "全部入り",     "LAYOUT_DASHBOARD"),
+    ("07_DASHBOARD_JMA_DIRECT", "全部入り（気象庁版）", "DASHBOARD_JMA_DIRECT"),
     ("03_AUPA20",             "AUPA20",       "AUPA20"),
     ("02_AXJP140",            "AXJP140",      "AXJP140"),
 ]
@@ -585,6 +594,38 @@ def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "ce
     return canvas
 
 
+def fill_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "top") -> Image.Image:
+    """
+    画像を指定セルいっぱいに拡大し、はみ出た分は切り取る(白余白を残さない)。
+    縦横比は維持する(歪めない)。
+    """
+    img = img.convert("RGB")
+    if img.width <= 0 or img.height <= 0:
+        return Image.new("RGB", (cell_w, cell_h), "white")
+
+    scale = max(cell_w / img.width, cell_h / img.height)
+    new_w = max(1, int(img.width * scale))
+    new_h = max(1, int(img.height * scale))
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+    x = (new_w - cell_w) // 2
+    y = 0 if valign == "top" else (new_h - cell_h) // 2
+    return resized.crop((x, y, x + cell_w, y + cell_h))
+
+
+def find_content_top(img: Image.Image, *, threshold: int = 245, step: int = 3) -> int:
+    """画像の上端から最初に白でない行が現れるyを返す(全て白ならheight)。"""
+    img = img.convert("RGB")
+    px = img.load()
+    w, h = img.size
+    for y in range(h):
+        for x in range(0, w, step):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return y
+    return h
+
+
 def resize_to_width_top(img: Image.Image, target_w: int) -> Image.Image:
     """縦横比を保ったまま指定幅まで拡大・縮小する。"""
     img = img.convert("RGB")
@@ -989,6 +1030,279 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     return pil_to_attachment(final_canvas, "LAYOUT_5_DASHBOARD")
 
 
+# ASAS等の広域チャートから日本付近だけを切り出す範囲（幅・高さに対する割合）。
+# ASAS_MONO.pdf (3640x2573) で目視確認して決めた値。
+JAPAN_CROP_FRACTIONS = (0.30, 0.22, 0.56, 0.58)  # (x0, y0, x1, y1)
+
+# 同じくASAS_MONO.pdfから、FXFE5782(T12/24, 500/850hPa)と同程度の
+# 極東アジア広域を切り出す範囲。目視確認して決めた値。
+ASIA_CROP_FRACTIONS = (0.22, 0.10, 0.75, 0.70)  # (x0, y0, x1, y1)
+
+# WCN版の対応コマ(全部入りダッシュボード内)は、セルいっぱいに拡大せず
+# 一回り小さく中央に配置されているため、その見た目に合わせる縮小率。
+ASAS_ASIA_CELL_SHRINK = 0.85
+
+
+def crop_japan_area(img: Image.Image) -> Image.Image:
+    """広域天気図から日本付近だけを切り出す。"""
+    img = img.convert("RGB")
+    w, h = img.size
+    x0, y0, x1, y1 = JAPAN_CROP_FRACTIONS
+    return img.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1)))
+
+
+def crop_asia_area(img: Image.Image) -> Image.Image:
+    """広域天気図から極東アジア(中国大陸〜日本〜日付変更線付近)を切り出す。"""
+    img = img.convert("RGB")
+    w, h = img.size
+    x0, y0, x1, y1 = ASIA_CROP_FRACTIONS
+    return img.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1)))
+
+
+def split_top_bottom(img: Image.Image) -> Tuple[Image.Image, Image.Image]:
+    """画像を上半分・下半分に2分割する。AXFE578やFXJP854のように
+    1ページに複数時刻/複数気圧面がまとまっている図に使う。"""
+    img = img.convert("RGB")
+    half_h = img.height // 2
+    return img.crop((0, 0, img.width, half_h)), img.crop((0, half_h, img.width, img.height))
+
+
+def resize_to_height(img: Image.Image, target_h: int) -> Image.Image:
+    img = img.convert("RGB")
+    if target_h <= 0 or img.height <= 0:
+        return img
+    target_w = max(1, int(img.width * (target_h / img.height)))
+    return img.resize((target_w, target_h), Image.LANCZOS)
+
+
+def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
+    """
+    有料DM配信用「全部入り」の気象庁直接取得版。
+    WCN（Weathercaster.jp会員ページ）を一切経由せず、気象庁が自ら公開している
+    データだけで、実際のWCN版「全部入り」と同じ構成を再現する。
+
+    左端の縦長列: 短期予報解説情報(TKAISETU) / AUPQ35 / AUPQ78
+    右側:
+      上段（縮小して各列幅に揃える）: ASAS / FSAS24(24時間後) / FSAS48(48時間後)
+      下段グリッド（4列）:
+        列2: AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa)
+        列3: FXFE502(12-24h) / FXFE5782(12-24h) / FXJP854上半分(T=12,24)
+        列4: FXFE504(36-48h) / FXFE5784(36-48h) / FXJP854下半分(T=36,48)
+        列5: FXFE507(72h) / FXFE577(72h)  ※FXJP854はT=48までのためT72列には無し
+    """
+    print("-> Building JMA-direct Dashboard (DM用)")
+
+    issue_dt_jst = issue_base_jst()
+    cycle = jma_cycle_suffix(issue_dt_jst)
+
+    # ---- 素材取得 ----
+    tkai = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_TKAISETU_URL, "TKAISETU"))
+    if tkai is not None:
+        # TKAISETUはPDFページ自体の右側に大きな白余白があり、そのままだと
+        # 列2との間に不要な隙間ができるのであらかじめ切り詰める。
+        tkai = trim_white_margins(tkai, pad=20)
+    asas = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_ASAS_MONO_URL, "ASAS"))
+    fsas24 = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_FSAS24_MONO_URL, "FSAS24"))
+    fsas48 = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_FSAS48_MONO_URL, "FSAS48"))
+    for name, im in (("TKAISETU", tkai), ("ASAS", asas), ("FSAS24", fsas24), ("FSAS48", fsas48)):
+        if im is None:
+            errors.append(f"DashboardJMA: {name} missing")
+
+    aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
+    aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
+    if aupq35 is None:
+        errors.append("DashboardJMA: AUPQ35 missing")
+    if aupq78 is None:
+        errors.append("DashboardJMA: AUPQ78 missing")
+
+    axfe578 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axfe578", cycle))
+    if axfe578 is None:
+        errors.append("DashboardJMA: AXFE578 missing")
+        axfe578_upper, axfe578_lower = None, None
+    else:
+        axfe578_upper, axfe578_lower = split_top_bottom(axfe578)
+
+    # ---- 列3・4・5: 各列とも、その列の地上天気図(surface)のネイティブ幅をそのまま使う ----
+    # (T=72のfxfe507/fxfe577は1コマのみのPDFで、T12/24を並べたfxfe502等より幅が狭い。
+    #  列ごとに幅が違ってよく、無理に他列と同じ幅に揃えると余白だらけになる)
+    ref_surface = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe502", cycle))
+
+    fxjp854_page = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxjp854", cycle))
+    if fxjp854_page is None:
+        errors.append("DashboardJMA: FXJP854 missing")
+        fxjp854_upper, fxjp854_lower = None, None
+    else:
+        fxjp854_upper, fxjp854_lower = split_top_bottom(fxjp854_page)
+        # 上下は元々1px程度の差(整数除算)しかないが、列3・列4で個別にresize_to_widthすると
+        # 丸め誤差で数px高さがずれ、T12/24とT36/48の段で微妙に位置がずれて見えるため、
+        # 先に同じ幅・高さに揃えておく(上揃えの位置が正確に一致するように)。
+        fxjp_target_w = ref_surface.width if ref_surface is not None else fxjp854_upper.width
+        fxjp854_upper = resize_to_width(fxjp854_upper, fxjp_target_w)
+        fxjp854_lower = fxjp854_lower.convert("RGB").resize(fxjp854_upper.size, Image.LANCZOS)
+
+        # 上段(T12/24)は元の図自体の上余白が下段(T36/48)より大きく、真上の画像との
+        # 白い部分が列3・列4で揃わない。上段の余分な上余白を切り、同じ量だけ下に
+        # 足し戻す(全体の高さは変えず、絵柄だけ上に詰める)。
+        upper_top = find_content_top(fxjp854_upper)
+        lower_top = find_content_top(fxjp854_lower)
+        extra = upper_top - lower_top
+        if extra > 0:
+            h = fxjp854_upper.height
+            trimmed = fxjp854_upper.crop((0, extra, fxjp854_upper.width, h))
+            canvas = Image.new("RGB", (fxjp854_upper.width, h), "white")
+            canvas.paste(trimmed, (0, 0))
+            fxjp854_upper = canvas
+
+    def build_period_column(
+        surface_code: str,
+        upper_code: str,
+        fxjp854_half: Optional[Image.Image],
+        surface_pre: Optional[Image.Image] = None,
+    ) -> Optional[Image.Image]:
+        surface = surface_pre if surface_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(surface_code, cycle))
+        upper = get_first_page_or_none(fetch_jma_numeric_pdf_pages(upper_code, cycle))
+        if surface is None:
+            errors.append(f"DashboardJMA: {surface_code} missing")
+        if upper is None:
+            errors.append(f"DashboardJMA: {upper_code} missing")
+
+        parts = [p for p in (surface, upper, fxjp854_half) if p is not None]
+        if not parts:
+            return None
+        target_w = parts[0].width
+        return combine_vertical([resize_to_width(p, target_w) for p in parts], gap=LAYOUT_GAP)
+
+    col3 = build_period_column("fxfe502", "fxfe5782", fxjp854_upper, surface_pre=ref_surface)
+    col4 = build_period_column("fxfe504", "fxfe5784", fxjp854_lower)
+    # T72はFXJP854(T=12/24/36/48のみ)に対応する時刻が無いため、FXJP854は付けない。
+    col5 = build_period_column("fxfe507", "fxfe577", None)
+
+    # ---- 「天気図1枚」の基準サイズ = 列3の地上天気図(fxfe502)のネイティブサイズ ----
+    # 列2はこのサイズのセルに各コマを収める(fit_to_cellで縦横比を保ったままレターボックス)。
+    # 列2を丸ごと引き伸ばす(=歪む)のではなく、コマ単位で標準サイズに揃えることで歪みを防ぐ。
+    standard_w = col3.width if col3 is not None else 2798
+    standard_h = ref_surface.height if ref_surface is not None else 2218
+
+    # AUPQ列＋列2の2列を合わせて、他の列(T12など)1列分の幅に収める。
+    col12_w = standard_w // 2
+    col12_h = standard_h // 2
+
+    # ---- 列2: AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa) ----
+    # 4枚それぞれを「天気図1枚」の基準セルの半分サイズに収める(4段、ペアにはしない)。
+    asas_asia = crop_asia_area(asas) if asas is not None else None
+    aupq35_lower = split_top_bottom(aupq35)[1] if aupq35 is not None else None
+
+    col2_cells = []
+    for im in (axfe578_upper, asas_asia, aupq35_lower, axfe578_lower):
+        if im is None:
+            continue
+        if im is asas_asia:
+            # WCN版の対応コマは周囲に余白を残して縮小配置されているため、
+            # セルいっぱいに詰めず、一回り小さくする。ただし絵柄の開始位置(上端)は
+            # 左右のコマ(AUPQ35下段・FXFE5782)と同じく上揃えにする(左右中央のみ)。
+            inner = fit_to_cell(im, int(col12_w * ASAS_ASIA_CELL_SHRINK), int(col12_h * ASAS_ASIA_CELL_SHRINK), valign="top")
+            cell = Image.new("RGB", (col12_w, col12_h), "white")
+            cell.paste(inner, ((col12_w - inner.width) // 2, 0))
+        else:
+            cell = fit_to_cell(im, col12_w, col12_h, valign="top")
+        col2_cells.append(cell)
+    col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
+
+    # ---- AUPQ35/AUPQ78の列: 列2の隣に、それぞれ上下2枚に分割して4段にし、
+    # 列2の4コマと1段ずつ同じ高さで揃える。
+    aupq35_top, aupq35_bottom = split_top_bottom(aupq35) if aupq35 is not None else (None, None)
+    aupq78_top, aupq78_bottom = split_top_bottom(aupq78) if aupq78 is not None else (None, None)
+    aupq_cells = [
+        fit_to_cell(im, col12_w, col12_h, valign="top")
+        for im in (aupq35_top, aupq35_bottom, aupq78_top, aupq78_bottom)
+        if im is not None
+    ]
+    aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP) if aupq_cells else None
+
+    # ---- 左端: 短期予報解説情報のみ。AUPQ35/AUPQ78(列)の上端と揃える。
+    left_col_w = tkai.width if tkai is not None else (aupq35.width if aupq35 is not None else 800)
+    tkai_part = resize_to_width(tkai, left_col_w) if tkai is not None else None
+
+    # ---- 上段: ASAS(列2の上に左揃え) / FSAS24(T12/24=列3の上に右揃え) / FSAS48(T36/48=列4の上に右揃え) ----
+    # 時間軸を意識し、ASASは現在時刻(列2側)、FSAS24/48は該当する予報時刻の列の右端に揃える。
+    # そろえた結果、間には自然に余白ができる。
+    asas_part = resize_to_width(asas, col12_w) if asas is not None else None
+    fsas24_part = resize_to_width(fsas24, col12_w) if fsas24 is not None else None
+    fsas48_part = resize_to_width(fsas48, col12_w) if fsas48 is not None else None
+
+    aupq_w = aupq_col.width if aupq_col is not None else 0
+    col2_w = col2.width if col2 is not None else 0
+    col3_w = col3.width if col3 is not None else 0
+    col4_w = col4.width if col4 is not None else 0
+    x_col2 = aupq_w
+    x_col3 = x_col2 + col2_w
+    x_col4 = x_col3 + col3_w + LAYOUT_GAP
+    header_w = x_col4 + col4_w
+    header_h = max((p.height for p in (asas_part, fsas24_part, fsas48_part) if p is not None), default=0)
+
+    header_row = None
+    if header_w > 0 and header_h > 0:
+        header_row = Image.new("RGB", (header_w, header_h), "white")
+        if asas_part is not None:
+            header_row.paste(asas_part, (x_col2, 0))
+        if fsas24_part is not None:
+            header_row.paste(fsas24_part, (x_col3 + col3_w - fsas24_part.width, 0))
+        if fsas48_part is not None:
+            header_row.paste(fsas48_part, (x_col4 + col4_w - fsas48_part.width, 0))
+
+    # 短期予報解説情報の上に、上段(ヘッダー)の高さ分の空白を入れ、
+    # AUPQ35/AUPQ78列の上端(グリッドの上端)と揃える。
+    left_col = None
+    if tkai_part is not None:
+        top_pad = (header_row.height + LAYOUT_GAP) if header_row is not None else 0
+        canvas = Image.new("RGB", (left_col_w, top_pad + tkai_part.height), "white")
+        canvas.paste(tkai_part, (0, top_pad))
+        left_col = canvas
+
+    grid_cols = [c for c in (aupq_col, col2, col3, col4, col5) if c is not None]
+    grid_row = None
+    if grid_cols:
+        grid_h = max(c.height for c in grid_cols)
+        aupq_p = pad_to_height(aupq_col, grid_h) if aupq_col is not None else None
+        col2_p = pad_to_height(col2, grid_h) if col2 is not None else None
+        col3_p = pad_to_height(col3, grid_h) if col3 is not None else None
+        col4_p = pad_to_height(col4, grid_h) if col4 is not None else None
+        col5_p = pad_to_height(col5, grid_h) if col5 is not None else None
+        # AUPQ列・列2・T12(列3)の間の余白を詰め、列3以降は通常の間隔のまま。
+        left_group = combine_horizontal(
+            [c for c in (aupq_p, col2_p, col3_p) if c is not None],
+            gap=0,
+            valign="top",
+        )
+        grid_row = combine_horizontal(
+            [c for c in (left_group, col4_p, col5_p) if c is not None],
+            gap=LAYOUT_GAP,
+            valign="top",
+        )
+
+    right_rows = [r for r in (header_row, grid_row) if r is not None]
+    right_block = None
+    if right_rows:
+        right_width = max(r.width for r in right_rows)
+        padded = []
+        for r in right_rows:
+            if r.width < right_width:
+                canvas = Image.new("RGB", (right_width, r.height), "white")
+                canvas.paste(r, (0, 0))
+                padded.append(canvas)
+            else:
+                padded.append(r)
+        right_block = combine_vertical(padded, gap=LAYOUT_GAP)
+
+    top_level = [c for c in (left_col, right_block) if c is not None]
+    if not top_level:
+        return None
+    # 左端と列2をくっつける(余白なし)。
+    final_canvas = combine_horizontal(top_level, gap=0, valign="top")
+    final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=56)
+    return pil_to_attachment(final_canvas, "DASHBOARD_JMA_DIRECT")
+
+
 def pad_to_height(img: Image.Image, target_h: int) -> Image.Image:
     """
     画像を白余白で target_h にそろえる。
@@ -1049,6 +1363,13 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
     layout5_att = build_layout_5(session, errors)
     if layout5_att:
         append_output(images, layout5_att, 4)
+
+    # -------------------------------------------------------------------------
+    # ⑤ 全部入り（気象庁直接取得版・有料DM配信用）
+    # -------------------------------------------------------------------------
+    dashboard_jma_att = build_layout_dashboard_jma(errors)
+    if dashboard_jma_att:
+        append_output(images, dashboard_jma_att, 5)
 
     # ローカルへの一時デバッグ書き出し
     for fname, data, _ in images:
