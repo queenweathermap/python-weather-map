@@ -100,14 +100,15 @@ DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "8
 
 Attachment = Tuple[str, bytes, str]
 
+# 04_LAYOUT_4_WEEKLY（週間4列結合）は scripts/jma_layout4_weekly.py / main_layout4()
+# として別スクリプト・別スケジュール（1日1回・JST正午、SKAISETUの10時頃更新に対応）に、
 # 07_DASHBOARD_JMA_DIRECT（気象庁直接取得版・全部入り）は WCN を一切経由しないため、
-# scripts/jma_dashboard_direct.py / main_dashboard_jma() として別スクリプト・別スケジュールに
-# 分離している（1日2回、UTC 00/12時サイクルの発表から2〜3時間後）。
+# scripts/jma_dashboard_direct.py / main_dashboard_jma() として別スクリプト・別スケジュール
+# （1日4回、TKAISETU発表とUTC 00/12時サイクルの両方に対応）に、それぞれ分離している。
 # ここ(OUTPUT_FILENAMES/NOTION_ORDER)には含めない。
 OUTPUT_FILENAMES = [
     "02_AXJP140",
     "03_AUPA20",
-    "04_LAYOUT_4_WEEKLY",
     "06_LAYOUT_5_DASHBOARD",
 ]
 
@@ -121,7 +122,6 @@ DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
 
 # Notion に流し込む順序・ラベル・ファイル名（まる数字なし）
 NOTION_ORDER = [
-    ("04_LAYOUT_4_WEEKLY",    "週間4列結合",  "LAYOUT_4_WEEKLY"),
     ("06_LAYOUT_5_DASHBOARD", "全部入り",     "LAYOUT_DASHBOARD"),
     ("03_AUPA20",             "AUPA20",       "AUPA20"),
     ("02_AXJP140",            "AXJP140",      "AXJP140"),
@@ -1353,21 +1353,15 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
         errors.append("AUPA20: download failed")
 
     # -------------------------------------------------------------------------
-    # ③ 週間 4列結合
-    # -------------------------------------------------------------------------
-    layout4_att = build_layout_4(session, errors)
-    if layout4_att:
-        append_output(images, layout4_att, 3)
-
-    # -------------------------------------------------------------------------
-    # ④ 全部入り
+    # ③ 全部入り
     # -------------------------------------------------------------------------
     layout5_att = build_layout_5(session, errors)
     if layout5_att:
-        append_output(images, layout5_att, 4)
+        append_output(images, layout5_att, 3)
 
-    # 全部入り（気象庁直接取得版）は scripts/jma_dashboard_direct.py 側で
-    # 別スケジュール・別ワークフローで生成する（このスクリプトでは作らない）。
+    # 週間4列結合は scripts/jma_layout4_weekly.py 側で(1日1回・JST正午)、
+    # 全部入り（気象庁直接取得版）は scripts/jma_dashboard_direct.py 側で(1日4回)、
+    # それぞれ別スケジュール・別ワークフローで生成する（このスクリプトでは作らない）。
 
     # ローカルへの一時デバッグ書き出し
     for fname, data, _ in images:
@@ -1631,7 +1625,7 @@ def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
 # =============================================================================
 def main() -> None:
     try:
-        print("=== Start Weathercaster JMA Weather Map (Custom Layout PNG / 4 outputs) ===")
+        print("=== Start Weathercaster JMA Weather Map (Custom Layout PNG / 3 outputs) ===")
 
         issue_dt_jst = issue_base_jst()
         rjtd = issue_dt_jst.strftime("%d%H%M")
@@ -1770,6 +1764,112 @@ def main_dashboard_jma() -> None:
                     )
                     # 有料DM配信対象は気象庁直接取得版のみ(DM_SAFE_FILENAMES参照)。
                     notify_dm_subscribers(content, thumb_path, thumb_mime)
+                else:
+                    print(f"[WARN] Discord thumbnail source missing: {src_path}")
+
+            if errors:
+                notify_discord_complete(errors=errors, attach_count=len(images))
+        except Exception as e:
+            print(f"[WARN] Discord failed: {e}")
+
+        if errors:
+            print("[WARN] completed with errors:")
+            for e in errors:
+                print(f"  - {e}")
+
+        print("=== Done ===")
+
+    finally:
+        shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+        shutil.rmtree(DATA_DIR, ignore_errors=True)
+
+
+def build_layout4_only() -> Tuple[List[Attachment], List[str]]:
+    """
+    週間4列結合だけを作る。SKAISETU/FEFE19/FXXN519/FZCX50はいずれもWCN
+    （Weathercaster.jp）経由なので weathercaster_session() が必要。
+    """
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    session = weathercaster_session()
+    images: List[Attachment] = []
+    errors: List[str] = []
+
+    layout4_att = build_layout_4(session, errors)
+    if layout4_att:
+        fixed = rename_attachment(layout4_att, "04_LAYOUT_4_WEEKLY")
+        images.append(fixed)
+        print(f"[OUT] {fixed[0]}")
+
+    for fname, data, _ in images:
+        try:
+            with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                f.write(data)
+        except Exception:
+            pass
+
+    print(f"[OK] output image count: {len(images)}")
+    return images, errors
+
+
+def main_layout4() -> None:
+    """
+    週間4列結合専用のエントリポイント。
+    元になるSKAISETU（週間予報解説資料）はJST 10時頃更新・1日1回のため、
+    正午JST頃の1日1回だけ実行する(scripts/jma_layout4_weekly.py)。
+    """
+    try:
+        print("=== Start Weekly 4-column Layout (週間4列結合) ===")
+
+        issue_dt_jst = issue_base_jst()
+        rjtd = issue_dt_jst.strftime("%d%H%M")
+        day = issue_dt_jst.strftime("%Y%m%d")
+        run_prefix = f"{day}/RJTD_{rjtd}"
+
+        images, errors = build_layout4_only()
+        all_urls, rep_url = upload_to_r2(run_prefix, images)
+
+        filename = "04_LAYOUT_4_WEEKLY"
+        url = all_urls[0] if all_urls else ""
+
+        notion_items = [(filename, "週間4列結合", "LAYOUT_4_WEEKLY", url)]
+        page_id = notion_write_db(
+            issue_dt_jst=issue_dt_jst,
+            rjtd=rjtd,
+            run_prefix=run_prefix,
+            rep_url=rep_url,
+            all_urls=all_urls,
+            notion_items=notion_items,
+            errors=errors,
+        )
+
+        notion_url = notion_page_url(page_id) if page_id else ""
+        if notion_url:
+            print(f"[OK] Notion URL: {notion_url}")
+
+        try:
+            if discord_jma_enabled() and url:
+                init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
+                title = DISCORD_TITLES.get(filename, filename)
+                extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
+                if extra_links:
+                    title += "\n" + "\n".join(f"・[{t}](<{u}>)" for t, u in extra_links)
+                content = (
+                    f"{init_jst} / {title}\n"
+                    f"**[★高解像度PNG（R2 / 30日保存）を表示](<{url}>)**"
+                )
+
+                src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
+                if os.path.exists(src_path):
+                    thumb_path, thumb_mime = make_discord_thumbnail(src_path)
+                    post_discord_file_image(
+                        webhook_url=discord_jma_webhook_url(),
+                        title=content,
+                        image_path=thumb_path,
+                        mime=thumb_mime,
+                        suppress_embeds=True,
+                    )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
 
