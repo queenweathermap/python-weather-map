@@ -1259,10 +1259,12 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             canvas.paste(trimmed, (0, 0))
             fxjp854_upper = canvas
 
-    # 列3・4・5は同じ種類のパネル(地上天気図・上層天気図)なので、同じ幅に揃える。
-    # FXFE507/577(T72)はT12/24等を並べたfxfe502等よりネイティブ幅が狭い(1コマのみの
-    # PDFのため)ので、この標準幅に拡大する(縦横比は維持、歪めない)。
+    # 列3・4・5は同じ種類のパネル(地上天気図・上層天気図)なので、同じサイズ(幅と高さ)に
+    # 揃える。FXFE507/577(T72)はT12/24等を並べたfxfe502等よりネイティブ幅が狭く
+    # (1コマのみのPDFのため)、幅だけ合わせると縦横比のせいで縦に間延びしてしまう。
+    # fit_to_cellで幅・高さともに基準サイズへ収める(縦横比は保つ、はみ出さない)。
     period_target_w = ref_surface.width if ref_surface is not None else 2798
+    period_target_h = ref_surface.height if ref_surface is not None else 2218
 
     def build_period_column(
         surface_code: str,
@@ -1277,10 +1279,17 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if upper is None:
             errors.append(f"DashboardJMA: {upper_code} missing")
 
-        parts = [p for p in (surface, upper, fxjp854_half) if p is not None]
-        if not parts:
+        cells = []
+        if surface is not None:
+            cells.append(fit_to_cell(surface, period_target_w, period_target_h, valign="top"))
+        if upper is not None:
+            cells.append(fit_to_cell(upper, period_target_w, period_target_h, valign="top"))
+        if fxjp854_half is not None:
+            # FXJP854は既に列3・列4で高さを揃え済みなので、自然な高さのまま幅だけ揃える。
+            cells.append(resize_to_width(fxjp854_half, period_target_w))
+        if not cells:
             return None
-        return combine_vertical([resize_to_width(p, period_target_w) for p in parts], gap=LAYOUT_GAP)
+        return combine_vertical(cells, gap=LAYOUT_GAP)
 
     col3 = build_period_column("fxfe502", "fxfe5782", fxjp854_upper, surface_pre=ref_surface)
     col4 = build_period_column("fxfe504", "fxfe5784", fxjp854_lower)
@@ -1335,24 +1344,21 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             return None
         target_w = col.width
 
-        if wide_img is None and near_img is not None:
-            # 広域版が無い(=既に他の段にある)場合は、日本周辺白黒版を「おまけ」扱いに
-            # 縮小せず、列幅いっぱいに収める(切り抜かず全体表示)。
-            row1_parts = [fit_to_cell(near_img, target_w, header_h, valign="top")]
-        else:
-            badge_cell = (
-                resize_to_height(near_img, max(1, int(header_h * NEAR_MONO_BADGE_SCALE)))
-                if near_img is not None
-                else None
-            )
-            badge_w = badge_cell.width if badge_cell is not None else 0
+        # 日本周辺白黒版はすべて同じサイズ(header_h×NEAR_MONO_BADGE_SCALE)に揃える。
+        # 広域版と並ぶ場合はその分だけ広域版を小さくし、単独の場合もこれより大きくしない。
+        badge_cell = (
+            resize_to_height(near_img, max(1, int(header_h * NEAR_MONO_BADGE_SCALE)))
+            if near_img is not None
+            else None
+        )
+        badge_w = badge_cell.width if badge_cell is not None else 0
 
-            row1_parts = []
-            if wide_img is not None:
-                wide_target_w = max(1, target_w - badge_w)
-                row1_parts.append(fit_to_cell(wide_img, wide_target_w, header_h, valign="top"))
-            if badge_cell is not None:
-                row1_parts.append(badge_cell)
+        row1_parts = []
+        if wide_img is not None:
+            wide_target_w = max(1, target_w - badge_w)
+            row1_parts.append(fit_to_cell(wide_img, wide_target_w, header_h, valign="top"))
+        if badge_cell is not None:
+            row1_parts.append(badge_cell)
 
         if row1_parts:
             header = combine_horizontal(row1_parts, gap=0, valign="top")
