@@ -563,7 +563,7 @@ def get_first_page_or_none(pages: List[Image.Image]) -> Optional[Image.Image]:
 
 
 
-def combine_vertical(images: List[Image.Image], *, gap: int = 0) -> Optional[Image.Image]:
+def combine_vertical(images: List[Image.Image], *, gap: int = 0, halign: str = "center") -> Optional[Image.Image]:
     valid = [im.convert("RGB") for im in images if im is not None]
     if not valid:
         return None
@@ -574,7 +574,8 @@ def combine_vertical(images: List[Image.Image], *, gap: int = 0) -> Optional[Ima
     canvas = Image.new("RGB", (w, h), "white")
     y = 0
     for im in valid:
-        canvas.paste(im, ((w - im.width) // 2, y))
+        x = 0 if halign == "left" else (w - im.width) // 2
+        canvas.paste(im, (x, y))
         y += im.height + gap
 
     return canvas
@@ -1332,10 +1333,12 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if near_img is not None:
             row1_parts.append(resize_to_height(near_img, max(1, int(header_h * NEAR_MONO_BADGE_SCALE))))
         if row1_parts:
-            header = combine_horizontal(row1_parts, gap=LAYOUT_GAP, valign="top")
+            header = combine_horizontal(row1_parts, gap=0, valign="top")
         else:
             header = Image.new("RGB", (target_w, header_h), "white")
-        return combine_vertical([header, col], gap=LAYOUT_GAP)
+        # halign="left": 一段目が二段目以降より横に広くなっても、二段目以降を
+        # 中央寄せせず左揃えのままにする(列同士の余白が生まれないように)。
+        return combine_vertical([header, col], gap=LAYOUT_GAP, halign="left")
 
     col2 = prepend_header_pair(col2, asas_wide, asas_new)
     col3 = prepend_header_pair(col3, fsas24_wide, fsas24_new)
