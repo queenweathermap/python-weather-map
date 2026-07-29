@@ -1313,11 +1313,12 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
 
     # ---- 一段目(3列目・4列目・5列目): 広域版(切り抜かず全体表示)を列の先頭に、
-    # 日本周辺白黒版はそれを縮小して横に「おまけ」のように並べる(縦に重ねない)。
-    # 一段目がその列の通常幅より少し広くなるが、combine_verticalが自動で中央寄せするため、
-    # 二段目以降(列の通常幅)には影響しない。6列目(T72)の上は空白のまま。
+    # 日本周辺白黒版はそれを少し拡大して横に「おまけ」のように並べる(縦に重ねない)。
+    # おまけの分だけ広域版を少し小さくし、合計幅がその列の通常幅(target_w)ちょうどに
+    # なるようにする(高さはheader_hのまま変えないので、列ごとの段位置はずれない)。
+    # 6列目(T72)の上は空白のまま。
     header_h = col12_h
-    NEAR_MONO_BADGE_SCALE = 0.5  # 「おまけ」サイズ。広域版の高さに対する比率。
+    NEAR_MONO_BADGE_SCALE = 0.65  # 「おまけ」サイズ。header_hに対する高さの比率。
 
     def prepend_header_pair(
         col: Optional[Image.Image],
@@ -1327,17 +1328,24 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if col is None:
             return None
         target_w = col.width
+        badge_cell = (
+            resize_to_height(near_img, max(1, int(header_h * NEAR_MONO_BADGE_SCALE)))
+            if near_img is not None
+            else None
+        )
+        badge_w = badge_cell.width if badge_cell is not None else 0
+
         row1_parts = []
         if wide_img is not None:
-            row1_parts.append(fit_to_cell(wide_img, target_w, header_h, valign="top"))
-        if near_img is not None:
-            row1_parts.append(resize_to_height(near_img, max(1, int(header_h * NEAR_MONO_BADGE_SCALE))))
+            wide_target_w = max(1, target_w - badge_w)
+            row1_parts.append(fit_to_cell(wide_img, wide_target_w, header_h, valign="top"))
+        if badge_cell is not None:
+            row1_parts.append(badge_cell)
+
         if row1_parts:
             header = combine_horizontal(row1_parts, gap=0, valign="top")
         else:
             header = Image.new("RGB", (target_w, header_h), "white")
-        # halign="left": 一段目が二段目以降より横に広くなっても、二段目以降を
-        # 中央寄せせず左揃えのままにする(列同士の余白が生まれないように)。
         return combine_vertical([header, col], gap=LAYOUT_GAP, halign="left")
 
     col2 = prepend_header_pair(col2, asas_wide, asas_new)
