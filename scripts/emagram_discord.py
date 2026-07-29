@@ -225,20 +225,33 @@ def build_grid_image(stations_with_images: list) -> bytes:
     return buf.getvalue()
 
 
-def append_caption_bar(img_bytes: bytes, dt: datetime, *, font_size: int = 26, pad: int = 14) -> bytes:
-    """画像の下に、作成日時(UTC)・出典を記した余白バーを追加する。"""
-    font = load_font(CJK_REGULAR_CANDIDATES, font_size)
-    text = (
+def caption_text_for(dt: datetime) -> str:
+    return (
         f"作成日時: {dt.strftime('%Y年%m月%d日 %H:%M')} UTC"
         "　出典: University of Wyoming 高層観測アーカイブ (weather.arcc.uwyo.edu)"
         "　作成: Synoptic Chart Premium"
     )
 
+
+def append_caption_bar(img_bytes: bytes, dt: datetime, *, font_size: int = 26, pad: int = 14) -> bytes:
+    """画像の下に、作成日時(UTC)・出典を記した余白バーを追加する。
+    横幅が足りない場合(サムネイル等)は、収まる範囲で自動的にフォントを縮小する。"""
+    text = caption_text_for(dt)
+
     with Image.open(BytesIO(img_bytes)) as im:
         rgb = im.convert("RGB")
 
     tmp = Image.new("RGB", (10, 10), "white")
+    available_w = max(1, rgb.width - pad * 2)
+
+    size = font_size
+    font = load_font(CJK_REGULAR_CANDIDATES, size)
     bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
+    while (bbox[2] - bbox[0]) > available_w and size > 10:
+        size -= 2
+        font = load_font(CJK_REGULAR_CANDIDATES, size)
+        bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
+
     text_h = bbox[3] - bbox[1]
     bar_h = text_h + pad * 2
 
@@ -252,16 +265,35 @@ def append_caption_bar(img_bytes: bytes, dt: datetime, *, font_size: int = 26, p
     return buf.getvalue()
 
 
-def make_thumbnail(img_bytes: bytes) -> bytes:
+def make_thumbnail(img_bytes: bytes, dt: datetime, *, baked_font_size: int = 26, thumb_font_size: int = 20) -> bytes:
+    """
+    Discordサムネイルを作る。焼き込み済みの出典バー(4000px基準の等倍フォント)は
+    縮小すると潰れて読めなくなるため、いったん取り除き、縮小後の解像度に
+    合わせた読めるサイズで描き直す。
+    """
+    baked_font = load_font(CJK_REGULAR_CANDIDATES, baked_font_size)
+    tmp = Image.new("RGB", (10, 10), "white")
+    bbox = ImageDraw.Draw(tmp).textbbox((0, 0), caption_text_for(dt), font=baked_font)
+    baked_bar_h = (bbox[3] - bbox[1]) + 14 * 2
+
     with Image.open(BytesIO(img_bytes)) as im:
         rgb = im.convert("RGB")
+        if 0 < baked_bar_h < rgb.height:
+            rgb = rgb.crop((0, 0, rgb.width, rgb.height - baked_bar_h))
+
         w, h = rgb.size
         if w > THUMB_MAX_WIDTH:
             new_h = max(1, int(h * (THUMB_MAX_WIDTH / w)))
             rgb = rgb.resize((THUMB_MAX_WIDTH, new_h), Image.Resampling.LANCZOS)
+
         buf = BytesIO()
-        rgb.save(buf, format="JPEG", quality=THUMB_JPEG_QUALITY, optimize=True)
-        return buf.getvalue()
+        rgb.save(buf, format="PNG")
+        rgb_bytes = append_caption_bar(buf.getvalue(), dt, font_size=thumb_font_size, pad=10)
+
+    with Image.open(BytesIO(rgb_bytes)) as im2:
+        out = BytesIO()
+        im2.convert("RGB").save(out, format="JPEG", quality=THUMB_JPEG_QUALITY, optimize=True)
+        return out.getvalue()
 
 
 def build_content(dt: datetime, highres_url: str) -> str:
@@ -330,7 +362,7 @@ def main() -> int:
     highres_url = make_url(r2_key)
     print(f"R2 UPLOADED: {highres_url}")
 
-    thumb = make_thumbnail(combined)
+    thumb = make_thumbnail(combined, dt)
 
     if post_combined(webhook_url, dt, thumb, highres_url):
         print("POSTED")

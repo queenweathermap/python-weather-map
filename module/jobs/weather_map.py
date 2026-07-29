@@ -259,10 +259,21 @@ def prepare_discord_upload_image(src_path: str) -> Tuple[str, str]:
 
 
 
-def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
+def make_discord_thumbnail(
+    src_path: str,
+    *,
+    caption_text: Optional[str] = None,
+    baked_caption_font_size: int = 52,
+    thumb_caption_font_size: int = 22,
+) -> Tuple[str, str]:
     """
     4・5枚目用の確認サムネイルを作る。
     本体の高解像度PNGはR2 URLで開くため、Discord添付は軽量JPEGにする。
+
+    caption_text指定時: 元画像の下端に焼き込み済みの出典キャプション帯は、
+    サムネイルへ縮小すると文字が潰れて読めなくなる(12000px級の原寸フォントの
+    まま10分の1近くに縮小されるため)。そのため焼き込み済みの帯はいったん
+    取り除き、縮小後のサムネイル解像度に合わせた読めるサイズで描き直す。
     """
     if not os.path.exists(src_path):
         raise FileNotFoundError(src_path)
@@ -275,8 +286,16 @@ def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
 
     with Image.open(src_path) as im:
         rgb = im.convert("RGB")
-        w, h = rgb.size
 
+        if caption_text:
+            font = _load_caption_font(baked_caption_font_size)
+            tmp = Image.new("RGB", (10, 10), "white")
+            bbox = ImageDraw.Draw(tmp).textbbox((0, 0), caption_text, font=font)
+            baked_bar_h = (bbox[3] - bbox[1]) + 24 * 2
+            if 0 < baked_bar_h < rgb.height:
+                rgb = rgb.crop((0, 0, rgb.width, rgb.height - baked_bar_h))
+
+        w, h = rgb.size
         max_w = max(480, DISCORD_THUMB_MAX_WIDTH)
         if w > max_w:
             new_h = max(1, int(h * (max_w / w)))
@@ -287,7 +306,10 @@ def make_discord_thumbnail(src_path: str) -> Tuple[str, str]:
         target_mb = max(1.0, DISCORD_MAX_UPLOAD_MB * 0.5)
 
         for _ in range(7):
-            rgb.save(out_path, format="JPEG", quality=q, optimize=True, progressive=True, subsampling=0)
+            test_img = rgb
+            if caption_text:
+                test_img = append_caption_bar(rgb, caption_text, font_size=thumb_caption_font_size, pad=10)
+            test_img.save(out_path, format="JPEG", quality=q, optimize=True, progressive=True, subsampling=0)
             size_mb = os.path.getsize(out_path) / (1024 * 1024)
             if size_mb <= target_mb:
                 break
@@ -766,6 +788,38 @@ def trim_bottom_whitespace(img: Image.Image, *, threshold: int = 245, bottom_pad
     return img.crop((0, 0, w, new_bottom + 1))
 
 
+def trim_right_whitespace(img: Image.Image, *, threshold: int = 245, right_pad: int = 20) -> Image.Image:
+    """
+    右側の白余白だけを安全に少し詰める(最右列がT72等、幅の狭いパネルの場合に
+    セル内の余白がそのままキャンバス右端の余白になってしまうのを防ぐ)。
+    上側・下側・左側のレイアウトは維持しつつ、最右列だけを控えめにトリムする。
+    """
+    img = img.convert("RGB")
+    px = img.load()
+    w, h = img.size
+
+    right = w - 1
+
+    def col_has_content(x: int) -> bool:
+        for y in range(h):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    while right >= 0 and not col_has_content(right):
+        right -= 1
+
+    if right < 0:
+        return img
+
+    new_right = min(w - 1, right + max(0, right_pad))
+    if new_right >= w - 1:
+        return img
+
+    return img.crop((0, 0, new_right + 1, h))
+
+
 CAPTION_FONT_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # ubuntu apt
     "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
@@ -788,11 +842,20 @@ def _load_caption_font(size: int) -> ImageFont.ImageFont:
 def append_caption_bar(img: Image.Image, text: str, *, font_size: int = 52, pad: int = 24) -> Image.Image:
     """
     画像の下に、出典・作成日時を記した余白バーを追加する。
+    横幅が足りない場合(サムネイル等)は、収まる範囲で自動的にフォントを縮小する。
     """
     img = img.convert("RGB")
-    font = _load_caption_font(font_size)
     tmp = Image.new("RGB", (10, 10), "white")
+    available_w = max(1, img.width - pad * 2)
+
+    size = font_size
+    font = _load_caption_font(size)
     bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
+    while (bbox[2] - bbox[0]) > available_w and size > 10:
+        size -= 2
+        font = _load_caption_font(size)
+        bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
+
     text_h = bbox[3] - bbox[1]
     bar_h = text_h + pad * 2
 
@@ -804,6 +867,14 @@ def append_caption_bar(img: Image.Image, text: str, *, font_size: int = 52, pad:
     canvas.paste(img, (0, 0))
     canvas.paste(bar, (0, img.height))
     return canvas
+
+
+def jma_source_caption(dt_utc: datetime) -> str:
+    return (
+        f"作成日時: {dt_utc.strftime('%Y年%m月%d日 %H:%M')} UTC"
+        "　出典: 気象庁ホームページ（気象庁提供の情報を編集・加工して作成）"
+        "　作成: Synoptic Chart Premium"
+    )
 
 
 def prepare_comp_panel(img: Image.Image, target_w: int) -> Image.Image:
@@ -975,11 +1046,7 @@ def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
     # 天気図ダッシュボードのような00Z/12Z発表サイクルが無いため、作成日時には
     # (発表時刻ではなく)実際の作成時刻をそのまま使う。
     now_utc = datetime.now(timezone.utc)
-    caption = (
-        f"作成日時: {now_utc.strftime('%Y年%m月%d日 %H:%M')} UTC"
-        "　出典: 気象庁ホームページ（気象庁提供の情報を編集・加工して作成）"
-        "　作成: Synoptic Chart Premium"
-    )
+    caption = jma_source_caption(now_utc)
     canvas = append_caption_bar(canvas, caption)
 
     return pil_to_attachment(canvas, "LAYOUT_4_WEEKLY")
@@ -1528,12 +1595,9 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         final_canvas = main_grid
 
     final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=20)
+    final_canvas = trim_right_whitespace(final_canvas, right_pad=20)
     issue_dt_utc = issue_dt_jst - timedelta(hours=9)
-    caption = (
-        f"作成日時: {issue_dt_utc.strftime('%Y年%m月%d日 %H:%M')} UTC"
-        "　出典: 気象庁ホームページ（気象庁提供の情報を編集・加工して作成）"
-        "　作成: Synoptic Chart Premium"
-    )
+    caption = jma_source_caption(issue_dt_utc)
     final_canvas = append_caption_bar(final_canvas, caption)
     return pil_to_attachment(final_canvas, "DASHBOARD_JMA_DIRECT")
 
@@ -1984,7 +2048,10 @@ def main_dashboard_jma() -> None:
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
                 if os.path.exists(src_path):
-                    thumb_path, thumb_mime = make_discord_thumbnail(src_path)
+                    thumb_path, thumb_mime = make_discord_thumbnail(
+                        src_path,
+                        caption_text=jma_source_caption(issue_dt_jst - timedelta(hours=9)),
+                    )
                     post_discord_file_image(
                         webhook_url=discord_jma_webhook_url(),
                         title=content,
@@ -2081,7 +2148,10 @@ def main_layout4() -> None:
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
                 if os.path.exists(src_path):
-                    thumb_path, thumb_mime = make_discord_thumbnail(src_path)
+                    thumb_path, thumb_mime = make_discord_thumbnail(
+                        src_path,
+                        caption_text=jma_source_caption(datetime.now(timezone.utc)),
+                    )
                     post_discord_file_image(
                         webhook_url=discord_jma_webhook_url(),
                         title=content,
