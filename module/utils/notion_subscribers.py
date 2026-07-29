@@ -31,7 +31,7 @@ from typing import List
 
 import requests
 
-NOTION_VERSION = "2022-06-28"
+NOTION_VERSION = "2025-09-03"
 API_BASE = "https://api.notion.com/v1"
 
 # 本格運用（課金必須）の開始日。Worker側 (src/index.ts) の BETA_CUTOFF と同じ日付。
@@ -69,11 +69,36 @@ def _prop_discord_id() -> str:
     return _env("NOTION_SUB_PROP_DISCORD_ID", "Discord User ID")
 
 
+def _raise_with_body(r: requests.Response) -> None:
+    """Notion APIのエラーはbodyに具体的な理由(code/message)が入っているため、
+    ステータスコードだけでなくbodyもログに残す。"""
+    try:
+        r.raise_for_status()
+    except requests.HTTPError as e:
+        raise requests.HTTPError(f"{e} body={r.text[:500]}", response=r) from None
+
+
+def _resolve_data_source_id(db_id: str) -> str:
+    """
+    2025-09-03以降のNotion APIでは、データベースへの行の問い合わせは
+    databases/{id}/query ではなく data_sources/{id}/query を使う必要がある
+    （新しいデータベースはこの形式でないと400 Bad Requestになる）。
+    そのためまずデータベースを取得し、直下のdata_sourceのidを得る。
+    """
+    r = requests.get(f"{API_BASE}/databases/{db_id}", headers=_headers(), timeout=30)
+    _raise_with_body(r)
+    data_sources = r.json().get("data_sources", [])
+    if not data_sources:
+        raise RuntimeError(f"NOTION_SUBSCRIBERS_DATABASE_ID={db_id} has no data_sources")
+    return data_sources[0]["id"]
+
+
 def get_active_discord_ids() -> List[str]:
-    """購読者データベースから配信対象（active/beta/admin）のDiscord User IDを返す。
+    """購読者データベースから配信対象（active/beta/admin/lifetime）のDiscord User IDを返す。
     ただしbetaはBETA_CUTOFFを過ぎたら対象外にする（Notion側のStatusは
     手動更新不要で、ここでの日付判定だけで自動的に配信が止まる）。"""
     db_id = _must_env("NOTION_SUBSCRIBERS_DATABASE_ID")
+    data_source_id = _resolve_data_source_id(db_id)
 
     payload = {
         "filter": {
@@ -96,12 +121,12 @@ def get_active_discord_ids() -> List[str]:
             body["start_cursor"] = cursor
 
         r = requests.post(
-            f"{API_BASE}/databases/{db_id}/query",
+            f"{API_BASE}/data_sources/{data_source_id}/query",
             headers=_headers(),
             json=body,
             timeout=30,
         )
-        r.raise_for_status()
+        _raise_with_body(r)
         data = r.json()
 
         for page in data.get("results", []):
