@@ -1178,12 +1178,12 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         # 隣列との間に不要な隙間ができるのであらかじめ切り詰める。
         tkai = trim_white_margins(tkai, pad=20)
 
-    # 一段目(row1): ASAS / FSAS24 / FSAS48。気象庁の「日本周辺・白黒」天気図
+    # 一段目(row1): FSAS24 / FSAS48。気象庁の「日本周辺・白黒」天気図
     # (list.jsonの near_monochrome、あらかじめ日本付近に切り出し済み)から取得する。
-    asas_new = fetch_jma_near_monochrome_latest("now", "ASAS")
+    # ASASは列3の3段目(極東アジア切り出し)に既に出ているため、一段目には出さない。
     fsas24_new = fetch_jma_near_monochrome_latest("ft24", "FSAS24")
     fsas48_new = fetch_jma_near_monochrome_latest("ft48", "FSAS48")
-    for name, im in (("ASAS", asas_new), ("FSAS24", fsas24_new), ("FSAS48", fsas48_new)):
+    for name, im in (("FSAS24", fsas24_new), ("FSAS48", fsas48_new)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
 
@@ -1348,7 +1348,8 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             header = Image.new("RGB", (target_w, header_h), "white")
         return combine_vertical([header, col], gap=LAYOUT_GAP, halign="left")
 
-    col2 = prepend_header_pair(col2, asas_wide, asas_new)
+    # ASASは列3の3段目(極東アジア切り出し)に既にあるため、一段目は空白にする。
+    col2 = prepend_header_pair(col2, None, None)
     col3 = prepend_header_pair(col3, fsas24_wide, fsas24_new)
     col4 = prepend_header_pair(col4, fsas48_wide, fsas48_new)
     col5 = prepend_header_pair(col5, None, None)
