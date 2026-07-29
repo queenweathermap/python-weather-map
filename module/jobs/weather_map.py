@@ -1311,41 +1311,36 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         col2_cells.append(cell)
     col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
 
-    # ---- 一段目(3列目・4列目・5列目): 広域版(切り抜かず全体表示)は元の位置(各列の先頭)、
-    # 日本周辺白黒版はその隣に横並びの別列として配置する(縦に重ねない)。6列目(T72)の上、
-    # および日本周辺白黒版の列自体も一段目より下は空白。
-    header_h = col12_h
+    # ---- 一段目(3列目・4列目・5列目): 広域版(切り抜かず全体表示) + 日本周辺白黒版(切り抜かず
+    # 全体表示)を2段重ねにする。6列目(T72)は同じ高さの空白。
+    # AUPQ列(2列目)は既にAUPA20だけを一段目として持っている(高さcol12_hのまま、変更なし)ので、
+    # こちらは2倍の高さ(header_h)になる。
+    header_h = col12_h * 2 + LAYOUT_GAP
 
-    def prepend_header(col: Optional[Image.Image], header_img: Optional[Image.Image]) -> Optional[Image.Image]:
+    def prepend_header_pair(
+        col: Optional[Image.Image],
+        wide_img: Optional[Image.Image],
+        near_img: Optional[Image.Image],
+    ) -> Optional[Image.Image]:
         if col is None:
             return None
         target_w = col.width
-        if header_img is not None:
-            header_cell = fit_to_cell(header_img, target_w, header_h, valign="top")
+        cells = []
+        if wide_img is not None:
+            cells.append(fit_to_cell(wide_img, target_w, col12_h, valign="top"))
+        if near_img is not None:
+            cells.append(fit_to_cell(near_img, target_w, col12_h, valign="top"))
+        if cells:
+            header = combine_vertical(cells, gap=LAYOUT_GAP)
+            header = pad_to_height(header, header_h)
         else:
-            header_cell = Image.new("RGB", (target_w, header_h), "white")
-        return combine_vertical([header_cell, col], gap=LAYOUT_GAP)
+            header = Image.new("RGB", (target_w, header_h), "white")
+        return combine_vertical([header, col], gap=LAYOUT_GAP)
 
-    def build_companion_column(near_img: Optional[Image.Image], match_col: Optional[Image.Image]) -> Optional[Image.Image]:
-        """日本周辺白黒版のみを一段目に置き、それ以外は隣列(match_col)の高さに
-        合わせて空白にする、横に添える別列。列の幅は画像自体の縦横比(header_hの高さに
-        収めた時の幅)に合わせて詰め、余白を作らない(列同士の余白をなくすため)。"""
-        if near_img is None or match_col is None:
-            return None
-        header_cell = resize_to_height(near_img, header_h)
-        col_w = header_cell.width
-        blank_h = max(1, match_col.height - header_h - LAYOUT_GAP)
-        blank = Image.new("RGB", (col_w, blank_h), "white")
-        return combine_vertical([header_cell, blank], gap=LAYOUT_GAP)
-
-    col2 = prepend_header(col2, asas_wide)
-    col3 = prepend_header(col3, fsas24_wide)
-    col4 = prepend_header(col4, fsas48_wide)
-    col5 = prepend_header(col5, None)
-
-    col2_companion = build_companion_column(asas_new, col2)
-    col3_companion = build_companion_column(fsas24_new, col3)
-    col4_companion = build_companion_column(fsas48_new, col4)
+    col2 = prepend_header_pair(col2, asas_wide, asas_new)
+    col3 = prepend_header_pair(col3, fsas24_wide, fsas24_new)
+    col4 = prepend_header_pair(col4, fsas48_wide, fsas48_new)
+    col5 = prepend_header_pair(col5, None, None)
 
     # ---- 2列目(aupq_col): 一段目=AUPA20 / AUPQ35(全体) / AUPQ78(全体、分割しない)。
     # AUPQ35/AUPQ78は3列目の下端に合わせて拡大する(残りの高さを2枚で等分)。
@@ -1392,7 +1387,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             left_parts.append(resize_to_width(tkai, left_col_w))
     left_col = combine_vertical(left_parts, gap=LAYOUT_GAP) if left_parts else None
 
-    grid_cols = [c for c in (aupq_col, col2, col2_companion, col3, col3_companion, col4, col4_companion, col5) if c is not None]
+    grid_cols = [c for c in (aupq_col, col2, col3, col4, col5) if c is not None]
     grid_row = None
     if grid_cols:
         grid_h = max(c.height for c in grid_cols)
