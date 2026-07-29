@@ -1186,11 +1186,14 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
 
-    # 3列目のASAS切り出しは、FXFE5782と同程度の極東アジア広域が必要なため、
-    # 一段目のASAS(日本周辺のみ)とは別に、引き続き広域のASAS_MONO.pdfを使う。
+    # 一段目にはさらに、広域版のASAS/FSAS24/FSAS48も並べる(日本周辺白黒版とは別の
+    # 材料として両方使う)。3列目のASAS切り出し(極東アジア広域)にもASAS広域版を使う。
     asas_wide = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_ASAS_MONO_URL, "ASAS_WIDE"))
-    if asas_wide is None:
-        errors.append("DashboardJMA: ASAS(wide) missing")
+    fsas24_wide = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_FSAS24_MONO_URL, "FSAS24_WIDE"))
+    fsas48_wide = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_FSAS48_MONO_URL, "FSAS48_WIDE"))
+    for name, im in (("ASAS(wide)", asas_wide), ("FSAS24(wide)", fsas24_wide), ("FSAS48(wide)", fsas48_wide)):
+        if im is None:
+            errors.append(f"DashboardJMA: {name} missing")
 
     # AXJP140は1ページにALONG 140E(上)とALONG 130E(下)の2断面図が
     # 縦に並んでいるので、上下分割してAXJP140/AXJP130として別々に使う。
@@ -1308,42 +1311,66 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         col2_cells.append(cell)
     col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
 
-    # ---- 2列目(aupq_col): 一段目=AUPA20 / AUPQ35(全体) / AUPQ78(全体、分割しない) ----
-    aupq_cells = []
-    if aupa20 is not None:
-        aupq_cells.append(fill_cell(aupa20, col12_w, col12_h, valign="top"))
-    if aupq35 is not None:
-        aupq_cells.append(fit_to_cell(aupq35, col12_w, col12_h, valign="top"))
-    if aupq78 is not None:
-        aupq_cells.append(fit_to_cell(aupq78, col12_w, col12_h, valign="top"))
-    aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP) if aupq_cells else None
+    # ---- 一段目(3列目・4列目・5列目): 広域版(切り抜かず全体表示) + 日本周辺白黒版(切り抜かず
+    # 全体表示)を2段重ねにする。6列目(T72)は同じ高さの空白。
+    # AUPQ列(2列目)は既にAUPA20だけを一段目として持っている(高さcol12_hのまま、変更なし)ので、
+    # こちらは2倍の高さ(header_pair_h)になる。
+    header_pair_h = col12_h * 2 + LAYOUT_GAP
 
-    # ---- 一段目をASAS(3列目)/FSAS24(4列目)/FSAS48(5列目)で埋め尽くす。6列目(T72)は空白。----
-    # AUPQ列(2列目)は既にAUPA20を一段目として持っているので、他の列にも同じ高さ
-    # (col12_h)で先頭に足し、段位置をそろえる。埋め尽くすため、はみ出た分は
-    # fill_cellで切り取って隙間なく詰める。
-    def prepend_header(col: Optional[Image.Image], header_img: Optional[Image.Image]) -> Optional[Image.Image]:
+    def prepend_header_pair(
+        col: Optional[Image.Image],
+        wide_img: Optional[Image.Image],
+        near_img: Optional[Image.Image],
+    ) -> Optional[Image.Image]:
         if col is None:
             return None
         target_w = col.width
-        if header_img is not None:
-            header_cell = fill_cell(header_img, target_w, col12_h, valign="top")
+        cells = []
+        if wide_img is not None:
+            cells.append(fit_to_cell(wide_img, target_w, col12_h, valign="top"))
+        if near_img is not None:
+            cells.append(fit_to_cell(near_img, target_w, col12_h, valign="top"))
+        if cells:
+            header = combine_vertical(cells, gap=LAYOUT_GAP)
+            header = pad_to_height(header, header_pair_h)
         else:
-            header_cell = Image.new("RGB", (target_w, col12_h), "white")
-        return combine_vertical([header_cell, col], gap=LAYOUT_GAP)
+            header = Image.new("RGB", (target_w, header_pair_h), "white")
+        return combine_vertical([header, col], gap=LAYOUT_GAP)
 
-    col2 = prepend_header(col2, asas_new)
-    col3 = prepend_header(col3, fsas24_new)
-    col4 = prepend_header(col4, fsas48_new)
-    col5 = prepend_header(col5, None)
+    col2 = prepend_header_pair(col2, asas_wide, asas_new)
+    col3 = prepend_header_pair(col3, fsas24_wide, fsas24_new)
+    col4 = prepend_header_pair(col4, fsas48_wide, fsas48_new)
+    col5 = prepend_header_pair(col5, None, None)
 
-    # ---- 左端(1列目): 一段目は空白、AXJP140 / AXJP130 / 短期予報解説情報。
+    # ---- 2列目(aupq_col): 一段目=AUPA20 / AUPQ35(全体) / AUPQ78(全体、分割しない)。
+    # AUPQ35/AUPQ78は3列目の下端に合わせて拡大する(残りの高さを2枚で等分)。
+    aupa20_cell = fill_cell(aupa20, col12_w, col12_h, valign="top") if aupa20 is not None else None
+    aupa20_h = aupa20_cell.height if aupa20_cell is not None else 0
+
+    aupq_bottom_cells = []
+    if col2 is not None:
+        remaining_h = max(1, col2.height - aupa20_h - LAYOUT_GAP)
+        each_h = max(1, (remaining_h - LAYOUT_GAP) // 2)
+        if aupq35 is not None:
+            aupq_bottom_cells.append(fit_to_cell(aupq35, col12_w, each_h, valign="top"))
+        if aupq78 is not None:
+            aupq_bottom_cells.append(fit_to_cell(aupq78, col12_w, each_h, valign="top"))
+    else:
+        if aupq35 is not None:
+            aupq_bottom_cells.append(fit_to_cell(aupq35, col12_w, col12_h, valign="top"))
+        if aupq78 is not None:
+            aupq_bottom_cells.append(fit_to_cell(aupq78, col12_w, col12_h, valign="top"))
+
+    aupq_cells = ([aupa20_cell] if aupa20_cell is not None else []) + aupq_bottom_cells
+    aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP) if aupq_cells else None
+
+    # ---- 左端(1列目): 一段目は空白(他列の一段目と同じ高さ)、AXJP140 / AXJP130 / 短期予報解説情報。
     # AXJP140/AXJP130は2列目(AUPQ列)と同じセルサイズ(col12_w×col12_h)に合わせる
     # (余白も揃えるため、多少の切り取りは許容してfill_cellで詰める)。
     # AXJP140の絵柄上端が3列目の絵柄上端(=一段目の下、二段目)に、TKAISETUの絵柄下端が
     # 3列目の絵柄下端に揃うよう、TKAISETUは残りの高さぴったりに収め、下揃え・大きめに配置する。
     left_col_w = col12_w
-    top_items = [Image.new("RGB", (left_col_w, col12_h), "white")]
+    top_items = [Image.new("RGB", (left_col_w, header_pair_h), "white")]
     if axjp140 is not None:
         top_items.append(fill_cell(axjp140, left_col_w, col12_h, valign="top"))
     if axjp130 is not None:
