@@ -1,11 +1,9 @@
 name: Run JMA Weather Map
 
+# AXJP140/AUPA20は気象庁直接取得版「全部入り」(jma-dashboard-direct.yml)に
+# 統合され、単体でのNotion投稿が不要になったため、定期実行を停止した。
+# 手動実行(workflow_dispatch)のみ残している。
 on:
-  schedule:
-    # 05:00 / 17:00 JST（短時間解説資料 03:40/15:40 発表に対応）
-    # 20:00 / 08:00 UTC
-    - cron: "0 20,8 * * *"
-
   workflow_dispatch: {}
 
 jobs:

@@ -611,7 +611,12 @@ def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "ce
 
     canvas = Image.new("RGB", (cell_w, cell_h), "white")
     x = (cell_w - new_w) // 2
-    y = 0 if valign == "top" else (cell_h - new_h) // 2
+    if valign == "top":
+        y = 0
+    elif valign == "bottom":
+        y = cell_h - new_h
+    else:
+        y = (cell_h - new_h) // 2
     canvas.paste(resized, (x, y))
     return canvas
 
@@ -1163,10 +1168,16 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
 
-    axjp140 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axjp140", cycle))
-    aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle))
-    if axjp140 is None:
+    # AXJP140は1ページにALONG 140E(上)とALONG 130E(下)の2断面図が
+    # 縦に並んでいるので、上下分割してAXJP140/AXJP130として別々に使う。
+    axjp140_raw = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axjp140", cycle))
+    if axjp140_raw is None:
         errors.append("DashboardJMA: AXJP140 missing")
+        axjp140, axjp130 = None, None
+    else:
+        axjp140, axjp130 = split_top_bottom(axjp140_raw)
+
+    aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle))
     if aupa20 is None:
         errors.append("DashboardJMA: AUPA20 missing")
 
@@ -1308,18 +1319,30 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if fsas48_part is not None:
             header_row.paste(fsas48_part, (x_col4 + col4_w - fsas48_part.width, 0))
 
-    # ---- 左端: AXJP140 / AUPA20 / 短期予報解説情報。上2枚は隣列(AUPQ列)と
+    # ---- 左端: AXJP140 / AXJP130 / AUPA20 / 短期予報解説情報。上3枚は隣列(AUPQ列)と
     # 同じセルサイズ(col12_w×col12_h)に合わせる(余白も揃えるため、多少の
-    # 切り取りは許容してfill_cellで詰める)。TKAISETUはテキストなので
-    # 切り取らず、幅だけ揃えて自然な高さのまま。
+    # 切り取りは許容してfill_cellで詰める)。AXJP140の絵柄上端が列2の絵柄上端に、
+    # TKAISETUの絵柄下端が列2の絵柄下端に揃うよう、TKAISETUは残りの高さぴったりに
+    # 収め、下揃えで配置する(縦横比は保つ)。
     left_col_w = col12_w
-    left_parts = []
+    top_items = []
     if axjp140 is not None:
-        left_parts.append(fill_cell(axjp140, left_col_w, col12_h, valign="top"))
+        top_items.append(fill_cell(axjp140, left_col_w, col12_h, valign="top"))
+    if axjp130 is not None:
+        top_items.append(fill_cell(axjp130, left_col_w, col12_h, valign="top"))
     if aupa20 is not None:
-        left_parts.append(fill_cell(aupa20, left_col_w, col12_h, valign="top"))
+        top_items.append(fill_cell(aupa20, left_col_w, col12_h, valign="top"))
+    top_stack = combine_vertical(top_items, gap=LAYOUT_GAP) if top_items else None
+    top_stack_h = top_stack.height if top_stack is not None else 0
+
+    left_parts = [top_stack] if top_stack is not None else []
     if tkai is not None:
-        left_parts.append(resize_to_width(tkai, left_col_w))
+        if col2 is not None:
+            gap_before_tkai = LAYOUT_GAP if top_stack is not None else 0
+            target_tkai_h = max(1, col2.height - top_stack_h - gap_before_tkai)
+            left_parts.append(fit_to_cell(tkai, left_col_w, target_tkai_h, valign="bottom"))
+        else:
+            left_parts.append(resize_to_width(tkai, left_col_w))
     left_col = combine_vertical(left_parts, gap=LAYOUT_GAP) if left_parts else None
 
     grid_cols = [c for c in (aupq_col, col2, col3, col4, col5) if c is not None]
@@ -1543,7 +1566,11 @@ IMAGE_EXTRA_LINKS: dict = {
     "07_DASHBOARD_JMA_DIRECT": [
         ("気象庁 専門家向け資料", "https://www.jma.go.jp/jma/kishou/know/expert/index.html"),
         ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
+        ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
         ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
+        ("気象庁 防災情報（秋田県）", "https://www.jma.go.jp/bosai/#pattern=default&area_type=offices&area_code=050000"),
+        ("秋田県防災ポータルサイト", "https://www.bousai-akita.jp/"),
+        ("林野火災注意報・警報用 気象情報収集支援システム", "https://konno-system.wew.jp/forest_fire_alert/portal.php"),
     ],
 }
 
