@@ -971,6 +971,17 @@ def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
     if canvas is None:
         return None
 
+    # 週間4列結合はSKAISETU等の更新(JST 10時頃)を待って正午に1日1回作成するだけで、
+    # 天気図ダッシュボードのような00Z/12Z発表サイクルが無いため、作成日時には
+    # (発表時刻ではなく)実際の作成時刻をそのまま使う。
+    now_utc = datetime.now(timezone.utc)
+    caption = (
+        f"作成日時: {now_utc.strftime('%Y年%m月%d日 %H:%M')} UTC"
+        "　出典: 気象庁ホームページ（気象庁提供の情報を編集・加工して作成）"
+        "　作成: Synoptic Chart Premium"
+    )
+    canvas = append_caption_bar(canvas, caption)
+
     return pil_to_attachment(canvas, "LAYOUT_4_WEEKLY")
 
 

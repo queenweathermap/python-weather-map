@@ -29,6 +29,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -82,11 +83,13 @@ CJK_BOLD_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.otf",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",  # macOS
 ]
 CJK_REGULAR_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",  # macOS
 ]
 
 
@@ -168,12 +171,26 @@ def placeholder_image(name: str, dt: datetime) -> bytes:
     return buf.getvalue()
 
 
+RETRY_COUNT = 3
+RETRY_WAIT_SECONDS = 180
+
+
 def fetch_image_with_fallback(stnm: str, name: str, dt: datetime) -> bytes:
     """当該時刻の画像を確保する。無ければプレースホルダー。
-    地点間で時系列がずれるのを避けるため、前回観測への遡りはしない。"""
+    地点間で時系列がずれるのを避けるため、前回観測への遡りはしない。
+    一部地点はサーバー側の反映が観測から数時間後にずれ込むことがあるため、
+    取得できない場合は少し待って数回リトライしてから諦める。"""
     img_bytes = fetch_image(stnm, dt)
     if img_bytes:
         return img_bytes
+
+    for attempt in range(1, RETRY_COUNT + 1):
+        print(f"RETRY {attempt}/{RETRY_COUNT}: {name} を{RETRY_WAIT_SECONDS}秒後に再試行します")
+        time.sleep(RETRY_WAIT_SECONDS)
+        img_bytes = fetch_image(stnm, dt)
+        if img_bytes:
+            print(f"RETRY OK: {name}")
+            return img_bytes
 
     print(f"NO DATA: {name} はプレースホルダーを使用")
     return placeholder_image(name, dt)
@@ -202,6 +219,33 @@ def build_grid_image(stations_with_images: list) -> bytes:
             if rgb.size != (CELL_W, CELL_H):
                 rgb = rgb.resize((CELL_W, CELL_H), Image.Resampling.LANCZOS)
             canvas.paste(rgb, (x, y + LABEL_H))
+
+    buf = BytesIO()
+    canvas.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def append_caption_bar(img_bytes: bytes, dt: datetime, *, font_size: int = 26, pad: int = 14) -> bytes:
+    """画像の下に、作成日時(UTC)・出典を記した余白バーを追加する。"""
+    font = load_font(CJK_REGULAR_CANDIDATES, font_size)
+    text = (
+        f"作成日時: {dt.strftime('%Y年%m月%d日 %H:%M')} UTC"
+        "　出典: University of Wyoming 高層観測アーカイブ (weather.arcc.uwyo.edu)"
+        "　作成: Synoptic Chart Premium"
+    )
+
+    with Image.open(BytesIO(img_bytes)) as im:
+        rgb = im.convert("RGB")
+
+    tmp = Image.new("RGB", (10, 10), "white")
+    bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
+    text_h = bbox[3] - bbox[1]
+    bar_h = text_h + pad * 2
+
+    canvas = Image.new("RGB", (rgb.width, rgb.height + bar_h), "white")
+    canvas.paste(rgb, (0, 0))
+    draw = ImageDraw.Draw(canvas)
+    draw.text((pad, rgb.height + pad - bbox[1]), text, fill=(90, 90, 90), font=font)
 
     buf = BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
@@ -279,6 +323,7 @@ def main() -> int:
     ]
 
     combined = build_grid_image(stations_with_images)
+    combined = append_caption_bar(combined, dt)
 
     r2_key = f"{dt.strftime('%Y%m%d%H')}.png"
     put_bytes(r2_key, combined, content_type="image/png")
