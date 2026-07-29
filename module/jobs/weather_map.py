@@ -490,6 +490,33 @@ def fetch_image_content(url: str) -> Optional[bytes]:
     return None
 
 
+JMA_WEATHER_MAP_LIST_URL = "https://www.jma.go.jp/bosai/weather_map/data/list.json"
+JMA_WEATHER_MAP_PNG_BASE = "https://www.jma.go.jp/bosai/weather_map/data/png"
+
+
+def fetch_jma_near_monochrome_latest(key: str, label: str = "") -> Optional[Image.Image]:
+    """
+    気象庁の「日本周辺・白黒」天気図(list.json の near_monochrome)から最新のPNGを取得する。
+      key: 'now'(実況=ASAS相当) / 'ft24'(24時間予想=FSAS24相当) / 'ft48'(48時間予想=FSAS48相当)
+    ファイル名はタイムスタンプ入りで毎回変わるため、list.jsonで最新ファイル名を都度確認する。
+    """
+    try:
+        r = requests.get(JMA_WEATHER_MAP_LIST_URL, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        filenames = data.get("near_monochrome", {}).get(key, [])
+        if not filenames:
+            print(f"[NG] JMA weather_map list: no entries for near_monochrome.{key}")
+            return None
+        filename = filenames[-1]
+    except Exception as e:
+        print(f"[ERR] JMA weather_map list.json: {e}")
+        return None
+
+    url = f"{JMA_WEATHER_MAP_PNG_BASE}/{filename}"
+    return fetch_jma_direct_png(url, label or key)
+
+
 def fetch_jma_direct_png(url: str, label: str = "") -> Optional[Image.Image]:
     """認証不要の気象庁URLからPNG画像を直接取得してPIL Imageで返す。"""
     content = fetch_image_content(url)
@@ -1131,14 +1158,12 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     WCN（Weathercaster.jp会員ページ）を一切経由せず、気象庁が自ら公開している
     データだけで、実際のWCN版「全部入り」と同じ構成を再現する。
 
-    左端の縦長列: AXJP140 / AXJP130 / 短期予報解説情報(TKAISETU、大きめ・下揃え)
-    右側:
-      上段（縮小して各列幅に揃える）: ASAS / FSAS24(24時間後) / FSAS48(48時間後)
-      下段グリッド（4列）:
-        列2: AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa) / AUPA20
-        列3: FXFE502(12-24h) / FXFE5782(12-24h) / FXJP854上半分(T=12,24)
-        列4: FXFE504(36-48h) / FXFE5784(36-48h) / FXJP854下半分(T=36,48)
-        列5: FXFE507(72h) / FXFE577(72h)  ※FXJP854はT=48までのためT72列には無し
+    左端の縦長列: (一段目は空白) / AXJP140 / AXJP130 / 短期予報解説情報(TKAISETU、大きめ・下揃え)
+    2列目: AUPA20(一段目) / AUPQ35(全体) / AUPQ78(全体)
+    3列目: ASAS(一段目、日本周辺白黒) / AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa)
+    4列目: FSAS24(一段目、24時間後) / FXFE502(12-24h) / FXFE5782(12-24h) / FXJP854上半分(T=12,24)
+    5列目: FSAS48(一段目、48時間後) / FXFE504(36-48h) / FXFE5784(36-48h) / FXJP854下半分(T=36,48)
+    6列目: (一段目は空白) / FXFE507(72h) / FXFE577(72h)  ※FXJP854はT=48までのためT72列には無し
     """
     print("-> Building JMA-direct Dashboard (DM用)")
 
@@ -1149,23 +1174,35 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     tkai = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_TKAISETU_URL, "TKAISETU"))
     if tkai is not None:
         # TKAISETUはPDFページ自体の右側に大きな白余白があり、そのままだと
-        # 列2との間に不要な隙間ができるのであらかじめ切り詰める。
+        # 隣列との間に不要な隙間ができるのであらかじめ切り詰める。
         tkai = trim_white_margins(tkai, pad=20)
-    asas = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_ASAS_MONO_URL, "ASAS"))
-    fsas24 = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_FSAS24_MONO_URL, "FSAS24"))
-    fsas48 = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_FSAS48_MONO_URL, "FSAS48"))
-    for name, im in (("TKAISETU", tkai), ("ASAS", asas), ("FSAS24", fsas24), ("FSAS48", fsas48)):
+
+    # 一段目(row1): ASAS / FSAS24 / FSAS48。気象庁の「日本周辺・白黒」天気図
+    # (list.jsonの near_monochrome、あらかじめ日本付近に切り出し済み)から取得する。
+    asas_new = fetch_jma_near_monochrome_latest("now", "ASAS")
+    fsas24_new = fetch_jma_near_monochrome_latest("ft24", "FSAS24")
+    fsas48_new = fetch_jma_near_monochrome_latest("ft48", "FSAS48")
+    for name, im in (("ASAS", asas_new), ("FSAS24", fsas24_new), ("FSAS48", fsas48_new)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
 
+    # 3列目のASAS切り出しは、FXFE5782と同程度の極東アジア広域が必要なため、
+    # 一段目のASAS(日本周辺のみ)とは別に、引き続き広域のASAS_MONO.pdfを使う。
+    asas_wide = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_ASAS_MONO_URL, "ASAS_WIDE"))
+    if asas_wide is None:
+        errors.append("DashboardJMA: ASAS(wide) missing")
+
     # AXJP140は1ページにALONG 140E(上)とALONG 130E(下)の2断面図が
     # 縦に並んでいるので、上下分割してAXJP140/AXJP130として別々に使う。
+    # 白余白はここで切り詰めておく(上下に余白が残らないように)。
     axjp140_raw = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axjp140", cycle))
     if axjp140_raw is None:
         errors.append("DashboardJMA: AXJP140 missing")
         axjp140, axjp130 = None, None
     else:
-        axjp140, axjp130 = split_top_bottom(axjp140_raw)
+        axjp140_half, axjp130_half = split_top_bottom(axjp140_raw)
+        axjp140 = trim_white_margins(axjp140_half)
+        axjp130 = trim_white_margins(axjp130_half)
 
     aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle))
     if aupa20 is None:
@@ -1250,13 +1287,13 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     col12_w = standard_w // 2
     col12_h = standard_h // 2
 
-    # ---- 列2: AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa) / AUPA20 ----
-    # 5枚それぞれを「天気図1枚」の基準セルの半分サイズに収める(5段、ペアにはしない)。
-    asas_asia = crop_asia_area(asas) if asas is not None else None
+    # ---- 3列目(旧・列2、AXFE578ベース): AXFE578上段(500hPa) / ASAS(極東アジア切り出し) /
+    # AUPQ35下段 / AXFE578下段(850hPa)。AUPA20はここから2列目(aupq_col)へ移動した。
+    asas_asia = crop_asia_area(asas_wide) if asas_wide is not None else None
     aupq35_lower = split_top_bottom(aupq35)[1] if aupq35 is not None else None
 
     col2_cells = []
-    for im in (axfe578_upper, asas_asia, aupq35_lower, axfe578_lower, aupa20):
+    for im in (axfe578_upper, asas_asia, aupq35_lower, axfe578_lower):
         if im is None:
             continue
         if im is asas_asia:
@@ -1271,63 +1308,53 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         col2_cells.append(cell)
     col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
 
-    # ---- AUPQ35/AUPQ78の列: 列2の隣に、それぞれ上下2枚に分割して4段にし、
-    # 列2の4コマと1段ずつ同じ高さで揃える。
-    aupq35_top, aupq35_bottom = split_top_bottom(aupq35) if aupq35 is not None else (None, None)
-    aupq78_top, aupq78_bottom = split_top_bottom(aupq78) if aupq78 is not None else (None, None)
-    aupq_cells = [
-        fit_to_cell(im, col12_w, col12_h, valign="top")
-        for im in (aupq35_top, aupq35_bottom, aupq78_top, aupq78_bottom)
-        if im is not None
-    ]
+    # ---- 2列目(aupq_col): 一段目=AUPA20 / AUPQ35(全体) / AUPQ78(全体、分割しない) ----
+    aupq_cells = []
+    if aupa20 is not None:
+        aupq_cells.append(fill_cell(aupa20, col12_w, col12_h, valign="top"))
+    if aupq35 is not None:
+        aupq_cells.append(fit_to_cell(aupq35, col12_w, col12_h, valign="top"))
+    if aupq78 is not None:
+        aupq_cells.append(fit_to_cell(aupq78, col12_w, col12_h, valign="top"))
     aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP) if aupq_cells else None
 
-    # ---- 上段: ASAS(列2の上に左揃え) / FSAS24(T12/24=列3の上に右揃え) / FSAS48(T36/48=列4の上に右揃え) ----
-    # 時間軸を意識し、ASASは現在時刻(列2側)、FSAS24/48は該当する予報時刻の列の右端に揃える。
-    # そろえた結果、間には自然に余白ができる。
-    asas_part = resize_to_width(asas, col12_w) if asas is not None else None
-    fsas24_part = resize_to_width(fsas24, col12_w) if fsas24 is not None else None
-    fsas48_part = resize_to_width(fsas48, col12_w) if fsas48 is not None else None
+    # ---- 一段目をASAS(3列目)/FSAS24(4列目)/FSAS48(5列目)で埋め尽くす。6列目(T72)は空白。----
+    # AUPQ列(2列目)は既にAUPA20を一段目として持っているので、他の列にも同じ高さ
+    # (col12_h)で先頭に足し、段位置をそろえる。埋め尽くすため、はみ出た分は
+    # fill_cellで切り取って隙間なく詰める。
+    def prepend_header(col: Optional[Image.Image], header_img: Optional[Image.Image]) -> Optional[Image.Image]:
+        if col is None:
+            return None
+        target_w = col.width
+        if header_img is not None:
+            header_cell = fill_cell(header_img, target_w, col12_h, valign="top")
+        else:
+            header_cell = Image.new("RGB", (target_w, col12_h), "white")
+        return combine_vertical([header_cell, col], gap=LAYOUT_GAP)
 
-    aupq_w = aupq_col.width if aupq_col is not None else 0
-    col2_w = col2.width if col2 is not None else 0
-    col3_w = col3.width if col3 is not None else 0
-    col4_w = col4.width if col4 is not None else 0
-    x_col2 = aupq_w
-    x_col3 = x_col2 + col2_w
-    x_col4 = x_col3 + col3_w + LAYOUT_GAP
-    header_w = x_col4 + col4_w
-    header_h = max((p.height for p in (asas_part, fsas24_part, fsas48_part) if p is not None), default=0)
+    col2 = prepend_header(col2, asas_new)
+    col3 = prepend_header(col3, fsas24_new)
+    col4 = prepend_header(col4, fsas48_new)
+    col5 = prepend_header(col5, None)
 
-    header_row = None
-    if header_w > 0 and header_h > 0:
-        header_row = Image.new("RGB", (header_w, header_h), "white")
-        if asas_part is not None:
-            header_row.paste(asas_part, (x_col2, 0))
-        if fsas24_part is not None:
-            header_row.paste(fsas24_part, (x_col3 + col3_w - fsas24_part.width, 0))
-        if fsas48_part is not None:
-            header_row.paste(fsas48_part, (x_col4 + col4_w - fsas48_part.width, 0))
-
-    # ---- 左端: AXJP140 / AXJP130 / 短期予報解説情報。AXJP140/AXJP130は隣列(AUPQ列)と
-    # 同じセルサイズ(col12_w×col12_h)に合わせる(余白も揃えるため、多少の
-    # 切り取りは許容してfill_cellで詰める)。AXJP140の絵柄上端が列2の絵柄上端に、
-    # TKAISETUの絵柄下端が列2の絵柄下端に揃うよう、TKAISETUは残りの高さぴったりに
-    # 収め、下揃え・大きめに配置する(縦横比は保つ)。
+    # ---- 左端(1列目): 一段目は空白、AXJP140 / AXJP130 / 短期予報解説情報。
+    # AXJP140/AXJP130は2列目(AUPQ列)と同じセルサイズ(col12_w×col12_h)に合わせる
+    # (余白も揃えるため、多少の切り取りは許容してfill_cellで詰める)。
+    # AXJP140の絵柄上端が3列目の絵柄上端(=一段目の下、二段目)に、TKAISETUの絵柄下端が
+    # 3列目の絵柄下端に揃うよう、TKAISETUは残りの高さぴったりに収め、下揃え・大きめに配置する。
     left_col_w = col12_w
-    top_items = []
+    top_items = [Image.new("RGB", (left_col_w, col12_h), "white")]
     if axjp140 is not None:
         top_items.append(fill_cell(axjp140, left_col_w, col12_h, valign="top"))
     if axjp130 is not None:
         top_items.append(fill_cell(axjp130, left_col_w, col12_h, valign="top"))
-    top_stack = combine_vertical(top_items, gap=LAYOUT_GAP) if top_items else None
-    top_stack_h = top_stack.height if top_stack is not None else 0
+    top_stack = combine_vertical(top_items, gap=LAYOUT_GAP)
+    top_stack_h = top_stack.height
 
-    left_parts = [top_stack] if top_stack is not None else []
+    left_parts = [top_stack]
     if tkai is not None:
         if col2 is not None:
-            gap_before_tkai = LAYOUT_GAP if top_stack is not None else 0
-            target_tkai_h = max(1, col2.height - top_stack_h - gap_before_tkai)
+            target_tkai_h = max(1, col2.height - top_stack_h - LAYOUT_GAP)
             left_parts.append(fit_to_cell(tkai, left_col_w, target_tkai_h, valign="bottom"))
         else:
             left_parts.append(resize_to_width(tkai, left_col_w))
@@ -1342,7 +1369,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         col3_p = pad_to_height(col3, grid_h) if col3 is not None else None
         col4_p = pad_to_height(col4, grid_h) if col4 is not None else None
         col5_p = pad_to_height(col5, grid_h) if col5 is not None else None
-        # AUPQ列・列2・T12(列3)の間の余白を詰め、列3以降は通常の間隔のまま。
+        # 2列目・3列目・4列目(T12/24)の間の余白を詰め、5列目以降は通常の間隔のまま。
         left_group = combine_horizontal(
             [c for c in (aupq_p, col2_p, col3_p) if c is not None],
             gap=0,
@@ -1354,24 +1381,10 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             valign="top",
         )
 
-    right_rows = [r for r in (header_row, grid_row) if r is not None]
-    right_block = None
-    if right_rows:
-        right_width = max(r.width for r in right_rows)
-        padded = []
-        for r in right_rows:
-            if r.width < right_width:
-                canvas = Image.new("RGB", (right_width, r.height), "white")
-                canvas.paste(r, (0, 0))
-                padded.append(canvas)
-            else:
-                padded.append(r)
-        right_block = combine_vertical(padded, gap=LAYOUT_GAP)
-
-    top_level = [c for c in (left_col, right_block) if c is not None]
+    top_level = [c for c in (left_col, grid_row) if c is not None]
     if not top_level:
         return None
-    # 左端と列2をくっつける(余白なし)。
+    # 左端と2列目をくっつける(余白なし)。
     final_canvas = combine_horizontal(top_level, gap=0, valign="top")
     final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=56)
     return pil_to_attachment(final_canvas, "DASHBOARD_JMA_DIRECT")
