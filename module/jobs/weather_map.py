@@ -1178,12 +1178,14 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         # 隣列との間に不要な隙間ができるのであらかじめ切り詰める。
         tkai = trim_white_margins(tkai, pad=20)
 
-    # 一段目(row1): FSAS24 / FSAS48。気象庁の「日本周辺・白黒」天気図
-    # (list.jsonの near_monochrome、あらかじめ日本付近に切り出し済み)から取得する。
-    # ASASは列3の3段目(極東アジア切り出し)に既に出ているため、一段目には出さない。
+    # 一段目(row1): ASAS(日本周辺白黒版のみ) / FSAS24 / FSAS48。気象庁の
+    # 「日本周辺・白黒」天気図(list.jsonの near_monochrome、あらかじめ日本付近に
+    # 切り出し済み)から取得する。ASASの広域版は列3の3段目(極東アジア切り出し)に
+    # 既に出ているため一段目には出さないが、日本周辺白黒版は別物なので出す。
+    asas_new = fetch_jma_near_monochrome_latest("now", "ASAS")
     fsas24_new = fetch_jma_near_monochrome_latest("ft24", "FSAS24")
     fsas48_new = fetch_jma_near_monochrome_latest("ft48", "FSAS48")
-    for name, im in (("FSAS24", fsas24_new), ("FSAS48", fsas48_new)):
+    for name, im in (("ASAS", asas_new), ("FSAS24", fsas24_new), ("FSAS48", fsas48_new)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
 
@@ -1328,19 +1330,25 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if col is None:
             return None
         target_w = col.width
-        badge_cell = (
-            resize_to_height(near_img, max(1, int(header_h * NEAR_MONO_BADGE_SCALE)))
-            if near_img is not None
-            else None
-        )
-        badge_w = badge_cell.width if badge_cell is not None else 0
 
-        row1_parts = []
-        if wide_img is not None:
-            wide_target_w = max(1, target_w - badge_w)
-            row1_parts.append(fit_to_cell(wide_img, wide_target_w, header_h, valign="top"))
-        if badge_cell is not None:
-            row1_parts.append(badge_cell)
+        if wide_img is None and near_img is not None:
+            # 広域版が無い(=既に他の段にある)場合は、日本周辺白黒版を「おまけ」扱いに
+            # 縮小せず、列幅いっぱいに収める(切り抜かず全体表示)。
+            row1_parts = [fit_to_cell(near_img, target_w, header_h, valign="top")]
+        else:
+            badge_cell = (
+                resize_to_height(near_img, max(1, int(header_h * NEAR_MONO_BADGE_SCALE)))
+                if near_img is not None
+                else None
+            )
+            badge_w = badge_cell.width if badge_cell is not None else 0
+
+            row1_parts = []
+            if wide_img is not None:
+                wide_target_w = max(1, target_w - badge_w)
+                row1_parts.append(fit_to_cell(wide_img, wide_target_w, header_h, valign="top"))
+            if badge_cell is not None:
+                row1_parts.append(badge_cell)
 
         if row1_parts:
             header = combine_horizontal(row1_parts, gap=0, valign="top")
@@ -1348,8 +1356,9 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             header = Image.new("RGB", (target_w, header_h), "white")
         return combine_vertical([header, col], gap=LAYOUT_GAP, halign="left")
 
-    # ASASは列3の3段目(極東アジア切り出し)に既にあるため、一段目は空白にする。
-    col2 = prepend_header_pair(col2, None, None)
+    # ASAS広域版は列3の3段目(極東アジア切り出し)に既にあるため一段目には出さないが、
+    # 日本周辺白黒版は別物なので一段目に残す。
+    col2 = prepend_header_pair(col2, None, asas_new)
     col3 = prepend_header_pair(col3, fsas24_wide, fsas24_new)
     col4 = prepend_header_pair(col4, fsas48_wide, fsas48_new)
     col5 = prepend_header_pair(col5, None, None)
