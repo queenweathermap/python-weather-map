@@ -562,7 +562,8 @@ def find_working_init_dt(
 GUIDE_ENABLE = env_bool("GUIDE_ENABLE", "1")
 
 GUIDE_LINKS: List[Tuple[str, str]] = [
-    ("気象防災アドバイザー向け資料集", "https://www.jma.go.jp/bosai/advisor/"),
+    ("秋田地方気象台", "https://www.jma-net.go.jp/akita/"),
+    ("秋田県防災ポータルサイト", "https://www.bousai-akita.jp/"),
 ]
 
 

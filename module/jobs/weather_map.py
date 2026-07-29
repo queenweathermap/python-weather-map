@@ -1706,12 +1706,7 @@ IMAGE_EXTRA_LINKS: dict = {
     ],
     "07_DASHBOARD_JMA_DIRECT": [
         ("気象庁 専門家向け資料", "https://www.jma.go.jp/jma/kishou/know/expert/index.html"),
-        ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
-        ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
         ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
-        ("気象庁 防災情報（秋田県）", "https://www.jma.go.jp/bosai/#pattern=default&area_type=offices&area_code=050000"),
-        ("秋田県防災ポータルサイト", "https://www.bousai-akita.jp/"),
-        ("林野火災注意報・警報用 気象情報収集支援システム", "https://konno-system.wew.jp/forest_fire_alert/portal.php"),
     ],
 }
 
