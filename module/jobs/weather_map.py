@@ -1328,12 +1328,14 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
 
     def build_companion_column(near_img: Optional[Image.Image], match_col: Optional[Image.Image]) -> Optional[Image.Image]:
         """日本周辺白黒版のみを一段目に置き、それ以外は隣列(match_col)の高さに
-        合わせて空白にする、横に添える別列。"""
+        合わせて空白にする、横に添える別列。列の幅は画像自体の縦横比(header_hの高さに
+        収めた時の幅)に合わせて詰め、余白を作らない(列同士の余白をなくすため)。"""
         if near_img is None or match_col is None:
             return None
-        header_cell = fit_to_cell(near_img, col12_w, header_h, valign="top")
+        header_cell = resize_to_height(near_img, header_h)
+        col_w = header_cell.width
         blank_h = max(1, match_col.height - header_h - LAYOUT_GAP)
-        blank = Image.new("RGB", (col12_w, blank_h), "white")
+        blank = Image.new("RGB", (col_w, blank_h), "white")
         return combine_vertical([header_cell, blank], gap=LAYOUT_GAP)
 
     col2 = prepend_header(col2, asas_wide)
@@ -1394,24 +1396,9 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     grid_row = None
     if grid_cols:
         grid_h = max(c.height for c in grid_cols)
-        # 2列目・3列目の間の余白を詰め、それ以降(日本周辺白黒版の添え列を含む)は通常の間隔。
-        aupq_p = pad_to_height(aupq_col, grid_h) if aupq_col is not None else None
-        col2_p = pad_to_height(col2, grid_h) if col2 is not None else None
-        rest = [
-            pad_to_height(c, grid_h)
-            for c in (col2_companion, col3, col3_companion, col4, col4_companion, col5)
-            if c is not None
-        ]
-        left_group = combine_horizontal(
-            [c for c in (aupq_p, col2_p) if c is not None],
-            gap=0,
-            valign="top",
-        )
-        grid_row = combine_horizontal(
-            [c for c in ([left_group] + rest) if c is not None],
-            gap=LAYOUT_GAP,
-            valign="top",
-        )
+        # 列同士の余白をすべて詰める(0ギャップ)。
+        padded_cols = [pad_to_height(c, grid_h) for c in grid_cols]
+        grid_row = combine_horizontal(padded_cols, gap=0, valign="top")
 
     top_level = [c for c in (left_col, grid_row) if c is not None]
     if not top_level:
