@@ -1259,6 +1259,11 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             canvas.paste(trimmed, (0, 0))
             fxjp854_upper = canvas
 
+    # 列3・4・5は同じ種類のパネル(地上天気図・上層天気図)なので、同じ幅に揃える。
+    # FXFE507/577(T72)はT12/24等を並べたfxfe502等よりネイティブ幅が狭い(1コマのみの
+    # PDFのため)ので、この標準幅に拡大する(縦横比は維持、歪めない)。
+    period_target_w = ref_surface.width if ref_surface is not None else 2798
+
     def build_period_column(
         surface_code: str,
         upper_code: str,
@@ -1275,8 +1280,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         parts = [p for p in (surface, upper, fxjp854_half) if p is not None]
         if not parts:
             return None
-        target_w = parts[0].width
-        return combine_vertical([resize_to_width(p, target_w) for p in parts], gap=LAYOUT_GAP)
+        return combine_vertical([resize_to_width(p, period_target_w) for p in parts], gap=LAYOUT_GAP)
 
     col3 = build_period_column("fxfe502", "fxfe5782", fxjp854_upper, surface_pre=ref_surface)
     col4 = build_period_column("fxfe504", "fxfe5784", fxjp854_lower)
