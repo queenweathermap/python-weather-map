@@ -799,10 +799,6 @@ def main() -> None:
     print(f"[OK] Notion DB row created: {page_id}")
     print(f"[OK] Notion URL: {notion_page_url(page_id)}")
 
-    if GUIDE_ENABLE:
-        for caption, url in GUIDE_LINKS:
-            append_bookmark(page_id, url, caption=caption)
-
     first_cover_url: Optional[str] = None
 
     notify_discord_adv_start(
@@ -972,6 +968,15 @@ def main() -> None:
                         "[WARN] Discord GIF send failed: "
                         f"{model_name} {item.label}: {e}"
                     )
+
+    # 画像をすべて貼り終えた後に関連リンクを表示する。
+    if GUIDE_ENABLE:
+        try:
+            append_heading(page_id, "関連リンク", level=2)
+            for caption, url in GUIDE_LINKS:
+                append_bookmark(page_id, url, caption=caption)
+        except Exception as e:
+            print(f"[WARN] Notion bookmarks failed: {e}")
 
     if errors:
         try:

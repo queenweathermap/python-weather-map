@@ -39,6 +39,8 @@ JMA_AMEDAS_URL = (
     "#9/39.615/140.218333333333/&elem=temp&contents=amedas&interval=60"
 )
 
+WCN_KISHO_URL = "https://www.weathercaster.jp/member/member_only/kisho_shiryo/"
+
 # JMA AMeDAS コードプレフィックス 32 = 秋田県
 AKITA_CODE_PREFIX = "32"
 
@@ -695,9 +697,9 @@ def _notion_write(
         print(f"[WARN] Notion image append failed: {e}")
 
     try:
-        append_heading(page_id, "参考リンク", level=2)
-        append_bookmark(page_id, JMA_AMEDAS_URL,
-                        caption="気象庁 アメダス（秋田）")
+        append_heading(page_id, "関連リンク", level=2)
+        append_bookmark(page_id, WCN_KISHO_URL,
+                        caption="WCN各種気象情報")
     except Exception as e:
         print(f"[WARN] Notion bookmarks failed: {e}")
 

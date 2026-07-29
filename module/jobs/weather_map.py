@@ -309,16 +309,6 @@ DISCORD_LINKS = [
     ("秋田地方気象台", "https://www.jma-net.go.jp/akita/"),
 ]
 
-NOTION_LINKS = [
-    ("気象庁 専門家向け資料", "https://www.jma.go.jp/jma/kishou/know/expert/index.html"),
-    ("気象庁 天気図", "https://www.jma.go.jp/bosai/weather_map/"),
-    ("気象庁 分布予報", "https://www.jma.go.jp/bosai/forecast/"),
-    ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
-    ("気象庁 防災情報（秋田県）", "https://www.jma.go.jp/bosai/#pattern=default&area_type=offices&area_code=050000"),
-    ("秋田県防災ポータルサイト", "https://www.bousai-akita.jp/"),
-    ("林野火災注意報・警報用 気象情報収集支援システム", "https://konno-system.wew.jp/forest_fire_alert/portal.php"),   
-    ("WCN各種気象情報", "https://www.weathercaster.jp/member/member_only/kisho_shiryo/"),
-]
 
 
 # =============================================================================
@@ -1141,11 +1131,11 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     WCN（Weathercaster.jp会員ページ）を一切経由せず、気象庁が自ら公開している
     データだけで、実際のWCN版「全部入り」と同じ構成を再現する。
 
-    左端の縦長列: AXJP140 / AUPA20 / 短期予報解説情報(TKAISETU)
+    左端の縦長列: AXJP140 / AXJP130 / 短期予報解説情報(TKAISETU、大きめ・下揃え)
     右側:
       上段（縮小して各列幅に揃える）: ASAS / FSAS24(24時間後) / FSAS48(48時間後)
       下段グリッド（4列）:
-        列2: AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa)
+        列2: AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa) / AUPA20
         列3: FXFE502(12-24h) / FXFE5782(12-24h) / FXJP854上半分(T=12,24)
         列4: FXFE504(36-48h) / FXFE5784(36-48h) / FXJP854下半分(T=36,48)
         列5: FXFE507(72h) / FXFE577(72h)  ※FXJP854はT=48までのためT72列には無し
@@ -1260,13 +1250,13 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     col12_w = standard_w // 2
     col12_h = standard_h // 2
 
-    # ---- 列2: AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa) ----
-    # 4枚それぞれを「天気図1枚」の基準セルの半分サイズに収める(4段、ペアにはしない)。
+    # ---- 列2: AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ35下段 / AXFE578下段(850hPa) / AUPA20 ----
+    # 5枚それぞれを「天気図1枚」の基準セルの半分サイズに収める(5段、ペアにはしない)。
     asas_asia = crop_asia_area(asas) if asas is not None else None
     aupq35_lower = split_top_bottom(aupq35)[1] if aupq35 is not None else None
 
     col2_cells = []
-    for im in (axfe578_upper, asas_asia, aupq35_lower, axfe578_lower):
+    for im in (axfe578_upper, asas_asia, aupq35_lower, axfe578_lower, aupa20):
         if im is None:
             continue
         if im is asas_asia:
@@ -1319,19 +1309,17 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if fsas48_part is not None:
             header_row.paste(fsas48_part, (x_col4 + col4_w - fsas48_part.width, 0))
 
-    # ---- 左端: AXJP140 / AXJP130 / AUPA20 / 短期予報解説情報。上3枚は隣列(AUPQ列)と
+    # ---- 左端: AXJP140 / AXJP130 / 短期予報解説情報。AXJP140/AXJP130は隣列(AUPQ列)と
     # 同じセルサイズ(col12_w×col12_h)に合わせる(余白も揃えるため、多少の
     # 切り取りは許容してfill_cellで詰める)。AXJP140の絵柄上端が列2の絵柄上端に、
     # TKAISETUの絵柄下端が列2の絵柄下端に揃うよう、TKAISETUは残りの高さぴったりに
-    # 収め、下揃えで配置する(縦横比は保つ)。
+    # 収め、下揃え・大きめに配置する(縦横比は保つ)。
     left_col_w = col12_w
     top_items = []
     if axjp140 is not None:
         top_items.append(fill_cell(axjp140, left_col_w, col12_h, valign="top"))
     if axjp130 is not None:
         top_items.append(fill_cell(axjp130, left_col_w, col12_h, valign="top"))
-    if aupa20 is not None:
-        top_items.append(fill_cell(aupa20, left_col_w, col12_h, valign="top"))
     top_stack = combine_vertical(top_items, gap=LAYOUT_GAP) if top_items else None
     top_stack_h = top_stack.height if top_stack is not None else 0
 
@@ -1492,6 +1480,7 @@ def notion_write_db(
     all_urls: List[str],
     notion_items: List[Tuple[str, str, str, str]],
     errors: List[str],
+    extra_links: Optional[List[Tuple[str, str]]] = None,
 ) -> Optional[str]:
     if not notion_enabled():
         return None
@@ -1517,13 +1506,7 @@ def notion_write_db(
 
     time.sleep(1.0)
 
-    try:
-        append_heading(page_id, "関連リンク", level=2)
-        for cap, url in NOTION_LINKS:
-            append_bookmark(page_id, url, caption=cap)
-    except Exception as e:
-        print(f"[WARN] links failed: {e}")
-
+    # 画像を先に貼り、関連リンクはその後に表示する。
     try:
         ordered_urls = [url for _, _label, _nfname, url in notion_items if url]
         if ordered_urls:
@@ -1550,6 +1533,14 @@ def notion_write_db(
                 append_images(page_id, all_urls, chunk=30)
         except Exception as e2:
             print(f"[WARN] append_images fallback failed: {e2}")
+
+    if extra_links:
+        try:
+            append_heading(page_id, "関連リンク", level=2)
+            for cap, url in extra_links:
+                append_bookmark(page_id, url, caption=cap)
+        except Exception as e:
+            print(f"[WARN] links failed: {e}")
 
     return page_id
 
@@ -1816,6 +1807,7 @@ def main_dashboard_jma() -> None:
             all_urls=all_urls,
             notion_items=notion_items,
             errors=errors,
+            extra_links=IMAGE_EXTRA_LINKS.get(filename, []),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""
@@ -1916,21 +1908,8 @@ def main_layout4() -> None:
 
         filename = "04_LAYOUT_4_WEEKLY"
         url = all_urls[0] if all_urls else ""
-
-        notion_items = [(filename, "週間4列結合", "LAYOUT_4_WEEKLY", url)]
-        page_id = notion_write_db(
-            issue_dt_jst=issue_dt_jst,
-            rjtd=rjtd,
-            run_prefix=run_prefix,
-            rep_url=rep_url,
-            all_urls=all_urls,
-            notion_items=notion_items,
-            errors=errors,
-        )
-
-        notion_url = notion_page_url(page_id) if page_id else ""
-        if notion_url:
-            print(f"[OK] Notion URL: {notion_url}")
+        # Notion配信は全部入り・アメダス・ADV・ガイダンスの4種類のみのため、
+        # 週間4列結合はNotionに書き込まない(公開Discord + 有料DMのみ)。
 
         try:
             if discord_jma_enabled() and url:

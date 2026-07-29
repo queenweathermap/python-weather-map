@@ -967,11 +967,9 @@ def _notion_write(
         print(f"[WARN] Notion image append failed: {e}")
 
     try:
-        append_heading(page_id, "参考リンク", level=2)
-        append_bookmark(page_id, JMA_FORECAST_PORTAL,
-                        caption="気象庁 天気予報（秋田県）")
+        append_heading(page_id, "関連リンク", level=2)
         append_bookmark(page_id, WCN_KISHO_URL,
-                        caption="WCN 各種気象情報")
+                        caption="WCN各種気象情報")
     except Exception as e:
         print(f"[WARN] Notion bookmarks failed: {e}")
 
