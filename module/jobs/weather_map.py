@@ -1311,11 +1311,12 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         col2_cells.append(cell)
     col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
 
-    # ---- 一段目(3列目・4列目・5列目): 広域版(切り抜かず全体表示) + 日本周辺白黒版(切り抜かず
-    # 全体表示)を2段重ねにする。6列目(T72)は同じ高さの空白。
-    # AUPQ列(2列目)は既にAUPA20だけを一段目として持っている(高さcol12_hのまま、変更なし)ので、
-    # こちらは2倍の高さ(header_h)になる。
-    header_h = col12_h * 2 + LAYOUT_GAP
+    # ---- 一段目(3列目・4列目・5列目): 広域版(切り抜かず全体表示)を列の先頭に、
+    # 日本周辺白黒版はそれを縮小して横に「おまけ」のように並べる(縦に重ねない)。
+    # 一段目がその列の通常幅より少し広くなるが、combine_verticalが自動で中央寄せするため、
+    # 二段目以降(列の通常幅)には影響しない。6列目(T72)の上は空白のまま。
+    header_h = col12_h
+    NEAR_MONO_BADGE_SCALE = 0.5  # 「おまけ」サイズ。広域版の高さに対する比率。
 
     def prepend_header_pair(
         col: Optional[Image.Image],
@@ -1325,14 +1326,13 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if col is None:
             return None
         target_w = col.width
-        cells = []
+        row1_parts = []
         if wide_img is not None:
-            cells.append(fit_to_cell(wide_img, target_w, col12_h, valign="top"))
+            row1_parts.append(fit_to_cell(wide_img, target_w, header_h, valign="top"))
         if near_img is not None:
-            cells.append(fit_to_cell(near_img, target_w, col12_h, valign="top"))
-        if cells:
-            header = combine_vertical(cells, gap=LAYOUT_GAP)
-            header = pad_to_height(header, header_h)
+            row1_parts.append(resize_to_height(near_img, max(1, int(header_h * NEAR_MONO_BADGE_SCALE))))
+        if row1_parts:
+            header = combine_horizontal(row1_parts, gap=LAYOUT_GAP, valign="top")
         else:
             header = Image.new("RGB", (target_w, header_h), "white")
         return combine_vertical([header, col], gap=LAYOUT_GAP)
