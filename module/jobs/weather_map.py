@@ -24,7 +24,7 @@ from typing import List, Optional, Tuple
 
 import requests
 from pdf2image import convert_from_bytes
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from module.utils.r2_utils import put_bytes, make_url
 from module.utils.notion_utils import (
@@ -611,7 +611,14 @@ def resize_to_width(img: Image.Image, target_w: int) -> Image.Image:
     return img.resize((target_w, target_h), Image.LANCZOS)
 
 
-def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "center") -> Image.Image:
+def fit_to_cell(
+    img: Image.Image,
+    cell_w: int,
+    cell_h: int,
+    *,
+    valign: str = "center",
+    halign: str = "center",
+) -> Image.Image:
     """
     画像を指定セル内に収め、白背景セルに配置する。
     縦横比は維持する。
@@ -628,7 +635,12 @@ def fit_to_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "ce
     resized = img.resize((new_w, new_h), Image.LANCZOS)
 
     canvas = Image.new("RGB", (cell_w, cell_h), "white")
-    x = (cell_w - new_w) // 2
+    if halign == "left":
+        x = 0
+    elif halign == "right":
+        x = cell_w - new_w
+    else:
+        x = (cell_w - new_w) // 2
     if valign == "top":
         y = 0
     elif valign == "bottom":
@@ -752,6 +764,46 @@ def trim_bottom_whitespace(img: Image.Image, *, threshold: int = 245, bottom_pad
         return img
 
     return img.crop((0, 0, w, new_bottom + 1))
+
+
+CAPTION_FONT_CANDIDATES = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # ubuntu apt
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+    "/usr/share/fonts/noto-cjk/NotoSansCJKjp-Regular.otf",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",  # macOS
+    "/Library/Fonts/Arial Unicode.ttf",
+]
+
+
+def _load_caption_font(size: int) -> ImageFont.ImageFont:
+    for path in CAPTION_FONT_CANDIDATES:
+        try:
+            if os.path.exists(path):
+                return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def append_caption_bar(img: Image.Image, text: str, *, font_size: int = 52, pad: int = 24) -> Image.Image:
+    """
+    画像の下に、出典・作成日時を記した余白バーを追加する。
+    """
+    img = img.convert("RGB")
+    font = _load_caption_font(font_size)
+    tmp = Image.new("RGB", (10, 10), "white")
+    bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
+    text_h = bbox[3] - bbox[1]
+    bar_h = text_h + pad * 2
+
+    bar = Image.new("RGB", (img.width, bar_h), "white")
+    draw = ImageDraw.Draw(bar)
+    draw.text((pad, pad - bbox[1]), text, fill=(90, 90, 90), font=font)
+
+    canvas = Image.new("RGB", (img.width, img.height + bar_h), "white")
+    canvas.paste(img, (0, 0))
+    canvas.paste(bar, (0, img.height))
+    return canvas
 
 
 def prepare_comp_panel(img: Image.Image, target_w: int) -> Image.Image:
@@ -1269,7 +1321,6 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     def build_period_column(
         surface_code: str,
         upper_code: str,
-        fxjp854_half: Optional[Image.Image],
         surface_pre: Optional[Image.Image] = None,
     ) -> Optional[Image.Image]:
         surface = surface_pre if surface_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(surface_code, cycle))
@@ -1281,20 +1332,21 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
 
         cells = []
         if surface is not None:
-            cells.append(fit_to_cell(surface, period_target_w, period_target_h, valign="top"))
+            cells.append(fit_to_cell(surface, period_target_w, period_target_h, valign="top", halign="left"))
         if upper is not None:
-            cells.append(fit_to_cell(upper, period_target_w, period_target_h, valign="top"))
-        if fxjp854_half is not None:
-            # FXJP854は既に列3・列4で高さを揃え済みなので、自然な高さのまま幅だけ揃える。
-            cells.append(resize_to_width(fxjp854_half, period_target_w))
+            cells.append(fit_to_cell(upper, period_target_w, period_target_h, valign="top", halign="left"))
         if not cells:
             return None
         return combine_vertical(cells, gap=LAYOUT_GAP)
 
-    col3 = build_period_column("fxfe502", "fxfe5782", fxjp854_upper, surface_pre=ref_surface)
-    col4 = build_period_column("fxfe504", "fxfe5784", fxjp854_lower)
+    # FXJP854(T12/24/36/48)は列4・列5の直下に、他列(1〜3・6列目)とは無関係な
+    # 独立した「4段目」として後で別途くっつける(ここでは列に含めない)。
+    # そうしないと、列4・5だけがFXJP854の分だけ高くなり、他列がそれに引きずられて
+    # 余分な白余白を抱えることになる。
+    col3 = build_period_column("fxfe502", "fxfe5782", surface_pre=ref_surface)
+    col4 = build_period_column("fxfe504", "fxfe5784")
     # T72はFXJP854(T=12/24/36/48のみ)に対応する時刻が無いため、FXJP854は付けない。
-    col5 = build_period_column("fxfe507", "fxfe577", None)
+    col5 = build_period_column("fxfe507", "fxfe577")
 
     # ---- 「天気図1枚」の基準サイズ = 列3の地上天気図(fxfe502)のネイティブサイズ ----
     # 列2はこのサイズのセルに各コマを収める(fit_to_cellで縦横比を保ったままレターボックス)。
@@ -1353,17 +1405,21 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         )
         badge_w = badge_cell.width if badge_cell is not None else 0
 
-        row1_parts = []
+        # ヘッダーは常にheader_hちょうどの高さの白キャンバスにする(広域版が無い列でも
+        # header_hを下回らないようにし、本体(axfe578等)の開始位置が他列とずれないようにする)。
+        # 日本周辺白黒版バッジは、広域版(またはヘッダー枠)の下端に揃える(下揃え)。
+        header = Image.new("RGB", (target_w, header_h), "white")
+        x = 0
         if wide_img is not None:
             wide_target_w = max(1, target_w - badge_w)
-            row1_parts.append(fit_to_cell(wide_img, wide_target_w, header_h, valign="top"))
+            wide_cell = fit_to_cell(wide_img, wide_target_w, header_h, valign="top")
+            header.paste(wide_cell, (0, 0))
+            x = wide_cell.width
         if badge_cell is not None:
-            row1_parts.append(badge_cell)
+            # 広域版が無い列(バッジ単独)は、列(本体)の幅の中央に配置する。
+            badge_x = x if wide_img is not None else max(0, (target_w - badge_w) // 2)
+            header.paste(badge_cell.convert("RGB"), (badge_x, header_h - badge_cell.height))
 
-        if row1_parts:
-            header = combine_horizontal(row1_parts, gap=0, valign="top")
-        else:
-            header = Image.new("RGB", (target_w, header_h), "white")
         return combine_vertical([header, col], gap=LAYOUT_GAP, halign="left")
 
     # ASAS広域版は列3の3段目(極東アジア切り出し)に既にあるため一段目には出さないが、
@@ -1398,8 +1454,8 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # ---- 左端(1列目): 一段目は空白(他列の一段目と同じ高さ)、AXJP140 / AXJP130 / 短期予報解説情報。
     # AXJP140/AXJP130は2列目(AUPQ列)と同じセルサイズ(col12_w×col12_h)に合わせる
     # (余白も揃えるため、多少の切り取りは許容してfill_cellで詰める)。
-    # AXJP140の絵柄上端が3列目の絵柄上端(=一段目の下、二段目)に、TKAISETUの絵柄下端が
-    # 3列目の絵柄下端に揃うよう、TKAISETUは残りの高さぴったりに収め、下揃え・大きめに配置する。
+    # AXJP140の絵柄上端が3列目の絵柄上端(=一段目の下、二段目)に揃うようにする。
+    # 短期予報解説資料(TKAISETU)の絵柄は、2列目(AUPQ列)のAUPQ78と揃える(上揃え)。
     left_col_w = col12_w
     top_items = [Image.new("RGB", (left_col_w, header_h), "white")]
     if axjp140 is not None:
@@ -1413,7 +1469,13 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     if tkai is not None:
         if col2 is not None:
             target_tkai_h = max(1, col2.height - top_stack_h - LAYOUT_GAP)
-            left_parts.append(fit_to_cell(tkai, left_col_w, target_tkai_h, valign="bottom"))
+            # AUPQ78と絵柄の上端をぴったり揃えると詰まりすぎるため、ほんの少しだけ下へ
+            # ずらす(セル自体の高さ・下端は変えない)。
+            tkai_top_nudge = max(0, int(col12_h * 0.06))
+            tkai_fitted = fit_to_cell(tkai, left_col_w, max(1, target_tkai_h - tkai_top_nudge), valign="top")
+            tkai_cell = Image.new("RGB", (left_col_w, target_tkai_h), "white")
+            tkai_cell.paste(tkai_fitted.convert("RGB"), (0, tkai_top_nudge))
+            left_parts.append(tkai_cell)
         else:
             left_parts.append(resize_to_width(tkai, left_col_w))
     left_col = combine_vertical(left_parts, gap=LAYOUT_GAP) if left_parts else None
@@ -1425,13 +1487,43 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         # 列同士の余白をすべて詰める(0ギャップ)。
         padded_cols = [pad_to_height(c, grid_h) for c in grid_cols]
         grid_row = combine_horizontal(padded_cols, gap=0, valign="top")
+        # 1列目(left_col)はcol2(3列目)の元の高さに合わせて作られているが、
+        # col2自体はここでgrid_h(4列目以降を含む最大高さ)まで白余白でパディングされる。
+        # そのままだとleft_colの下端がgrid_rowの下端より短く、段差ができてしまうため、
+        # left_colもgrid_hに合わせて下端をそろえる。
+        if left_col is not None:
+            left_col = pad_to_height(left_col, grid_h)
 
     top_level = [c for c in (left_col, grid_row) if c is not None]
     if not top_level:
         return None
     # 左端と2列目をくっつける(余白なし)。
-    final_canvas = combine_horizontal(top_level, gap=0, valign="top")
-    final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=56)
+    main_grid = combine_horizontal(top_level, gap=0, valign="top")
+
+    # FXJP854(T12/24/36/48)を、列4(FXFE502列)・列5(FXFE504列)の真下だけに
+    # 独立した段として追加する(他列の下には余白のまま何も置かない)。
+    fxjp854_parts = [im for im in (fxjp854_upper, fxjp854_lower) if im is not None]
+    if fxjp854_parts:
+        fxjp854_row = combine_horizontal(fxjp854_parts, gap=0, valign="top")
+        left_pad_w = (
+            (left_col.width if left_col is not None else 0)
+            + (aupq_col.width if aupq_col is not None else 0)
+            + (col2.width if col2 is not None else 0)
+        )
+        strip = Image.new("RGB", (main_grid.width, fxjp854_row.height), "white")
+        strip.paste(fxjp854_row.convert("RGB"), (left_pad_w, 0))
+        final_canvas = combine_vertical([main_grid, strip], gap=LAYOUT_GAP, halign="left")
+    else:
+        final_canvas = main_grid
+
+    final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=20)
+    issue_dt_utc = issue_dt_jst - timedelta(hours=9)
+    caption = (
+        f"作成日時: {issue_dt_utc.strftime('%Y年%m月%d日 %H:%M')} UTC"
+        "　出典: 気象庁ホームページ（気象庁提供の情報を編集・加工して作成）"
+        "　作成: Synoptic Chart Premium"
+    )
+    final_canvas = append_caption_bar(final_canvas, caption)
     return pil_to_attachment(final_canvas, "DASHBOARD_JMA_DIRECT")
 
 
