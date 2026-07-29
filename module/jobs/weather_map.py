@@ -55,6 +55,10 @@ JMA_TKAISETU_URL = os.environ.get(
 JMA_ASAS_MONO_URL = "https://www.data.jma.go.jp/yoho/data/wxchart/quick/ASAS_MONO.pdf"
 JMA_FSAS24_MONO_URL = "https://www.data.jma.go.jp/yoho/data/wxchart/quick/FSAS24_MONO_ASIA.pdf"
 JMA_FSAS48_MONO_URL = "https://www.data.jma.go.jp/yoho/data/wxchart/quick/FSAS48_MONO_ASIA.pdf"
+JMA_SKAISETU_URL = "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_latest.pdf"
+JMA_FEFE19_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fefe19.png"
+JMA_FXXN519_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxxn519.png"
+JMA_FZCX50_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fzcx50.png"
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
@@ -89,10 +93,11 @@ DISCORD_R2_PNG_LINK_FILENAMES = {
 }
 
 # 有料DM配信は気象庁の一般公開データのみで構成された画像に限定する。
-# 04_LAYOUT_4_WEEKLY / 06_LAYOUT_5_DASHBOARD はWCN（Weathercaster.jp会員限定ページ）
-# 経由のため対象外。07_DASHBOARD_JMA_DIRECTはWCNを一切経由せず気象庁の
-# 公開データのみで組み立てているため、これだけをDM配信の対象にする。
+# 06_LAYOUT_5_DASHBOARD はWCN（Weathercaster.jp会員限定ページ）経由のため対象外。
+# 04_LAYOUT_4_WEEKLY / 07_DASHBOARD_JMA_DIRECT はいずれもWCNを一切経由せず
+# 気象庁の公開データのみで組み立てているため、DM配信の対象にする。
 DM_SAFE_FILENAMES = {
+    "04_LAYOUT_4_WEEKLY",
     "07_DASHBOARD_JMA_DIRECT",
 }
 DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
@@ -105,24 +110,24 @@ Attachment = Tuple[str, bytes, str]
 # 07_DASHBOARD_JMA_DIRECT（気象庁直接取得版・全部入り）は WCN を一切経由しないため、
 # scripts/jma_dashboard_direct.py / main_dashboard_jma() として別スクリプト・別スケジュール
 # （1日4回、TKAISETU発表とUTC 00/12時サイクルの両方に対応）に、それぞれ分離している。
+# 06_LAYOUT_5_DASHBOARD（WCN版「全部入り」）は07が気象庁公開データのみで同等のレイアウトを
+# 再現できるようになったため、公開投稿・Notionとも廃止した（build_layout_5()自体は
+# 参考として残しているが、build_outputs()からは呼び出していない）。
 # ここ(OUTPUT_FILENAMES/NOTION_ORDER)には含めない。
 OUTPUT_FILENAMES = [
     "02_AXJP140",
     "03_AUPA20",
-    "06_LAYOUT_5_DASHBOARD",
 ]
 
 # Discord に送る画像とタイトル（AXJP140・AUPA20 は Notion のみ）
 DISCORD_TITLES = {
     "04_LAYOUT_4_WEEKLY": "週間4列結合",
-    "06_LAYOUT_5_DASHBOARD": "全部入り",
     "07_DASHBOARD_JMA_DIRECT": "全部入り（気象庁データのみ版）",
 }
 DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
 
 # Notion に流し込む順序・ラベル・ファイル名（まる数字なし）
 NOTION_ORDER = [
-    ("06_LAYOUT_5_DASHBOARD", "全部入り",     "LAYOUT_DASHBOARD"),
     ("03_AUPA20",             "AUPA20",       "AUPA20"),
     ("02_AXJP140",            "AXJP140",      "AXJP140"),
 ]
@@ -495,6 +500,21 @@ def fetch_image_content(url: str) -> Optional[bytes]:
     return None
 
 
+def fetch_jma_direct_png(url: str, label: str = "") -> Optional[Image.Image]:
+    """認証不要の気象庁URLからPNG画像を直接取得してPIL Imageで返す。"""
+    content = fetch_image_content(url)
+    if content is None:
+        print(f"[NG] JMA direct PNG {label}: fetch failed URL={url}")
+        return None
+    try:
+        img = Image.open(io.BytesIO(content)).convert("RGB")
+        print(f"[OK] JMA direct PNG {label}: size={img.size} URL={url}")
+        return img
+    except Exception as e:
+        print(f"[ERR] JMA direct PNG {label}: {e}")
+        return None
+
+
 # =============================================================================
 # 共通画像処理
 # =============================================================================
@@ -846,6 +866,39 @@ def build_layout_4(session: requests.Session, errors: List[str]) -> Optional[Att
     return pil_to_attachment(canvas, "LAYOUT_4_WEEKLY")
 
 
+def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
+    """
+    週間4列結合の気象庁直接取得版。WCN（Weathercaster.jp）には一切アクセスしない。
+      1列目: SKAISETU（週間予報解説資料、JMA直取得PDF）
+      2列目: FEFE19（気象庁公開PNG）
+      3列目: FXXN519（気象庁公開PNG）
+      4列目: FZCX50（気象庁公開PNG）
+    """
+    print("-> Building Layout 4 (Weekly Multicolumn, JMA-direct)")
+
+    skai_pages = fetch_jma_direct_pdf_pages(JMA_SKAISETU_URL, "SKAISETU")
+    col1_img = combine_vertical(skai_pages, gap=LAYOUT_GAP) if skai_pages else None
+    if col1_img is None:
+        errors.append("Layout4JMA: SKAISETU download/conversion failed")
+
+    col2_img = fetch_jma_direct_png(JMA_FEFE19_URL, "FEFE19")
+    col3_img = fetch_jma_direct_png(JMA_FXXN519_URL, "FXXN519")
+    col4_img = fetch_jma_direct_png(JMA_FZCX50_URL, "FZCX50")
+
+    if col2_img is None:
+        errors.append("Layout4JMA: FEFE19 failed")
+    if col3_img is None:
+        errors.append("Layout4JMA: FXXN519 failed")
+    if col4_img is None:
+        errors.append("Layout4JMA: FZCX50 failed")
+
+    canvas = combine_horizontal([col1_img, col2_img, col3_img, col4_img], gap=LAYOUT_GAP, valign="top")
+    if canvas is None:
+        return None
+
+    return pil_to_attachment(canvas, "LAYOUT_4_WEEKLY")
+
+
 def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Attachment]:
     """
     ⑤ 全部入り（TeamSABOTENスタイル・タブレット天気図完全再現版）
@@ -1083,7 +1136,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     WCN（Weathercaster.jp会員ページ）を一切経由せず、気象庁が自ら公開している
     データだけで、実際のWCN版「全部入り」と同じ構成を再現する。
 
-    左端の縦長列: 短期予報解説情報(TKAISETU) / AUPQ35 / AUPQ78
+    左端の縦長列: AXJP140 / AUPA20 / 短期予報解説情報(TKAISETU)
     右側:
       上段（縮小して各列幅に揃える）: ASAS / FSAS24(24時間後) / FSAS48(48時間後)
       下段グリッド（4列）:
@@ -1109,6 +1162,13 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     for name, im in (("TKAISETU", tkai), ("ASAS", asas), ("FSAS24", fsas24), ("FSAS48", fsas48)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
+
+    axjp140 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axjp140", cycle))
+    aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle))
+    if axjp140 is None:
+        errors.append("DashboardJMA: AXJP140 missing")
+    if aupa20 is None:
+        errors.append("DashboardJMA: AUPA20 missing")
 
     aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
     aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
@@ -1221,10 +1281,6 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     ]
     aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP) if aupq_cells else None
 
-    # ---- 左端: 短期予報解説情報のみ。AUPQ35/AUPQ78(列)の上端と揃える。
-    left_col_w = tkai.width if tkai is not None else (aupq35.width if aupq35 is not None else 800)
-    tkai_part = resize_to_width(tkai, left_col_w) if tkai is not None else None
-
     # ---- 上段: ASAS(列2の上に左揃え) / FSAS24(T12/24=列3の上に右揃え) / FSAS48(T36/48=列4の上に右揃え) ----
     # 時間軸を意識し、ASASは現在時刻(列2側)、FSAS24/48は該当する予報時刻の列の右端に揃える。
     # そろえた結果、間には自然に余白ができる。
@@ -1252,14 +1308,19 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if fsas48_part is not None:
             header_row.paste(fsas48_part, (x_col4 + col4_w - fsas48_part.width, 0))
 
-    # 短期予報解説情報の上に、上段(ヘッダー)の高さ分の空白を入れ、
-    # AUPQ35/AUPQ78列の上端(グリッドの上端)と揃える。
-    left_col = None
-    if tkai_part is not None:
-        top_pad = (header_row.height + LAYOUT_GAP) if header_row is not None else 0
-        canvas = Image.new("RGB", (left_col_w, top_pad + tkai_part.height), "white")
-        canvas.paste(tkai_part, (0, top_pad))
-        left_col = canvas
+    # ---- 左端: AXJP140 / AUPA20 / 短期予報解説情報。上2枚は隣列(AUPQ列)と
+    # 同じセルサイズ(col12_w×col12_h)に合わせる(余白も揃えるため、多少の
+    # 切り取りは許容してfill_cellで詰める)。TKAISETUはテキストなので
+    # 切り取らず、幅だけ揃えて自然な高さのまま。
+    left_col_w = col12_w
+    left_parts = []
+    if axjp140 is not None:
+        left_parts.append(fill_cell(axjp140, left_col_w, col12_h, valign="top"))
+    if aupa20 is not None:
+        left_parts.append(fill_cell(aupa20, left_col_w, col12_h, valign="top"))
+    if tkai is not None:
+        left_parts.append(resize_to_width(tkai, left_col_w))
+    left_col = combine_vertical(left_parts, gap=LAYOUT_GAP) if left_parts else None
 
     grid_cols = [c for c in (aupq_col, col2, col3, col4, col5) if c is not None]
     grid_row = None
@@ -1352,16 +1413,10 @@ def build_outputs() -> Tuple[List[Attachment], List[str]]:
     else:
         errors.append("AUPA20: download failed")
 
-    # -------------------------------------------------------------------------
-    # ③ 全部入り
-    # -------------------------------------------------------------------------
-    layout5_att = build_layout_5(session, errors)
-    if layout5_att:
-        append_output(images, layout5_att, 3)
-
     # 週間4列結合は scripts/jma_layout4_weekly.py 側で(1日1回・JST正午)、
     # 全部入り（気象庁直接取得版）は scripts/jma_dashboard_direct.py 側で(1日4回)、
     # それぞれ別スケジュール・別ワークフローで生成する（このスクリプトでは作らない）。
+    # 全部入りWCN版(build_layout_5)は07に置き換わったため、もう呼び出さない。
 
     # ローカルへの一時デバッグ書き出し
     for fname, data, _ in images:
@@ -1625,7 +1680,7 @@ def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
 # =============================================================================
 def main() -> None:
     try:
-        print("=== Start Weathercaster JMA Weather Map (Custom Layout PNG / 3 outputs) ===")
+        print("=== Start Weathercaster JMA Weather Map (Custom Layout PNG / 2 outputs) ===")
 
         issue_dt_jst = issue_base_jst()
         rjtd = issue_dt_jst.strftime("%d%H%M")
@@ -1786,17 +1841,17 @@ def main_dashboard_jma() -> None:
 
 def build_layout4_only() -> Tuple[List[Attachment], List[str]]:
     """
-    週間4列結合だけを作る。SKAISETU/FEFE19/FXXN519/FZCX50はいずれもWCN
-    （Weathercaster.jp）経由なので weathercaster_session() が必要。
+    週間4列結合だけを作る。SKAISETU/FEFE19/FXXN519/FZCX50はすべて気象庁が
+    自ら公開しているデータのみで構成するため、WCN（Weathercaster.jp）には
+    一切アクセスしない。
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    session = weathercaster_session()
     images: List[Attachment] = []
     errors: List[str] = []
 
-    layout4_att = build_layout_4(session, errors)
+    layout4_att = build_layout4_jma_direct(errors)
     if layout4_att:
         fixed = rename_attachment(layout4_att, "04_LAYOUT_4_WEEKLY")
         images.append(fixed)
@@ -1818,6 +1873,8 @@ def main_layout4() -> None:
     週間4列結合専用のエントリポイント。
     元になるSKAISETU（週間予報解説資料）はJST 10時頃更新・1日1回のため、
     正午JST頃の1日1回だけ実行する(scripts/jma_layout4_weekly.py)。
+    気象庁公開データのみで構成しているため、有料DM配信の対象にもなる
+    （DM_SAFE_FILENAMES参照）。
     """
     try:
         print("=== Start Weekly 4-column Layout (週間4列結合) ===")
@@ -1870,6 +1927,8 @@ def main_layout4() -> None:
                         mime=thumb_mime,
                         suppress_embeds=True,
                     )
+                    if filename in DM_SAFE_FILENAMES:
+                        notify_dm_subscribers(content, thumb_path, thumb_mime)
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
 
