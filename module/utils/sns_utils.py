@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import time
 from datetime import datetime, timezone
@@ -29,6 +30,46 @@ Image_ = Tuple[bytes, str]  # (png_bytes, alt)
 
 BSKY_PDS = os.environ.get("BLUESKY_PDS", "https://bsky.social").rstrip("/")
 BSKY_BLOB_LIMIT = 950_000  # Bluesky の blob 上限(約1MB)より少し小さめ
+
+
+# =============================================================================
+# Discord（1メッセージ・複数画像添付）
+# =============================================================================
+def post_discord_images(
+    *, webhook_url: str, content: str,
+    images: List[Tuple[str, bytes]], r2_links: List[Tuple[str, str]] = (),
+) -> bool:
+    """
+    images   : [(filename, png_bytes), ...] を1メッセージに添付
+    r2_links : [(ラベル, url), ...] を本文に太字リンクで付与
+    """
+    if not webhook_url:
+        print("[INFO] Discord 無効（webhook 未設定）")
+        return False
+
+    body = content
+    link_parts = [f"**[★{label}]({u})**" for label, u in r2_links if u]
+    if link_parts:
+        body += "\n" + " ／ ".join(link_parts)
+
+    files = {}
+    for i, (fname, png) in enumerate(images):
+        files[f"files[{i}]"] = (fname, io.BytesIO(png), "image/png")
+
+    payload = {"content": body[:1900], "allowed_mentions": {"parse": []}, "flags": 4}
+    try:
+        r = requests.post(
+            webhook_url,
+            data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+            files=files,
+            timeout=180,
+        )
+        r.raise_for_status()
+        print(f"[OK] Discord posted ({len(images)} images)")
+        return True
+    except Exception as e:
+        print(f"[ERR] Discord post failed: {e}")
+        return False
 
 
 # =============================================================================

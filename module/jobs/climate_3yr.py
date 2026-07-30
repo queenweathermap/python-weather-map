@@ -253,13 +253,17 @@ def fetch_station_month(prec_no: str, block_no: str, kind: str, year: int, month
     return out
 
 
-def collect_data(month: int, comparison_years: List[int]) -> Dict[str, Dict[int, Dict[str, Dict[int, float]]]]:
+def collect_data(
+    month: int, comparison_years: List[int],
+    stations: Optional[List[Tuple[str, str, str, str]]] = None,
+) -> Dict[str, Dict[int, Dict[str, Dict[int, float]]]]:
     """
     data[station_name][year][element][day] = value
     横手のように block_no 未設定の局はスキップ（ログのみ）。
+    stations を省略すると既定の STATIONS（秋田県3地点）を使う。
     """
     data: Dict[str, Dict[int, Dict[str, Dict[int, float]]]] = {}
-    for name, prec_no, block_no, kind in STATIONS:
+    for name, prec_no, block_no, kind in (stations or STATIONS):
         data[name] = {}
         if not block_no:
             print(f"[SKIP] {name}: block_no 未設定のためスキップ（STATIONS に block_no を入れてください）")
@@ -293,12 +297,15 @@ def build_figure(
     data: Dict[str, Dict[int, Dict[str, Dict[int, float]]]],
     year: int, month: int, start_day: int, end_day: int,
     comparison_years: List[int],
+    stations: Optional[List[Tuple[str, str, str, str]]] = None,
 ) -> bytes:
+    """stations を省略すると既定の STATIONS（秋田県3地点）を使う。"""
+    stations = stations or STATIONS
     _setup_japanese_font()
 
     days = list(range(start_day, end_day + 1))
     n_years = len(comparison_years)
-    n_st = len(STATIONS)
+    n_st = len(stations)
 
     elements = elements_for_month(month)  # 積雪は12〜3月のみ
     n_col = len(elements)
@@ -306,7 +313,7 @@ def build_figure(
     # 気温は最高・最低で目盛りを完全に揃える（全地点の最高/最低をまとめて共通レンジに）。
     temp_vals = [
         v
-        for (name, _p, _b, _k) in STATIONS
+        for (name, _p, _b, _k) in stations
         for y in comparison_years
         for ekey in ("tmax", "tmin")
         for v in data.get(name, {}).get(y, {}).get(ekey, {}).values()
@@ -320,7 +327,7 @@ def build_figure(
 
     fig, axes = plt.subplots(n_st, n_col, figsize=(5.0 * n_col, 3.9 * n_st), squeeze=False)
 
-    for r, (name, _p, _b, _k) in enumerate(STATIONS):
+    for r, (name, _p, _b, _k) in enumerate(stations):
         for c, (ekey, etitle) in enumerate(elements):
             ax = axes[r][c]
             st_years = data.get(name, {})

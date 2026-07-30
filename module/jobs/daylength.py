@@ -64,9 +64,9 @@ DISCORD_ENABLE = os.environ.get("DISCORD_ENABLE", "1").lower() in ("1", "true", 
 # =============================================================================
 # 天文計算
 # =============================================================================
-def day_info(d: date):
-    """指定日の (日の出dt, 日の入りdt, 昼の長さtimedelta) を返す。"""
-    s = sun(OBS, date=d, tzinfo=TZ)
+def day_info(d: date, observer=OBS):
+    """指定日の (日の出dt, 日の入りdt, 昼の長さtimedelta) を返す。observer省略時は秋田。"""
+    s = sun(observer, date=d, tzinfo=TZ)
     sr, ss = s["sunrise"], s["sunset"]
     return sr, ss, (ss - sr)
 
@@ -112,8 +112,8 @@ def draw_clock(ax, cx, cy, r, sr_h, ss_h, *, daylen_str=None, daylen_fs=6.0, tic
                 fontsize=daylen_fs, color="#333", zorder=4)
 
 
-def draw_map(ax):
-    """日本地図（秋田県を強調）。GeoJSON が無ければ静かにスキップ。"""
+def draw_map(ax, highlight_pref: str = "秋田県"):
+    """日本地図（highlight_pref を強調。省略時は秋田県）。GeoJSON が無ければ静かにスキップ。"""
     if not os.path.exists(GEOJSON_PATH):
         print(f"[WARN] geojson 無し: {GEOJSON_PATH}（地図スキップ）")
         ax.axis("off")
@@ -121,7 +121,7 @@ def draw_map(ax):
     try:
         d = json.load(open(GEOJSON_PATH, encoding="utf-8"))
         for ft in d["features"]:
-            akita = ft["properties"].get("nam_ja") == "秋田県"
+            akita = ft["properties"].get("nam_ja") == highlight_pref
             fc = "#4fae5a" if akita else "#ececec"
             geom = ft["geometry"]
             polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
@@ -142,13 +142,17 @@ def draw_map(ax):
 # =============================================================================
 # 図の組み立て
 # =============================================================================
-def build_figure(year: int, month: int, start_day: int, end_day: int) -> bytes:
+def build_figure(
+    year: int, month: int, start_day: int, end_day: int,
+    *, city_label: str = "秋田県", observer=OBS, highlight_pref: str = "秋田県",
+) -> bytes:
+    """city_label/observer/highlight_pref を省略すると従来通り秋田県版になる。"""
     _setup_japanese_font()
 
     days = [date(year, month, d) for d in range(start_day, end_day + 1)]
-    info = {d: day_info(d) for d in days}
+    info = {d: day_info(d, observer) for d in days}
     prev = days[0] - timedelta(days=1)
-    prev_len = day_info(prev)[2].total_seconds()
+    prev_len = day_info(prev, observer)[2].total_seconds()
 
     n = len(days)
     rows = math.ceil(n / COLS)
@@ -159,7 +163,7 @@ def build_figure(year: int, month: int, start_day: int, end_day: int) -> bytes:
         ref_date, ref_label = date(year, 6, 21), "夏至の頃"
     else:
         ref_date, ref_label = date(year, 12, 21), "冬至の頃"
-    ref_sr, ref_ss, ref_len = day_info(ref_date)
+    ref_sr, ref_ss, ref_len = day_info(ref_date, observer)
 
     # 期間内の至（冬至/夏至）
     sol_day = 22 if month == 12 else (21 if month == 6 else None)
@@ -215,7 +219,7 @@ def build_figure(year: int, month: int, start_day: int, end_day: int) -> bytes:
 
     # 右上: 日本地図
     ax_map = fig.add_axes([0.775, 0.50, 0.215, 0.45])
-    draw_map(ax_map)
+    draw_map(ax_map, highlight_pref)
 
     # 右下: 反対側の至の参照円
     ax_ref = fig.add_axes([0.775, 0.06, 0.215, 0.40])
@@ -231,7 +235,7 @@ def build_figure(year: int, month: int, start_day: int, end_day: int) -> bytes:
 
     # タイトル
     half = "前半" if start_day == 1 else "後半"
-    fig.text(0.02, 0.965, f"秋田県 昼の長さ ／ 日の出・日の入り", fontsize=15, fontweight="bold")
+    fig.text(0.02, 0.965, f"{city_label} 昼の長さ ／ 日の出・日の入り", fontsize=15, fontweight="bold")
     fig.text(0.02, 0.935, f"{month}月{half}（{month}/{start_day}〜{month}/{end_day}）",
              fontsize=10, color="#555")
 

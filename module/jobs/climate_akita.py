@@ -13,11 +13,7 @@
 
 from __future__ import annotations
 
-import io
-import json
 import os
-
-import requests
 
 from module.jobs.climate_3yr import (
     resolve_window,
@@ -30,7 +26,7 @@ from module.jobs.climate_3yr import (
     elements_for_month,
 )
 from module.jobs.daylength import build_figure as build_daylength_figure
-from module.utils.sns_utils import post_bluesky, post_x, post_threads
+from module.utils.sns_utils import post_bluesky, post_x, post_threads, post_discord_images
 
 DISCORD_ENABLE = os.environ.get("DISCORD_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 
@@ -47,28 +43,7 @@ def post_discord_combined(content: str, images, r2_links) -> None:
     if not (DISCORD_ENABLE and url):
         print("[INFO] Discord 無効")
         return
-
-    body = content
-    link_parts = [f"**[★{label}]({u})**" for label, u in r2_links if u]
-    if link_parts:
-        body += "\n" + " ／ ".join(link_parts)
-
-    files = {}
-    for i, (fname, png) in enumerate(images):
-        files[f"files[{i}]"] = (fname, io.BytesIO(png), "image/png")
-
-    payload = {"content": body[:1900], "allowed_mentions": {"parse": []}, "flags": 4}
-    try:
-        r = requests.post(
-            url,
-            data={"payload_json": json.dumps(payload, ensure_ascii=False)},
-            files=files,
-            timeout=180,
-        )
-        r.raise_for_status()
-        print(f"[OK] Discord posted ({len(images)} images)")
-    except Exception as e:
-        print(f"[ERR] Discord post failed: {e}")
+    post_discord_images(webhook_url=url, content=content, images=images, r2_links=r2_links)
 
 
 # =============================================================================
