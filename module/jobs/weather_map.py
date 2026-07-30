@@ -2056,7 +2056,10 @@ def main_dashboard_jma() -> None:
         issue_dt_jst = issue_base_jst()
         rjtd = issue_dt_jst.strftime("%d%H%M")
         day = issue_dt_jst.strftime("%Y%m%d")
-        run_prefix = f"{day}/RJTD_{rjtd}"
+        # issue_dt_jstは09:00/21:00の固定枠に丸められるため、同じ枠内で1日に
+        # 複数回実行されると(例: 11:30と17:00はどちらも09:00枠)同じR2キーに
+        # なってしまう。実際の実行時刻(分秒)を付けてキーを一意にする。
+        run_prefix = f"{day}/RJTD_{rjtd}_{now_jst().strftime('%H%M%S')}"
 
         images, errors = build_dashboard_jma_only()
         all_urls, rep_url = upload_to_r2(run_prefix, images)
@@ -2170,7 +2173,10 @@ def main_layout4() -> None:
         issue_dt_jst = issue_base_jst()
         rjtd = issue_dt_jst.strftime("%d%H%M")
         day = issue_dt_jst.strftime("%Y%m%d")
-        run_prefix = f"{day}/RJTD_{rjtd}"
+        # issue_dt_jstは固定枠に丸められるため、手動再実行等で同じ枠内に
+        # 複数回実行されると同じR2キーになってしまう。実際の実行時刻(分秒)を
+        # 付けてキーを一意にする。
+        run_prefix = f"{day}/RJTD_{rjtd}_{now_jst().strftime('%H%M%S')}"
 
         images, errors = build_layout4_only()
         all_urls, rep_url = upload_to_r2(run_prefix, images)

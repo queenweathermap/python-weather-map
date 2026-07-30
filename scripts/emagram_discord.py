@@ -398,7 +398,10 @@ def main() -> int:
     combined = build_grid_image(stations_with_images)
     combined = append_caption_bar(combined, dt)
 
-    r2_key = f"{dt.strftime('%Y%m%d%H')}.png"
+    # dtは00Z/12Zの固定枠に丸められるため、同じ枠内で複数回実行される(手動再実行等)と
+    # 同じR2キーになってしまう。実際の実行時刻(分秒, UTC)を付けてキーを一意にする。
+    now_utc = datetime.now(timezone.utc)
+    r2_key = f"{dt.strftime('%Y%m%d%H')}_{now_utc.strftime('%M%S')}.png"
     put_bytes(r2_key, combined, content_type="image/png")
     highres_url = make_url(r2_key)
     print(f"R2 UPLOADED: {highres_url}")

@@ -82,12 +82,20 @@ def put_bytes(
     data: bytes,
     *,
     content_type: str = "application/octet-stream",
-    cache_control: str = "public, max-age=31536000, immutable",
+    cache_control: str = "public, max-age=300, must-revalidate",
     metadata: Optional[Dict[str, str]] = None,
 ) -> None:
     """
     bytes をR2へアップロードする。
     - 公開バケット（r2.dev等）にしていれば、ASSET_BASE_URL + key で閲覧できる。
+
+    cache_control: 以前は "immutable, max-age=31536000"(1年キャッシュ)だったが、
+    キー生成が発表時刻(9時/21時など固定枠)ベースのジョブでは、同じ枠内で
+    複数回実行される(1日に複数回のスケジュール実行や手動再実行)と同じキーに
+    上書きされることがあり、"immutable"のせいでCDN/ブラウザが最初にキャッシュ
+    した古い内容をいつまでも返し続けてしまっていた(例: キャプション追加前の
+    画像が半永久的に配信され続ける不具合の原因になった)。5分キャッシュ+
+    must-revalidateにして、上書きが確実に反映されるようにする。
     """
     bucket = _must_env("R2_BUCKET")
     k = normalize_key(key)
