@@ -93,6 +93,21 @@ def _resolve_data_source_id(db_id: str) -> str:
     return data_sources[0]["id"]
 
 
+def _existing_select_options(data_source_id: str, prop_name: str) -> set:
+    """
+    新APIはselectのequalsフィルタに、実際にそのDBに存在しない選択肢名を
+    渡すと400 validation_errorになる(旧APIは単に0件マッチだったが、
+    新APIは厳格にスキーマを検証する)。ELIGIBLE_STATUSESの中にまだこの
+    DBに無い選択肢(例:betaオプションを作っていない)が含まれていても
+    落ちないよう、実在する選択肢だけに絞る。
+    """
+    r = requests.get(f"{API_BASE}/data_sources/{data_source_id}", headers=_headers(), timeout=30)
+    _raise_with_body(r)
+    prop = r.json().get("properties", {}).get(prop_name, {})
+    options = (prop.get("select") or {}).get("options", [])
+    return {opt.get("name", "") for opt in options}
+
+
 def get_active_discord_ids() -> List[str]:
     """購読者データベースから配信対象（active/beta/admin/lifetime）のDiscord User IDを返す。
     ただしbetaはBETA_CUTOFFを過ぎたら対象外にする（Notion側のStatusは
@@ -100,11 +115,22 @@ def get_active_discord_ids() -> List[str]:
     db_id = _must_env("NOTION_SUBSCRIBERS_DATABASE_ID")
     data_source_id = _resolve_data_source_id(db_id)
 
+    existing_options = _existing_select_options(data_source_id, _prop_status())
+    statuses_to_query = [s for s in ELIGIBLE_STATUSES if s in existing_options]
+    skipped = [s for s in ELIGIBLE_STATUSES if s not in existing_options]
+    if skipped:
+        print(f"[INFO] Status選択肢が未作成のため対象外: {skipped} (既存: {sorted(existing_options)})")
+    if not statuses_to_query:
+        raise RuntimeError(
+            f"None of ELIGIBLE_STATUSES {ELIGIBLE_STATUSES} exist as '{_prop_status()}' "
+            f"select options (existing: {sorted(existing_options)})"
+        )
+
     payload = {
         "filter": {
             "or": [
                 {"property": _prop_status(), "select": {"equals": status}}
-                for status in ELIGIBLE_STATUSES
+                for status in statuses_to_query
             ]
         },
         "page_size": 100,
