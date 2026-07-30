@@ -233,32 +233,73 @@ def caption_text_for(dt: datetime) -> str:
     )
 
 
-def append_caption_bar(img_bytes: bytes, dt: datetime, *, font_size: int = 26, pad: int = 14) -> bytes:
-    """画像の下に、作成日時(UTC)・出典を記した余白バーを追加する。
-    横幅が足りない場合(サムネイル等)は、収まる範囲で自動的にフォントを縮小する。"""
+def _wrap_caption_lines(text: str, font, available_w: int, tmp_draw) -> list:
+    """"　"区切りの単位で、収まる範囲まで貪欲に行を詰める。"""
+    segments = text.split("　")
+    lines = []
+    current = ""
+    for seg in segments:
+        candidate = seg if not current else current + "　" + seg
+        w = tmp_draw.textbbox((0, 0), candidate, font=font)[2]
+        if w <= available_w or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = seg
+    if current:
+        lines.append(current)
+    return lines
+
+
+def append_caption_bar(
+    img_bytes: bytes,
+    dt: datetime,
+    *,
+    font_size: int = 26,
+    pad: int = 14,
+    align: str = "right",
+    min_font_size: int = 14,
+) -> bytes:
+    """画像の下に、作成日時(UTC)・出典を記した余白バー(既定で右寄せ)を追加する。
+    横幅が足りない場合(サムネイル等)は、まず複数行に折り返す。それでも
+    収まらない極端に狭い場合だけ、可読性を保てるmin_font_sizeを下限に
+    フォントを縮小する。"""
     text = caption_text_for(dt)
 
     with Image.open(BytesIO(img_bytes)) as im:
         rgb = im.convert("RGB")
 
     tmp = Image.new("RGB", (10, 10), "white")
+    draw_tmp = ImageDraw.Draw(tmp)
     available_w = max(1, rgb.width - pad * 2)
 
     size = font_size
-    font = load_font(CJK_REGULAR_CANDIDATES, size)
-    bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
-    while (bbox[2] - bbox[0]) > available_w and size > 10:
-        size -= 2
+    while True:
         font = load_font(CJK_REGULAR_CANDIDATES, size)
-        bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
+        single_bbox = draw_tmp.textbbox((0, 0), text, font=font)
+        if (single_bbox[2] - single_bbox[0]) <= available_w:
+            lines = [text]
+            break
+        lines = _wrap_caption_lines(text, font, available_w, draw_tmp)
+        widest = max(draw_tmp.textbbox((0, 0), ln, font=font)[2] for ln in lines)
+        if widest <= available_w or size <= min_font_size:
+            break
+        size -= 2
 
-    text_h = bbox[3] - bbox[1]
-    bar_h = text_h + pad * 2
+    line_bboxes = [draw_tmp.textbbox((0, 0), ln, font=font) for ln in lines]
+    line_h = max(b[3] - b[1] for b in line_bboxes)
+    line_gap = max(2, line_h // 6)
+    bar_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad * 2
 
     canvas = Image.new("RGB", (rgb.width, rgb.height + bar_h), "white")
     canvas.paste(rgb, (0, 0))
     draw = ImageDraw.Draw(canvas)
-    draw.text((pad, rgb.height + pad - bbox[1]), text, fill=(90, 90, 90), font=font)
+    y = rgb.height + pad
+    for ln, bbox in zip(lines, line_bboxes):
+        w = bbox[2] - bbox[0]
+        x = (rgb.width - pad - w) if align == "right" else pad
+        draw.text((x, y - bbox[1]), ln, fill=(90, 90, 90), font=font)
+        y += line_h + line_gap
 
     buf = BytesIO()
     canvas.save(buf, format="PNG", optimize=True)

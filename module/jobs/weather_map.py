@@ -839,29 +839,75 @@ def _load_caption_font(size: int) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def append_caption_bar(img: Image.Image, text: str, *, font_size: int = 52, pad: int = 24) -> Image.Image:
+def _wrap_caption_lines(text: str, font, available_w: int, tmp_draw) -> List[str]:
     """
-    画像の下に、出典・作成日時を記した余白バーを追加する。
-    横幅が足りない場合(サムネイル等)は、収まる範囲で自動的にフォントを縮小する。
+    "　"区切りの単位で、収まる範囲まで貪欲に行を詰める(文字単位ではなく
+    意味のまとまり単位で改行するため読みやすい)。1単位だけでも収まらない
+    場合はその行だけ突き出る(呼び出し側で最終的にフォントを縮めて対応)。
+    """
+    segments = text.split("　")
+    lines: List[str] = []
+    current = ""
+    for seg in segments:
+        candidate = seg if not current else current + "　" + seg
+        w = tmp_draw.textbbox((0, 0), candidate, font=font)[2]
+        if w <= available_w or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = seg
+    if current:
+        lines.append(current)
+    return lines
+
+
+def append_caption_bar(
+    img: Image.Image,
+    text: str,
+    *,
+    font_size: int = 52,
+    pad: int = 24,
+    align: str = "right",
+    min_font_size: int = 16,
+) -> Image.Image:
+    """
+    画像の下に、出典・作成日時を記した余白バーを追加する(既定で右寄せ)。
+    横幅が足りない場合(サムネイル等)は、まず意味のまとまり単位で複数行に
+    折り返す。それでも収まらない極端に狭い場合だけ、可読性を保てる
+    min_font_size を下限にフォントを縮小する(文字が潰れて読めなくなる
+    ほどには縮めない)。
     """
     img = img.convert("RGB")
     tmp = Image.new("RGB", (10, 10), "white")
+    draw_tmp = ImageDraw.Draw(tmp)
     available_w = max(1, img.width - pad * 2)
 
     size = font_size
-    font = _load_caption_font(size)
-    bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
-    while (bbox[2] - bbox[0]) > available_w and size > 10:
-        size -= 2
+    while True:
         font = _load_caption_font(size)
-        bbox = ImageDraw.Draw(tmp).textbbox((0, 0), text, font=font)
+        single_bbox = draw_tmp.textbbox((0, 0), text, font=font)
+        if (single_bbox[2] - single_bbox[0]) <= available_w:
+            lines = [text]
+            break
+        lines = _wrap_caption_lines(text, font, available_w, draw_tmp)
+        widest = max(draw_tmp.textbbox((0, 0), ln, font=font)[2] for ln in lines)
+        if widest <= available_w or size <= min_font_size:
+            break
+        size -= 2
 
-    text_h = bbox[3] - bbox[1]
-    bar_h = text_h + pad * 2
+    line_bboxes = [draw_tmp.textbbox((0, 0), ln, font=font) for ln in lines]
+    line_h = max(b[3] - b[1] for b in line_bboxes)
+    line_gap = max(2, line_h // 6)
+    bar_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad * 2
 
     bar = Image.new("RGB", (img.width, bar_h), "white")
     draw = ImageDraw.Draw(bar)
-    draw.text((pad, pad - bbox[1]), text, fill=(90, 90, 90), font=font)
+    y = pad
+    for ln, bbox in zip(lines, line_bboxes):
+        w = bbox[2] - bbox[0]
+        x = (img.width - pad - w) if align == "right" else pad
+        draw.text((x, y - bbox[1]), ln, fill=(90, 90, 90), font=font)
+        y += line_h + line_gap
 
     canvas = Image.new("RGB", (img.width, img.height + bar_h), "white")
     canvas.paste(img, (0, 0))
