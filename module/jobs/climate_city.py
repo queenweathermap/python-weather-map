@@ -24,7 +24,7 @@ from module.jobs.climate_3yr import (
     elements_for_month,
 )
 from module.jobs.daylength import build_figure as build_daylength_figure
-from module.utils.sns_utils import post_bluesky, post_x, post_threads
+from module.utils.sns_utils import post_bluesky, post_x, post_threads, post_instagram
 
 CITY_CONFIGS = {
     "sapporo": dict(
@@ -111,5 +111,6 @@ def main(city_key: str) -> None:
     post_bluesky(text=caption, images=images)
     post_x(text=caption, images=images)
     post_threads(text=caption, images=images, r2_upload=upload_r2)
+    post_instagram(text=caption, images=images, r2_upload=upload_r2)
 
     print("=== Done ===")

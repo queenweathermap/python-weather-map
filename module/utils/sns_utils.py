@@ -308,3 +308,103 @@ def post_threads(*, text: str, images: List[Image_], r2_upload) -> bool:
         body = getattr(getattr(e, "response", None), "text", "")
         print(f"[ERR] Threads post failed: {e} {body}")
         return False
+
+
+# =============================================================================
+# Instagram (Meta) ※無料。Threadsと同じMeta Graph API基盤（graph.facebook.com）。
+#   画像は公開URL(R2)からMetaが取得。2枚以上はカルーセル（最大10枚）。
+# =============================================================================
+def instagram_enabled() -> bool:
+    return (
+        os.environ.get("INSTAGRAM_ENABLE", "0").lower() in ("1", "true", "yes", "on")
+        and bool(os.environ.get("INSTAGRAM_USER_ID", "").strip())
+        and bool(os.environ.get("INSTAGRAM_ACCESS_TOKEN", "").strip())
+    )
+
+
+def _instagram_fit_image(png: bytes) -> bytes:
+    """Instagramの幅上限(1440px)に収め、JPEG化する。"""
+    try:
+        from PIL import Image
+    except Exception:
+        return png
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    if im.width > 1440:
+        h = max(1, int(im.height * 1440 / im.width))
+        im = im.resize((1440, h))
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=90, optimize=True)
+    return buf.getvalue()
+
+
+def post_instagram(*, text: str, images: List[Image_], r2_upload) -> bool:
+    """
+    Instagram に投稿。1枚=単一投稿 / 2枚以上=カルーセル。成功で True。
+    画像は公開URLが必須のため、r2_upload(key, bytes)->url で一旦R2に上げてURLを渡す。
+    """
+    if not instagram_enabled():
+        print("[INFO] Instagram 無効（INSTAGRAM_ENABLE / USER_ID / TOKEN 未設定）")
+        return False
+    if r2_upload is None:
+        print("[ERR] Instagram: 公開URLが必要（r2_upload 未指定）")
+        return False
+
+    images = list(images)[:10]  # Instagramカルーセルは最大10枚
+    if not images:
+        return False
+
+    uid = os.environ["INSTAGRAM_USER_ID"].strip()
+    token = os.environ["INSTAGRAM_ACCESS_TOKEN"].strip()
+    base = "https://graph.facebook.com/v21.0"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+    # 各画像をR2の公開URLへ
+    urls: List[Tuple[str, str]] = []  # (image_url, alt)
+    for i, (png, alt) in enumerate(images):
+        u = r2_upload(f"instagram/{ts}_{i}.jpg", _instagram_fit_image(png))
+        if not u:
+            print("[ERR] Instagram: R2アップロード失敗（公開URLを用意できず）")
+            return False
+        urls.append((u, alt))
+
+    try:
+        if len(urls) == 1:
+            image_url, alt = urls[0]
+            params = {"image_url": image_url, "caption": text, "access_token": token}
+            if alt:
+                params["alt_text"] = alt
+            c = requests.post(f"{base}/{uid}/media", params=params, timeout=60)
+            c.raise_for_status()
+            creation_id = c.json()["id"]
+        else:
+            # カルーセル: 各画像をitemコンテナ化 → CAROUSEL親
+            child_ids = []
+            for image_url, alt in urls:
+                params = {"image_url": image_url, "is_carousel_item": "true", "access_token": token}
+                if alt:
+                    params["alt_text"] = alt
+                cc = requests.post(f"{base}/{uid}/media", params=params, timeout=60)
+                cc.raise_for_status()
+                child_ids.append(cc.json()["id"])
+            c = requests.post(
+                f"{base}/{uid}/media",
+                params={"media_type": "CAROUSEL", "children": ",".join(child_ids),
+                        "caption": text, "access_token": token},
+                timeout=60,
+            )
+            c.raise_for_status()
+            creation_id = c.json()["id"]
+
+        time.sleep(35)  # Metaの処理待ち（Threadsと同様30秒以上）
+
+        p = requests.post(
+            f"{base}/{uid}/media_publish",
+            params={"creation_id": creation_id, "access_token": token}, timeout=60,
+        )
+        p.raise_for_status()
+        print(f"[OK] Instagram posted ({len(urls)} images{' carousel' if len(urls) > 1 else ''})")
+        return True
+    except Exception as e:
+        body = getattr(getattr(e, "response", None), "text", "")
+        print(f"[ERR] Instagram post failed: {e} {body}")
+        return False

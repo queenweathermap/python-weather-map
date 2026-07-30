@@ -65,6 +65,13 @@ jobs:
       THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
 
       # ------------------------------------------------------------
+      # Instagram（Meta・無料）: 画像は公開URL(R2)から取得される
+      # ------------------------------------------------------------
+      INSTAGRAM_ENABLE: "1"
+      INSTAGRAM_USER_ID: ${{ secrets.INSTAGRAM_USER_ID }}
+      INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+
+      # ------------------------------------------------------------
       # R2（任意・高解像度PNGの置き場）
       # ------------------------------------------------------------
       R2_ENABLE: "1"
