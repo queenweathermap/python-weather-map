@@ -28,6 +28,35 @@ import requests
 
 Image_ = Tuple[bytes, str]  # (png_bytes, alt)
 
+
+def _wait_container_ready(base: str, container_id: str, token: str, *,
+                           timeout: float = 60.0, interval: float = 2.0) -> bool:
+    """
+    Threads/Instagramのメディアコンテナは作成が非同期。
+    status が FINISHED になるまでポーリングしてから使う（カルーセル作成・publish前に必須）。
+    未完了のままカルーセルの children に渡すと "Invalid Carousel Children" で弾かれるため。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            r = requests.get(
+                f"{base}/{container_id}",
+                params={"fields": "status,error_message", "access_token": token},
+                timeout=30,
+            )
+            if r.ok:
+                status = r.json().get("status")
+                if status == "FINISHED":
+                    return True
+                if status == "ERROR":
+                    print(f"[ERR] media container error: {r.json()}")
+                    return False
+        except Exception as e:
+            print(f"[WARN] container status check failed: {e}")
+        time.sleep(interval)
+    print(f"[WARN] media container not ready in time: {container_id}")
+    return False
+
 BSKY_PDS = os.environ.get("BLUESKY_PDS", "https://bsky.social").rstrip("/")
 BSKY_BLOB_LIMIT = 950_000  # Bluesky の blob 上限(約1MB)より少し小さめ
 
@@ -276,7 +305,7 @@ def post_threads(*, text: str, images: List[Image_], r2_upload) -> bool:
             c.raise_for_status()
             creation_id = c.json()["id"]
         else:
-            # カルーセル: 各画像をitemコンテナ化 → CAROUSEL親
+            # カルーセル: 各画像をitemコンテナ化 → 準備完了を待つ → CAROUSEL親
             child_ids = []
             for image_url, alt in urls:
                 params = {"media_type": "IMAGE", "image_url": image_url,
@@ -286,6 +315,8 @@ def post_threads(*, text: str, images: List[Image_], r2_upload) -> bool:
                 cc = requests.post(f"{base}/{uid}/threads", params=params, timeout=60)
                 cc.raise_for_status()
                 child_ids.append(cc.json()["id"])
+            for cid in child_ids:
+                _wait_container_ready(base, cid, token)
             c = requests.post(
                 f"{base}/{uid}/threads",
                 params={"media_type": "CAROUSEL", "children": ",".join(child_ids),
@@ -377,7 +408,7 @@ def post_instagram(*, text: str, images: List[Image_], r2_upload) -> bool:
             c.raise_for_status()
             creation_id = c.json()["id"]
         else:
-            # カルーセル: 各画像をitemコンテナ化 → CAROUSEL親
+            # カルーセル: 各画像をitemコンテナ化 → 準備完了を待つ → CAROUSEL親
             child_ids = []
             for image_url, alt in urls:
                 params = {"image_url": image_url, "is_carousel_item": "true", "access_token": token}
@@ -386,6 +417,8 @@ def post_instagram(*, text: str, images: List[Image_], r2_upload) -> bool:
                 cc = requests.post(f"{base}/{uid}/media", params=params, timeout=60)
                 cc.raise_for_status()
                 child_ids.append(cc.json()["id"])
+            for cid in child_ids:
+                _wait_container_ready(base, cid, token)
             c = requests.post(
                 f"{base}/{uid}/media",
                 params={"media_type": "CAROUSEL", "children": ",".join(child_ids),
