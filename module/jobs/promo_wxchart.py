@@ -83,23 +83,34 @@ def main() -> None:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     try:
-        layout4_images, layout4_errors = build_layout4_only()
-        dashboard_images, dashboard_errors = build_dashboard_jma_only()
-
-        for errs, label in ((layout4_errors, "layout4"), (dashboard_errors, "dashboard")):
-            if errs:
-                print(f"[WARN] {label} errors: {errs}")
-
+        # 3枚それぞれを個別に保護する。どれか1つが例外で落ちても、
+        # 残りが作れていればその分だけで投稿する（月次・無人実行のため）。
         images = []
-        layout4_thumb = _weather_map_thumbnail("04_LAYOUT_4_WEEKLY") if layout4_images else None
-        if layout4_thumb:
-            images.append((layout4_thumb, "週間天気 4列結合（週間予報解説・予想天気図3枚）"))
 
-        dashboard_thumb = _weather_map_thumbnail("07_DASHBOARD_JMA_DIRECT") if dashboard_images else None
-        if dashboard_thumb:
-            images.append((dashboard_thumb, "気象庁 全部入りダッシュボード（実況・予想天気図＋高層天気図など）"))
+        try:
+            layout4_images, layout4_errors = build_layout4_only()
+            if layout4_errors:
+                print(f"[WARN] layout4 errors: {layout4_errors}")
+            thumb = _weather_map_thumbnail("04_LAYOUT_4_WEEKLY") if layout4_images else None
+            if thumb:
+                images.append((thumb, "週間天気 4列結合（週間予報解説・予想天気図3枚）"))
+        except Exception as e:
+            print(f"[ERR] layout4 build failed: {e}")
 
-        images.append((_build_emagram_thumbnail(), "高層観測 エマグラム（稚内〜父島の全国15地点）"))
+        try:
+            dashboard_images, dashboard_errors = build_dashboard_jma_only()
+            if dashboard_errors:
+                print(f"[WARN] dashboard errors: {dashboard_errors}")
+            thumb = _weather_map_thumbnail("07_DASHBOARD_JMA_DIRECT") if dashboard_images else None
+            if thumb:
+                images.append((thumb, "気象庁 全部入りダッシュボード（実況・予想天気図＋高層天気図など）"))
+        except Exception as e:
+            print(f"[ERR] dashboard build failed: {e}")
+
+        try:
+            images.append((_build_emagram_thumbnail(), "高層観測 エマグラム（稚内〜父島の全国15地点）"))
+        except Exception as e:
+            print(f"[ERR] emagram build failed: {e}")
 
         if not images:
             print("[ERR] 画像が1枚も作れませんでした")
