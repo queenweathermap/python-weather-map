@@ -26,7 +26,6 @@ from module.jobs.weather_map import (
     jma_source_caption,
     make_discord_thumbnail,
 )
-from module.jobs.climate_3yr import upload_r2
 from module.utils.sns_utils import post_bluesky, post_threads, post_x
 from scripts.emagram_discord import (
     STATIONS as EMAGRAM_STATIONS,
@@ -36,6 +35,24 @@ from scripts.emagram_discord import (
     make_thumbnail as make_emagram_thumbnail,
     target_sounding_time,
 )
+
+R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
+
+
+def upload_r2(key: str, blob: bytes) -> str:
+    """climate_3yr.upload_r2 と同等だが、pandas依存のclimate_3yrを
+    importせずに済むようここに直接持つ（このジョブはpandasを使わない）。"""
+    if not R2_ENABLE:
+        return ""
+    try:
+        from module.utils.r2_utils import put_bytes, make_url
+        put_bytes(key, blob, content_type="image/png")
+        url = make_url(key)
+        print(f"[OK] R2: {url}")
+        return url
+    except Exception as e:
+        print(f"[WARN] R2 upload failed: {e}")
+        return ""
 
 
 def _weather_map_thumbnail(filename: str) -> bytes | None:
