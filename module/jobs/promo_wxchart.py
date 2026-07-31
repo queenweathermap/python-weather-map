@@ -106,11 +106,13 @@ def main() -> None:
             return
 
         caption = (
-            "🌏 wx-chart 月次まとめ\n"
+            "🌏 wx-chart premium　毎日配信中\n"
             "①週間天気（週間予報解説＋予想天気図3枚）\n"
             "②気象庁 全部入りダッシュボード（実況・予想天気図＋高層天気図など）\n"
             "③高層観測エマグラム（全国15地点）\n"
-            "を毎日配信中。詳しくは wx-chart.com へ\n"
+            "詳しくは http://wx-chart.com へ\n"
+            "\n"
+            "画像はサンプルです\n"
             "#天気 #気象 #天気図 #WxChart"
         )
 
