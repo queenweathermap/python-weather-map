@@ -36,8 +36,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from module.utils.r2_utils import put_bytes, make_url
+from module.utils.notion_subscribers import get_active_discord_ids
+from module.utils.discord_dm import send_dm_multi_to_all
 
 JST = timezone(timedelta(hours=9))
+
+PORTAL_URL = "https://www.jma.go.jp/bosai/windprofiler/"
+
+# DM配信はエマグラム(02時/14時JST投稿)の中間にあたる正午の回だけに絞る。
+# 4回中1回だけをDM対象にするため、時刻はワークフローのスケジュールではなく
+# 実行時のJST時刻で判定する。
+DM_HOUR_JST = int(os.environ.get("WINDPROFILER_DM_HOUR_JST", "12"))
 
 # 気象庁公式の地点コード表 (const/station.json) の並び順のまま。
 # https://www.jma.go.jp/bosai/windprofiler/#code=XXXXX&type=chart
@@ -322,7 +331,25 @@ def build_content(dt_jst: datetime, urls: List[str]) -> str:
     lines = [f"🌀 **ウィンドプロファイラ（高層風） / {dt_jst.strftime('%Y-%m-%d %H:%M')} JST**"]
     for label, url in zip(GROUP_LABELS, urls):
         lines.append(f"**[★高解像度PNG {label} を表示](<{url}>)**")
+    lines.append(f"🔗 [気象庁 ウィンドプロファイラ（地点別）](<{PORTAL_URL}>)")
     return "\n".join(lines)
+
+
+def notify_dm_subscribers(content: str, thumbs: List[bytes]) -> None:
+    """有料DM購読者（Notion管理）へ、公開チャンネルと同じ内容(3枚)をDMする。
+    DM配信はエマグラム(02時/14時JST)の中間にあたる正午の回だけに絞る
+    （1日4回すべてDMすると購読者にとってうるさいため）。"""
+    try:
+        discord_ids = get_active_discord_ids()
+    except Exception as e:
+        print(f"[WARN] DM購読者リスト取得失敗: {e}")
+        return
+
+    if not discord_ids:
+        return
+
+    images = [(f"windprofiler_{i}.jpg", thumb) for i, thumb in enumerate(thumbs)]
+    send_dm_multi_to_all(discord_ids, content, images)
 
 
 def post_combined(webhook_url: str, dt_jst: datetime, thumbs: List[bytes], urls: List[str]) -> bool:
@@ -382,8 +409,12 @@ def main() -> int:
         urls.append(url)
         thumbs.append(make_thumbnail(combined, dt_jst))
 
+    content = build_content(dt_jst, urls)
+
     if post_combined(webhook_url, dt_jst, thumbs, urls):
         print("POSTED")
+        if dt_jst.hour == DM_HOUR_JST:
+            notify_dm_subscribers(content, thumbs)
         return 0
 
     return 1

@@ -337,10 +337,14 @@ def make_thumbnail(img_bytes: bytes, dt: datetime, *, baked_font_size: int = 26,
         return out.getvalue()
 
 
+WYOMING_PORTAL_URL = "https://weather.arcc.uwyo.edu/upperair/"
+
+
 def build_content(dt: datetime, highres_url: str) -> str:
     return (
         f"🌡️ **エマグラム / {dt.strftime('%Y-%m-%d %H')}Z**\n"
-        f"**[★高解像度PNG（R2 / {R2_RETENTION_DAYS}日保存）を表示](<{highres_url}>)**"
+        f"**[★高解像度PNG（R2 / {R2_RETENTION_DAYS}日保存）を表示](<{highres_url}>)**\n"
+        f"🔗 [University of Wyoming 高層観測アーカイブ](<{WYOMING_PORTAL_URL}>)"
     )
 
 

@@ -22,6 +22,13 @@ jobs:
       DISCORD_WINDPROFILER_WEBHOOK_URL: ${{ secrets.DISCORD_WINDPROFILER_WEBHOOK_URL }}
 
       # ------------------------------------------------------------
+      # 有料DM配信（正午の回のみ。emagram/guidance系と同じ購読者管理）
+      # ------------------------------------------------------------
+      DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
+
+      # ------------------------------------------------------------
       # R2
       # ------------------------------------------------------------
       R2_ENABLE: "1"
