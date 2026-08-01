@@ -1504,12 +1504,13 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
 
     # ---- 一段目(3列目・4列目・5列目): 広域版(切り抜かず全体表示)を列の先頭に、
-    # 日本周辺白黒版はそれを少し拡大して横に「おまけ」のように並べる(縦に重ねない)。
-    # おまけの分だけ広域版を少し小さくし、合計幅がその列の通常幅(target_w)ちょうどに
-    # なるようにする(高さはheader_hのまま変えないので、列ごとの段位置はずれない)。
+    # 日本周辺白黒版はそれを横に並べる(縦に重ねない)。広域版は元の縦横比の都合で
+    # header_hいっぱいまで表示しても幅に余裕があるため、日本周辺白黒版もheader_h
+    # いっぱいまで拡大し、周囲に空白が残らないようにする(合計幅がその列の通常幅
+    # (target_w)ちょうどになるよう、広域版側の割り当て幅だけを削る)。
     # 6列目(T72)の上は空白のまま。
     header_h = col12_h
-    NEAR_MONO_BADGE_SCALE = 0.65  # 「おまけ」サイズ。header_hに対する高さの比率。
+    NEAR_MONO_BADGE_SCALE = 1.0  # header_hに対する高さの比率(いっぱいまで拡大し余白をなくす)。
 
     def prepend_header_pair(
         col: Optional[Image.Image],
