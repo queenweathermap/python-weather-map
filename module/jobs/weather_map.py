@@ -1389,6 +1389,11 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle))
     if aupa20 is None:
         errors.append("DashboardJMA: AUPA20 missing")
+    else:
+        # AUPA20はPDFページ自体に白余白があり、そのままfill_cellすると
+        # 下のAUPQ35(同じくfill_cellで余白なく詰める)より幅が狭く見えるため、
+        # あらかじめ切り詰めておく。
+        aupa20 = trim_white_margins(aupa20)
 
     aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
     aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
@@ -1556,6 +1561,9 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
 
     # ---- 2列目(aupq_col): 一段目=AUPA20 / AUPQ35(全体) / AUPQ78(全体、分割しない)。
     # AUPQ35/AUPQ78は3列目の下端に合わせて拡大する(残りの高さを2枚で等分)。
+    # AUPQ35/AUPQ78は縦長(ポートレート)の図で、幅(col12_w)基準でfit_to_cellすると
+    # 高さ側に余りが出て4列目(FXFE502/FXFE5782)より低く見えてしまうため、
+    # fill_cellでセルいっぱいに拡大する(縦横比は保ったまま左右をわずかに切り詰める)。
     aupa20_cell = fill_cell(aupa20, col12_w, col12_h, valign="top") if aupa20 is not None else None
     aupa20_h = aupa20_cell.height if aupa20_cell is not None else 0
 
@@ -1564,14 +1572,14 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         remaining_h = max(1, col2.height - aupa20_h - LAYOUT_GAP)
         each_h = max(1, (remaining_h - LAYOUT_GAP) // 2)
         if aupq35 is not None:
-            aupq_bottom_cells.append(fit_to_cell(aupq35, col12_w, each_h, valign="top"))
+            aupq_bottom_cells.append(fill_cell(aupq35, col12_w, each_h, valign="top"))
         if aupq78 is not None:
-            aupq_bottom_cells.append(fit_to_cell(aupq78, col12_w, each_h, valign="top"))
+            aupq_bottom_cells.append(fill_cell(aupq78, col12_w, each_h, valign="top"))
     else:
         if aupq35 is not None:
-            aupq_bottom_cells.append(fit_to_cell(aupq35, col12_w, col12_h, valign="top"))
+            aupq_bottom_cells.append(fill_cell(aupq35, col12_w, col12_h, valign="top"))
         if aupq78 is not None:
-            aupq_bottom_cells.append(fit_to_cell(aupq78, col12_w, col12_h, valign="top"))
+            aupq_bottom_cells.append(fill_cell(aupq78, col12_w, col12_h, valign="top"))
 
     aupq_cells = ([aupa20_cell] if aupa20_cell is not None else []) + aupq_bottom_cells
     aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP) if aupq_cells else None
