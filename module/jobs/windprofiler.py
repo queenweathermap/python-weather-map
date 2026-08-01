@@ -4,7 +4,8 @@
 #
 # 気象庁「ウィンドプロファイラ」(WINDAS) 全33地点のチャートを
 # 公式ページ (https://www.jma.go.jp/bosai/windprofiler/) から
-# Playwrightでスクリーンショットし、2枚（17地点/16地点）に結合してDiscordへ配信する。
+# Playwrightでスクリーンショットし、11地点ずつ3枚（画像サイズを揃える）に
+# 結合してDiscordへ配信する。
 #
 # チャートはJS(SVG)描画のSPAで、ページ内の #wpr-chart 要素が
 # 「地点名・緯度経度」ラベルとグラフ本体（時間の向き矢印込み）をまとめて含む。
@@ -76,10 +77,8 @@ STATIONS_ALL: List[Tuple[str, str]] = [
     ("47945", "南大東島"),
 ]
 
-GROUP_A = STATIONS_ALL[:17]   # 留萌〜八丈島（北海道〜関東・伊豆諸島）
-GROUP_B = STATIONS_ALL[17:]   # 鳥取〜南大東島（中国・四国・九州・南西諸島）
-GROUP_A_LABEL = "1/2（北海道〜関東・伊豆諸島）"
-GROUP_B_LABEL = "2/2（中国・四国・九州・南西諸島）"
+GROUPS = [STATIONS_ALL[0:11], STATIONS_ALL[11:22], STATIONS_ALL[22:33]]  # 11地点ずつ3枚（画像サイズを揃える）
+GROUP_LABELS = ["1/3", "2/3", "3/3"]
 
 BASE_URL = "https://www.jma.go.jp/bosai/windprofiler/"
 CHART_SELECTOR = "#wpr-chart"
@@ -319,16 +318,15 @@ def make_thumbnail(img_bytes: bytes, dt_jst: datetime, *, baked_font_size: int =
         return out.getvalue()
 
 
-def build_content(dt_jst: datetime, url_a: str, url_b: str) -> str:
-    return (
-        f"🌀 **ウィンドプロファイラ（高層風） / {dt_jst.strftime('%Y-%m-%d %H:%M')} JST**\n"
-        f"**[★高解像度PNG {GROUP_A_LABEL} を表示](<{url_a}>)**\n"
-        f"**[★高解像度PNG {GROUP_B_LABEL} を表示](<{url_b}>)**"
-    )
+def build_content(dt_jst: datetime, urls: List[str]) -> str:
+    lines = [f"🌀 **ウィンドプロファイラ（高層風） / {dt_jst.strftime('%Y-%m-%d %H:%M')} JST**"]
+    for label, url in zip(GROUP_LABELS, urls):
+        lines.append(f"**[★高解像度PNG {label} を表示](<{url}>)**")
+    return "\n".join(lines)
 
 
-def post_combined(webhook_url: str, dt_jst: datetime, thumb_a: bytes, thumb_b: bytes, url_a: str, url_b: str) -> bool:
-    content = build_content(dt_jst, url_a, url_b)
+def post_combined(webhook_url: str, dt_jst: datetime, thumbs: List[bytes], urls: List[str]) -> bool:
+    content = build_content(dt_jst, urls)
     payload = {
         "username": "ウィンドプロファイラ",
         "content": content,
@@ -336,9 +334,9 @@ def post_combined(webhook_url: str, dt_jst: datetime, thumb_a: bytes, thumb_b: b
     }
     files = {
         "payload_json": (None, json.dumps(payload)),
-        "files[0]": ("windprofiler_a.jpg", thumb_a, "image/jpeg"),
-        "files[1]": ("windprofiler_b.jpg", thumb_b, "image/jpeg"),
     }
+    for i, thumb in enumerate(thumbs):
+        files[f"files[{i}]"] = (f"windprofiler_{i}.jpg", thumb, "image/jpeg")
 
     try:
         r = requests.post(webhook_url, files=files, timeout=DISCORD_TIMEOUT_SECONDS)
@@ -362,29 +360,29 @@ def main() -> int:
     dt_jst = _jst_now()
 
     all_images = screenshot_all_stations()
-    group_a_images = all_images[:17]
-    group_b_images = all_images[17:]
-
-    combined_a = build_grid_image(group_a_images)
-    combined_b = build_grid_image(group_b_images)
-    combined_a = append_caption_bar(combined_a, dt_jst)
-    combined_b = append_caption_bar(combined_b, dt_jst)
 
     now_utc = datetime.now(timezone.utc)
     key_stub = f"{dt_jst.strftime('%Y%m%d%H%M')}_{now_utc.strftime('%S')}"
-    r2_key_a = f"{key_stub}_a.png"
-    r2_key_b = f"{key_stub}_b.png"
-    put_bytes(r2_key_a, combined_a, content_type="image/png")
-    put_bytes(r2_key_b, combined_b, content_type="image/png")
-    url_a = make_url(r2_key_a)
-    url_b = make_url(r2_key_b)
-    print(f"R2 UPLOADED: {url_a}")
-    print(f"R2 UPLOADED: {url_b}")
 
-    thumb_a = make_thumbnail(combined_a, dt_jst)
-    thumb_b = make_thumbnail(combined_b, dt_jst)
+    urls: List[str] = []
+    thumbs: List[bytes] = []
+    offset = 0
+    for i, group in enumerate(GROUPS):
+        group_images = all_images[offset:offset + len(group)]
+        offset += len(group)
 
-    if post_combined(webhook_url, dt_jst, thumb_a, thumb_b, url_a, url_b):
+        combined = build_grid_image(group_images)
+        combined = append_caption_bar(combined, dt_jst)
+
+        r2_key = f"{key_stub}_{i + 1}.png"
+        put_bytes(r2_key, combined, content_type="image/png")
+        url = make_url(r2_key)
+        print(f"R2 UPLOADED: {url}")
+
+        urls.append(url)
+        thumbs.append(make_thumbnail(combined, dt_jst))
+
+    if post_combined(webhook_url, dt_jst, thumbs, urls):
         print("POSTED")
         return 0
 
