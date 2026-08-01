@@ -624,6 +624,38 @@ def combine_horizontal(images: List[Image.Image], *, gap: int = 0, valign: str =
     return canvas
 
 
+def visual_gap_positions(
+    images: List[Image.Image],
+    *,
+    visual_gap: int,
+    measure_images: Optional[List[Image.Image]] = None,
+) -> List[int]:
+    """
+    各画像の内蔵している白余白の量を測り、実際の絵柄(非白領域)同士の間隔が
+    常にvisual_gapになるような貼り付けx座標のリストを返す(先頭は必ず0)。
+    measure_imagesを渡すと、余白の測定にはそちら(例えば1段目を除いた範囲)を
+    使い、実際に動かす対象はimages(全体)のままにできる。
+    負の重なりが隣列の絵柄そのものに食い込まないよう、重なりは相手側の
+    白余白の範囲内に収まるようクランプする(その場合、実際の間隔は
+    visual_gapより広くなることがある)。
+    """
+    measure = measure_images if measure_images is not None else images
+    bboxes = [content_bbox(im) for im in measure]
+    x_positions = [0]
+    for i in range(1, len(images)):
+        prev_img, prev_bbox = measure[i - 1], bboxes[i - 1]
+        this_bbox = bboxes[i]
+        prev_right_margin = prev_img.width - 1 - prev_bbox[2]
+        this_left_margin = this_bbox[0]
+        raw_gap = visual_gap - prev_right_margin - this_left_margin
+        raw_gap = max(raw_gap, -prev_right_margin)
+        x_positions.append(x_positions[-1] + images[i - 1].width + raw_gap)
+    min_x = min(x_positions)
+    if min_x < 0:
+        x_positions = [x - min_x for x in x_positions]
+    return x_positions
+
+
 def resize_to_width(img: Image.Image, target_w: int) -> Image.Image:
     """縦横比を保ったまま、指定幅に合わせる。"""
     img = img.convert("RGB")
@@ -1329,10 +1361,6 @@ JAPAN_CROP_FRACTIONS = (0.30, 0.22, 0.56, 0.58)  # (x0, y0, x1, y1)
 # 極東アジア広域を切り出す範囲。目視確認して決めた値。
 ASIA_CROP_FRACTIONS = (0.22, 0.10, 0.75, 0.70)  # (x0, y0, x1, y1)
 
-# WCN版の対応コマ(全部入りダッシュボード内)は、セルいっぱいに拡大せず
-# 一回り小さく中央に配置されているため、その見た目に合わせる縮小率。
-ASAS_ASIA_CELL_SHRINK = 0.85
-
 
 def crop_japan_area(img: Image.Image) -> Image.Image:
     """広域天気図から日本付近だけを切り出す。"""
@@ -1413,15 +1441,14 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
 
     # AXJP140は1ページにALONG 140E(上)とALONG 130E(下)の2断面図が
     # 縦に並んでいるので、上下分割してAXJP140/AXJP130として別々に使う。
-    # 白余白はここで切り詰めておく(上下に余白が残らないように)。
+    # 気象庁からは1枚のPDFとして配信されており、軸ラベル・観測点名など周囲の
+    # 文字情報を含めてそのまま使う(トリミングしない)。
     axjp140_raw = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axjp140", cycle))
     if axjp140_raw is None:
         errors.append("DashboardJMA: AXJP140 missing")
         axjp140, axjp130 = None, None
     else:
-        axjp140_half, axjp130_half = split_top_bottom(axjp140_raw)
-        axjp140 = trim_white_margins(axjp140_half)
-        axjp130 = trim_white_margins(axjp130_half)
+        axjp140, axjp130 = split_top_bottom(axjp140_raw)
 
     aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle))
     if aupa20 is None:
@@ -1452,6 +1479,10 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         axfe578_upper, axfe578_lower = None, None
     else:
         axfe578_upper, axfe578_lower = split_top_bottom(axfe578)
+        # AXFE578はPDFページ自体に左と上に白余白があり、そのままだと2列目(aupq_col、
+        # 既に余白なく詰めてある)と絵柄の位置がずれて見えるため、切り詰めておく。
+        axfe578_upper = trim_white_margins(axfe578_upper)
+        axfe578_lower = trim_white_margins(axfe578_lower)
 
     # ---- 列3・4・5: 各列とも、その列の地上天気図(surface)のネイティブ幅をそのまま使う ----
     # (T=72のfxfe507/fxfe577は1コマのみのPDFで、T12/24を並べたfxfe502等より幅が狭い。
@@ -1545,21 +1576,17 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # ---- 3列目(旧・列2、AXFE578ベース): AXFE578上段(500hPa) / ASAS(極東アジア切り出し) /
     # AUPQ35下段 / AXFE578下段(850hPa)。AUPA20はここから2列目(aupq_col)へ移動した。
     asas_asia = crop_asia_area(asas_wide) if asas_wide is not None else None
-    aupq35_lower = split_top_bottom(aupq35)[1] if aupq35 is not None else None
+    # aupq35は既に全体を切り詰め済みだが、上下分割した境目には余白が残るので
+    # 下段(500hPa)だけ改めて切り詰める。
+    aupq35_lower = trim_white_margins(split_top_bottom(aupq35)[1]) if aupq35 is not None else None
 
     col2_cells = []
     for im in (axfe578_upper, asas_asia, aupq35_lower, axfe578_lower):
         if im is None:
             continue
-        if im is asas_asia:
-            # WCN版の対応コマは周囲に余白を残して縮小配置されているため、
-            # セルいっぱいに詰めず、一回り小さくする。ただし絵柄の開始位置(上端)は
-            # 左右のコマ(AUPQ35下段・FXFE5782)と同じく上揃えにする(左右中央のみ)。
-            inner = fit_to_cell(im, int(col12_w * ASAS_ASIA_CELL_SHRINK), int(col12_h * ASAS_ASIA_CELL_SHRINK), valign="top")
-            cell = Image.new("RGB", (col12_w, col12_h), "white")
-            cell.paste(inner, ((col12_w - inner.width) // 2, 0))
-        else:
-            cell = fit_to_cell(im, col12_w, col12_h, valign="top")
+        # AXFE578上段/下段・ASAS(極東アジア)・AUPQ35下段とも、2列目(aupq_col)と
+        # 同じくfill_cellでセルいっぱいに詰め、余白なく絵柄の位置を揃える。
+        cell = fill_cell(im, col12_w, col12_h, valign="top")
         col2_cells.append(cell)
     col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
 
@@ -1614,67 +1641,75 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     col4 = prepend_header_pair(col4, fsas48_wide, fsas48_new)
     col5 = prepend_header_pair(col5, None, None)
 
+    # 短期予報解説資料(TKAISETU)・AXJP140・AXJP130はいずれも気象庁配信のPDFページ
+    # そのままの外枠(タイトル・軸ラベル・観測点表など)を欠かさず見せたいので、
+    # fill_cell(クロップして詰める)ではなく、幅基準でそのまま縮小するだけ(切り取らない)。
+    # 高さは絵柄なりの自然な値になるため、AUPQ35/AUPQ78側をその高さに合わせる
+    # (用紙サイズが変わっても構わない)。
+    tkai_natural = resize_to_width(tkai, col12_w) if tkai is not None else None
+    axjp140_natural = resize_to_width(axjp140, col12_w) if axjp140 is not None else None
+    axjp130_natural = resize_to_width(axjp130, col12_w) if axjp130 is not None else None
+
     # ---- 2列目(aupq_col): 一段目=AUPA20 / AUPQ35(全体) / AUPQ78(全体、分割しない)。
-    # AUPQ35/AUPQ78は3列目の下端に合わせて拡大する(残りの高さを2枚で等分)。
-    # AUPQ35/AUPQ78は縦長(ポートレート)の図で、幅(col12_w)基準でfit_to_cellすると
-    # 高さ側に余りが出て4列目(FXFE502/FXFE5782)より低く見えてしまうため、
-    # fill_cellでセルいっぱいに拡大する(縦横比は保ったまま左右をわずかに切り詰める)。
+    # AUPQ35はAXJP140+AXJP130の自然な高さの合計に、AUPQ78はTKAISETUの自然な高さに
+    # それぞれ合わせる(セルいっぱいに拡大する側はfill_cellで詰める)。
     aupa20_cell = fill_cell(aupa20, col12_w, col12_h, valign="top") if aupa20 is not None else None
     aupa20_h = aupa20_cell.height if aupa20_cell is not None else 0
 
+    axjp_natural_total_h = sum(
+        im.height for im in (axjp140_natural, axjp130_natural) if im is not None
+    ) + (LAYOUT_GAP if axjp140_natural is not None and axjp130_natural is not None else 0)
+
     aupq_bottom_cells = []
-    if col2 is not None:
-        remaining_h = max(1, col2.height - aupa20_h - LAYOUT_GAP)
-        each_h = max(1, (remaining_h - LAYOUT_GAP) // 2)
-        if aupq35 is not None:
-            aupq_bottom_cells.append(fill_cell(aupq35, col12_w, each_h, valign="top"))
-        if aupq78 is not None:
-            aupq_bottom_cells.append(fill_cell(aupq78, col12_w, each_h, valign="top"))
-    else:
-        if aupq35 is not None:
-            aupq_bottom_cells.append(fill_cell(aupq35, col12_w, col12_h, valign="top"))
-        if aupq78 is not None:
-            aupq_bottom_cells.append(fill_cell(aupq78, col12_w, col12_h, valign="top"))
+    if aupq35 is not None:
+        aupq35_h = axjp_natural_total_h if axjp_natural_total_h > 0 else col12_h
+        aupq_bottom_cells.append(fill_cell(aupq35, col12_w, aupq35_h, valign="top"))
+    if aupq78 is not None:
+        aupq78_h = tkai_natural.height if tkai_natural is not None else col12_h
+        aupq_bottom_cells.append(fill_cell(aupq78, col12_w, aupq78_h, valign="top"))
 
     aupq_cells = ([aupa20_cell] if aupa20_cell is not None else []) + aupq_bottom_cells
     aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP) if aupq_cells else None
 
     # ---- 左端(1列目): 一段目は空白(他列の一段目と同じ高さ)、AXJP140 / AXJP130 / 短期予報解説情報。
-    # AXJP140/AXJP130は2列目(AUPQ列)と同じセルサイズ(col12_w×col12_h)に合わせる
-    # (余白も揃えるため、多少の切り取りは許容してfill_cellで詰める)。
-    # AXJP140の絵柄上端が3列目の絵柄上端(=一段目の下、二段目)に揃うようにする。
-    # 短期予報解説資料(TKAISETU)の絵柄は、2列目(AUPQ列)のAUPQ78と揃える(上揃え)。
+    # 3つとも切り取らず自然なサイズのまま並べる(上でAUPQ35/AUPQ78側をこの高さに合わせている)。
     left_col_w = col12_w
-    top_items = [Image.new("RGB", (left_col_w, header_h), "white")]
-    if axjp140 is not None:
-        top_items.append(fill_cell(axjp140, left_col_w, col12_h, valign="top"))
-    if axjp130 is not None:
-        top_items.append(fill_cell(axjp130, left_col_w, col12_h, valign="top"))
-    top_stack = combine_vertical(top_items, gap=LAYOUT_GAP)
-    top_stack_h = top_stack.height
-
-    left_parts = [top_stack]
-    if tkai is not None:
-        if col2 is not None:
-            target_tkai_h = max(1, col2.height - top_stack_h - LAYOUT_GAP)
-            # AUPQ78と絵柄の上端をぴったり揃えると詰まりすぎるため、ほんの少しだけ下へ
-            # ずらす(セル自体の高さ・下端は変えない)。
-            tkai_top_nudge = max(0, int(col12_h * 0.06))
-            tkai_fitted = fit_to_cell(tkai, left_col_w, max(1, target_tkai_h - tkai_top_nudge), valign="top")
-            tkai_cell = Image.new("RGB", (left_col_w, target_tkai_h), "white")
-            tkai_cell.paste(tkai_fitted.convert("RGB"), (0, tkai_top_nudge))
-            left_parts.append(tkai_cell)
-        else:
-            left_parts.append(resize_to_width(tkai, left_col_w))
+    # 短期予報解説資料(TKAISETU)を先に、AXJP140/AXJP130を後にする(上下逆)。
+    left_parts = [Image.new("RGB", (left_col_w, header_h), "white")]
+    if tkai_natural is not None:
+        left_parts.append(tkai_natural)
+    if axjp140_natural is not None:
+        left_parts.append(axjp140_natural)
+    if axjp130_natural is not None:
+        left_parts.append(axjp130_natural)
     left_col = combine_vertical(left_parts, gap=LAYOUT_GAP) if left_parts else None
+
+    # 1段目(ヘッダー/AUPA20など)はどの列も特殊な構成で余白の性質がバラバラなので、
+    # 列間の余白測定は2段目以降(header_h+LAYOUT_GAPより下)だけを見て行う。
+    row2_top = header_h + LAYOUT_GAP
 
     grid_cols = [c for c in (aupq_col, col2, col3, col4, col5) if c is not None]
     grid_row = None
+    col3_x_in_grid_row = 0
     if grid_cols:
         grid_h = max(c.height for c in grid_cols)
-        # 列同士の余白をすべて詰める(0ギャップ)。
         padded_cols = [pad_to_height(c, grid_h) for c in grid_cols]
-        grid_row = combine_horizontal(padded_cols, gap=0, valign="top")
+        # 各列が自身に内蔵している白余白の量(FXFE502等はまだ切り詰めていないため
+        # 列ごとにバラバラ)に関わらず、絵柄同士の間隔が常にLAYOUT_GAPになるよう
+        # 貼り付け位置をずらして結合する(画像そのものはトリミングしない)。
+        measure_cols = [c.crop((0, min(row2_top, c.height - 1), c.width, c.height)) for c in padded_cols]
+        grid_positions = visual_gap_positions(
+            padded_cols, visual_gap=LAYOUT_GAP, measure_images=measure_cols
+        )
+        grid_w = max(x + c.width for x, c in zip(grid_positions, padded_cols))
+        grid_row = Image.new("RGB", (grid_w, grid_h), "white")
+        for x, c in zip(grid_positions, padded_cols):
+            grid_row.paste(c, (x, 0))
+        # col3(FXFE502列)はgrid_cols内でaupq_col,col2の次(index=2)にあたる。
+        # FXJP854をこの列の真下に正確に揃えるため、実際の貼り付けx座標を控えておく。
+        if col3 is not None:
+            col3_index = grid_cols.index(col3)
+            col3_x_in_grid_row = grid_positions[col3_index]
         # 1列目(left_col)はcol2(3列目)の元の高さに合わせて作られているが、
         # col2自体はここでgrid_h(4列目以降を含む最大高さ)まで白余白でパディングされる。
         # そのままだとleft_colの下端がgrid_rowの下端より短く、段差ができてしまうため、
@@ -1682,22 +1717,29 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if left_col is not None:
             left_col = pad_to_height(left_col, grid_h)
 
-    top_level = [c for c in (left_col, grid_row) if c is not None]
+    top_level = [c.convert("RGB") for c in (left_col, grid_row) if c is not None]
     if not top_level:
         return None
-    # 左端と2列目をくっつける(余白なし)。
-    main_grid = combine_horizontal(top_level, gap=0, valign="top")
+    # 1列目とそれ以降の列も含め、列間の隙間(見た目)はすべてLAYOUT_GAPで統一する。
+    # ここも1段目を除いた範囲(row2_top以降)だけで余白を測る。
+    top_level_measure = [c.crop((0, min(row2_top, c.height - 1), c.width, c.height)) for c in top_level]
+    top_level_positions = visual_gap_positions(
+        top_level, visual_gap=LAYOUT_GAP, measure_images=top_level_measure
+    )
+    main_grid_w = max(x + c.width for x, c in zip(top_level_positions, top_level))
+    main_grid_h = max(c.height for c in top_level)
+    main_grid = Image.new("RGB", (main_grid_w, main_grid_h), "white")
+    for x, c in zip(top_level_positions, top_level):
+        main_grid.paste(c.convert("RGB"), (x, 0))
+    # grid_row(2列目以降)がmain_grid内で実際に貼り付けられたx座標。
+    grid_row_x_in_main = top_level_positions[-1] if left_col is not None and grid_row is not None else 0
 
     # FXJP854(T12/24/36/48)を、列4(FXFE502列)・列5(FXFE504列)の真下だけに
     # 独立した段として追加する(他列の下には余白のまま何も置かない)。
     fxjp854_parts = [im for im in (fxjp854_upper, fxjp854_lower) if im is not None]
     if fxjp854_parts:
         fxjp854_row = combine_horizontal(fxjp854_parts, gap=0, valign="top")
-        left_pad_w = (
-            (left_col.width if left_col is not None else 0)
-            + (aupq_col.width if aupq_col is not None else 0)
-            + (col2.width if col2 is not None else 0)
-        )
+        left_pad_w = grid_row_x_in_main + col3_x_in_grid_row
         strip = Image.new("RGB", (main_grid.width, fxjp854_row.height), "white")
         strip.paste(fxjp854_row.convert("RGB"), (left_pad_w, 0))
         final_canvas = combine_vertical([main_grid, strip], gap=LAYOUT_GAP, halign="left")
