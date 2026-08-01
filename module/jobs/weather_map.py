@@ -714,6 +714,43 @@ def resize_to_width_top(img: Image.Image, target_w: int) -> Image.Image:
     return img.resize((target_w, target_h), Image.LANCZOS)
 
 
+def content_bbox(img: Image.Image, *, threshold: int = 245) -> tuple:
+    """画像内の非白領域のバウンディングボックス(left, top, right, bottom)を返す(切り取りはしない)。"""
+    img = img.convert("RGB")
+    px = img.load()
+    w, h = img.size
+
+    left, right = 0, w - 1
+    top, bottom = 0, h - 1
+
+    def row_has_content(y: int) -> bool:
+        for x in range(w):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    def col_has_content(x: int) -> bool:
+        for y in range(h):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    while top < h and not row_has_content(top):
+        top += 1
+    while bottom >= 0 and not row_has_content(bottom):
+        bottom -= 1
+    while left < w and not col_has_content(left):
+        left += 1
+    while right >= 0 and not col_has_content(right):
+        right -= 1
+
+    if left > right or top > bottom:
+        return 0, 0, w - 1, h - 1
+    return left, top, right, bottom
+
+
 def trim_white_margins(img: Image.Image, *, threshold: int = 245, pad: int = 0) -> Image.Image:
     """画像外周の白余白をできるだけ取り除く。"""
     img = img.convert("RGB")
@@ -1399,8 +1436,15 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
     if aupq35 is None:
         errors.append("DashboardJMA: AUPQ35 missing")
+    else:
+        # AXJP140/AXJP130/TKAISETUは既に切り詰め済みなので、AUPQ35/AUPQ78も
+        # 同様に切り詰めておかないと、fill_cell後も自身の白余白が残った分だけ
+        # 絵柄の開始位置がずれて見える(セルの大きさは揃っていても中の絵柄が揃わない)。
+        aupq35 = trim_white_margins(aupq35)
     if aupq78 is None:
         errors.append("DashboardJMA: AUPQ78 missing")
+    else:
+        aupq78 = trim_white_margins(aupq78)
 
     axfe578 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axfe578", cycle))
     if axfe578 is None:
@@ -1413,6 +1457,10 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # (T=72のfxfe507/fxfe577は1コマのみのPDFで、T12/24を並べたfxfe502等より幅が狭い。
     #  列ごとに幅が違ってよく、無理に他列と同じ幅に揃えると余白だらけになる)
     ref_surface = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe502", cycle))
+    # FXJP854の幅合わせの基準として、列4(FXFE5782)・列5(FXFE504)の絵柄部分を先に取得しておく
+    # (build_period_columnの中で改めて取得されるが、ここでは絵柄の左位置・幅を測るためだけに使う)。
+    fxfe5782_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe5782", cycle))
+    fxfe504_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe504", cycle))
 
     fxjp854_page = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxjp854", cycle))
     if fxjp854_page is None:
@@ -1420,25 +1468,31 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         fxjp854_upper, fxjp854_lower = None, None
     else:
         fxjp854_upper, fxjp854_lower = split_top_bottom(fxjp854_page)
-        # 上下は元々1px程度の差(整数除算)しかないが、列3・列4で個別にresize_to_widthすると
-        # 丸め誤差で数px高さがずれ、T12/24とT36/48の段で微妙に位置がずれて見えるため、
-        # 先に同じ幅・高さに揃えておく(上揃えの位置が正確に一致するように)。
-        fxjp_target_w = ref_surface.width if ref_surface is not None else fxjp854_upper.width
-        fxjp854_upper = resize_to_width(fxjp854_upper, fxjp_target_w)
-        fxjp854_lower = fxjp854_lower.convert("RGB").resize(fxjp854_upper.size, Image.LANCZOS)
+        # FXJP854自身の白余白を切り詰めてから、列4(FXFE5782)・列5(FXFE504)の
+        # 絵柄部分(左位置・幅)に合わせて配置する。これにより、セルの大きさだけでなく
+        # 実際の絵柄の左端・幅も揃う(切り詰め前は自身の余白が残った分だけ縮小率が
+        # 小さくなり、絵柄がFXFE5782/FXFE504より少しはみ出て見えていた)。
+        fxjp854_upper = trim_white_margins(fxjp854_upper)
+        fxjp854_lower = trim_white_margins(fxjp854_lower)
 
-        # 上段(T12/24)は元の図自体の上余白が下段(T36/48)より大きく、真上の画像との
-        # 白い部分が列3・列4で揃わない。上段の余分な上余白を切り、同じ量だけ下に
-        # 足し戻す(全体の高さは変えず、絵柄だけ上に詰める)。
-        upper_top = find_content_top(fxjp854_upper)
-        lower_top = find_content_top(fxjp854_lower)
-        extra = upper_top - lower_top
-        if extra > 0:
-            h = fxjp854_upper.height
-            trimmed = fxjp854_upper.crop((0, extra, fxjp854_upper.width, h))
-            canvas = Image.new("RGB", (fxjp854_upper.width, h), "white")
-            canvas.paste(trimmed, (0, 0))
-            fxjp854_upper = canvas
+        fxjp_target_w = ref_surface.width if ref_surface is not None else fxjp854_upper.width
+        fxjp_target_h = ref_surface.height if ref_surface is not None else fxjp854_upper.height
+
+        def fit_fxjp854_half(img: Image.Image, ref_img: Optional[Image.Image]) -> Image.Image:
+            if ref_img is None:
+                return resize_to_width(img, fxjp_target_w)
+            left, _, right, _ = content_bbox(ref_img)
+            scale = min(fxjp_target_w / ref_img.width, fxjp_target_h / ref_img.height)
+            content_w = max(1, int((right - left + 1) * scale))
+            left_scaled = int(left * scale)
+            scaled = resize_to_width(img, content_w)
+            canvas = Image.new("RGB", (fxjp_target_w, scaled.height), "white")
+            canvas.paste(scaled, (min(left_scaled, fxjp_target_w - scaled.width), 0))
+            return canvas
+
+        # 上段(T12/24)はFXFE5782(列4)、下段(T36/48)はFXFE504(列5)の絵柄幅・左位置に合わせる。
+        fxjp854_upper = fit_fxjp854_half(fxjp854_upper, fxfe5782_ref)
+        fxjp854_lower = fit_fxjp854_half(fxjp854_lower, fxfe504_ref)
 
     # 列3・4・5は同じ種類のパネル(地上天気図・上層天気図)なので、同じサイズ(幅と高さ)に
     # 揃える。FXFE507/577(T72)はT12/24等を並べたfxfe502等よりネイティブ幅が狭く
@@ -1451,9 +1505,10 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         surface_code: str,
         upper_code: str,
         surface_pre: Optional[Image.Image] = None,
+        upper_pre: Optional[Image.Image] = None,
     ) -> Optional[Image.Image]:
         surface = surface_pre if surface_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(surface_code, cycle))
-        upper = get_first_page_or_none(fetch_jma_numeric_pdf_pages(upper_code, cycle))
+        upper = upper_pre if upper_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(upper_code, cycle))
         if surface is None:
             errors.append(f"DashboardJMA: {surface_code} missing")
         if upper is None:
@@ -1472,8 +1527,8 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # 独立した「4段目」として後で別途くっつける(ここでは列に含めない)。
     # そうしないと、列4・5だけがFXJP854の分だけ高くなり、他列がそれに引きずられて
     # 余分な白余白を抱えることになる。
-    col3 = build_period_column("fxfe502", "fxfe5782", surface_pre=ref_surface)
-    col4 = build_period_column("fxfe504", "fxfe5784")
+    col3 = build_period_column("fxfe502", "fxfe5782", surface_pre=ref_surface, upper_pre=fxfe5782_ref)
+    col4 = build_period_column("fxfe504", "fxfe5784", surface_pre=fxfe504_ref)
     # T72はFXJP854(T=12/24/36/48のみ)に対応する時刻が無いため、FXJP854は付けない。
     col5 = build_period_column("fxfe507", "fxfe577")
 
