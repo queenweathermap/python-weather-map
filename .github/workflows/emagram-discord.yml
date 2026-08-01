@@ -2,9 +2,9 @@ name: Emagram (University of Wyoming)
 
 on:
   schedule:
-    # JST 13:00 / 翌01:00（00Z=09時JST・12Z=21時JST観測の4時間後）
-    # UTC 04:00 / 16:00
-    - cron: "0 4,16 * * *"
+    # JST 14:00 / 翌02:00（00Z=09時JST・12Z=21時JST観測の5時間後）
+    # UTC 05:00 / 17:00
+    - cron: "0 5,17 * * *"
 
   workflow_dispatch:
 
