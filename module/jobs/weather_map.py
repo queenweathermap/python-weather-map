@@ -705,7 +705,9 @@ def fit_to_cell(
     return canvas
 
 
-def fill_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "top") -> Image.Image:
+def fill_cell(
+    img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "top", halign: str = "center"
+) -> Image.Image:
     """
     画像を指定セルいっぱいに拡大し、はみ出た分は切り取る(白余白を残さない)。
     縦横比は維持する(歪めない)。
@@ -719,8 +721,18 @@ def fill_cell(img: Image.Image, cell_w: int, cell_h: int, *, valign: str = "top"
     new_h = max(1, int(img.height * scale))
     resized = img.resize((new_w, new_h), Image.LANCZOS)
 
-    x = (new_w - cell_w) // 2
-    y = 0 if valign == "top" else (new_h - cell_h) // 2
+    if halign == "left":
+        x = 0
+    elif halign == "right":
+        x = new_w - cell_w
+    else:
+        x = (new_w - cell_w) // 2
+    if valign == "top":
+        y = 0
+    elif valign == "bottom":
+        y = new_h - cell_h
+    else:
+        y = (new_h - cell_h) // 2
     return resized.crop((x, y, x + cell_w, y + cell_h))
 
 
@@ -1525,19 +1537,23 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         fxjp854_upper = fit_fxjp854_half(fxjp854_upper, fxfe5782_ref)
         fxjp854_lower = fit_fxjp854_half(fxjp854_lower, fxfe504_ref)
 
-    # 列3・4・5は同じ種類のパネル(地上天気図・上層天気図)なので、同じサイズ(幅と高さ)に
-    # 揃える。FXFE507/577(T72)はT12/24等を並べたfxfe502等よりネイティブ幅が狭く
-    # (1コマのみのPDFのため)、幅だけ合わせると縦横比のせいで縦に間延びしてしまう。
-    # fit_to_cellで幅・高さともに基準サイズへ収める(縦横比は保つ、はみ出さない)。
-    period_target_w = ref_surface.width if ref_surface is not None else 2798
-    period_target_h = ref_surface.height if ref_surface is not None else 2218
+    # 列3・4・5は同じ種類のパネル(地上天気図・上層天気図)。FXFE507/577(T72)は
+    # T12/24等を並べたfxfe502等よりネイティブ幅が狭い(1コマのみのPDFのため)が、
+    # 幅は無理に揃えず各列ネイティブのまま(自然な高さ)にする。
 
-    def build_period_column(
+    def build_period_rows(
         surface_code: str,
         upper_code: str,
         surface_pre: Optional[Image.Image] = None,
         upper_pre: Optional[Image.Image] = None,
-    ) -> Optional[Image.Image]:
+    ) -> List[Image.Image]:
+        """
+        surface(例: fxfe502)・upper(例: fxfe5782)は、それぞれ1ページの中に
+        上段・下段の2種類の物理量(例: 500hPa/地上、500hPa気温/850hPa)がT=12・T=24
+        などを横に並べた形で入っている。3列目(AXFE578ベース)の4段
+        (500hPa/ASAS地上/AUPQ35(500hPa)/AXFE578下段(850hPa))と種類ごとに
+        揃えるため、それぞれ上下に分割し、4段(自然な高さ、切り取らない)として返す。
+        """
         surface = surface_pre if surface_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(surface_code, cycle))
         upper = upper_pre if upper_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(upper_code, cycle))
         if surface is None:
@@ -1545,23 +1561,38 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if upper is None:
             errors.append(f"DashboardJMA: {upper_code} missing")
 
-        cells = []
-        if surface is not None:
-            cells.append(fit_to_cell(surface, period_target_w, period_target_h, valign="top", halign="left"))
-        if upper is not None:
-            cells.append(fit_to_cell(upper, period_target_w, period_target_h, valign="top", halign="left"))
-        if not cells:
-            return None
-        return combine_vertical(cells, gap=LAYOUT_GAP)
+        rows: List[Image.Image] = []
+        for im in (surface, upper):
+            if im is None:
+                continue
+            target_w = im.width
+            top, bottom = split_top_bottom(im)
+            rows.append(resize_to_width(trim_white_margins(top), target_w))
+            rows.append(resize_to_width(trim_white_margins(bottom), target_w))
+        return rows
 
     # FXJP854(T12/24/36/48)は列4・列5の直下に、他列(1〜3・6列目)とは無関係な
     # 独立した「4段目」として後で別途くっつける(ここでは列に含めない)。
     # そうしないと、列4・5だけがFXJP854の分だけ高くなり、他列がそれに引きずられて
     # 余分な白余白を抱えることになる。
-    col3 = build_period_column("fxfe502", "fxfe5782", surface_pre=ref_surface, upper_pre=fxfe5782_ref)
-    col4 = build_period_column("fxfe504", "fxfe5784", surface_pre=fxfe504_ref)
+    col3_rows = build_period_rows("fxfe502", "fxfe5782", surface_pre=ref_surface, upper_pre=fxfe5782_ref)
+    col4_rows = build_period_rows("fxfe504", "fxfe5784", surface_pre=fxfe504_ref)
     # T72はFXJP854(T=12/24/36/48のみ)に対応する時刻が無いため、FXJP854は付けない。
-    col5 = build_period_column("fxfe507", "fxfe577")
+    col5_rows = build_period_rows("fxfe507", "fxfe577")
+    # T72(col5)はfxfe507/577がfxfe502/5782等と別テンプレート(1コマのみ)のため、
+    # 自然な高さのままだと段の位置が列3・列4よりわずかにずれる。列3の各段の高さに
+    # 厳密に合わせる(幅は列5ネイティブのまま、fill_cellで高さだけ詰める)。
+    if col3_rows:
+        # fill_cellだと日によって列5側が列3より自然な高さで低い場合にキャプション文字
+        # (「T=72」等)が下端で切れてしまう恐れがあるため、fit_to_cell(切り取らず
+        # 縮小してレターボックス)で高さを合わせる。
+        col5_rows = [
+            fit_to_cell(row, row.width, col3_rows[i].height, valign="top") if i < len(col3_rows) else row
+            for i, row in enumerate(col5_rows)
+        ]
+    col3 = combine_vertical(col3_rows, gap=LAYOUT_GAP) if col3_rows else None
+    col4 = combine_vertical(col4_rows, gap=LAYOUT_GAP) if col4_rows else None
+    col5 = combine_vertical(col5_rows, gap=LAYOUT_GAP) if col5_rows else None
 
     # ---- 「天気図1枚」の基準サイズ = 列3の地上天気図(fxfe502)のネイティブサイズ ----
     # 列2はこのサイズのセルに各コマを収める(fit_to_cellで縦横比を保ったままレターボックス)。
@@ -1580,13 +1611,18 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # 下段(500hPa)だけ改めて切り詰める。
     aupq35_lower = trim_white_margins(split_top_bottom(aupq35)[1]) if aupq35 is not None else None
 
+    # 4段それぞれの種類が4列目(col3_rows)と対応するよう並べている:
+    # 0=500hPa系(AXFE578上段 ⇔ FXFE502上段) / 1=地上系(ASAS ⇔ FXFE502下段) /
+    # 2=500hPa気温系(AUPQ35下段 ⇔ FXFE5782上段) / 3=850hPa系(AXFE578下段 ⇔ FXFE5782下段)。
+    # col3_rows(自然な高さ、切り取っていない)の高さに合わせてfill_cellで詰めることで、
+    # 種類の合う段同士が横方向にぴったり並ぶ。
+    col2_items = [axfe578_upper, asas_asia, aupq35_lower, axfe578_lower]
     col2_cells = []
-    for im in (axfe578_upper, asas_asia, aupq35_lower, axfe578_lower):
+    for i, im in enumerate(col2_items):
         if im is None:
             continue
-        # AXFE578上段/下段・ASAS(極東アジア)・AUPQ35下段とも、2列目(aupq_col)と
-        # 同じくfill_cellでセルいっぱいに詰め、余白なく絵柄の位置を揃える。
-        cell = fill_cell(im, col12_w, col12_h, valign="top")
+        target_h = col3_rows[i].height if i < len(col3_rows) else col12_h
+        cell = fill_cell(im, col12_w, target_h, valign="top")
         col2_cells.append(cell)
     col2 = combine_vertical(col2_cells, gap=LAYOUT_GAP) if col2_cells else None
 
@@ -1650,26 +1686,80 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     axjp140_natural = resize_to_width(axjp140, col12_w) if axjp140 is not None else None
     axjp130_natural = resize_to_width(axjp130, col12_w) if axjp130 is not None else None
 
-    # ---- 2列目(aupq_col): 一段目=AUPA20 / AUPQ35(全体) / AUPQ78(全体、分割しない)。
-    # AUPQ35はAXJP140+AXJP130の自然な高さの合計に、AUPQ78はTKAISETUの自然な高さに
-    # それぞれ合わせる(セルいっぱいに拡大する側はfill_cellで詰める)。
+    # ---- 2列目(aupq_col): ヘッダー相当=AUPA20 / 本体=AUPQ35(500hPa・300hPa) / AUPQ78(700hPa・850hPa)。
+    # 「同じ場所が時間経過でどう変わるか」を横に並べて見せるのが目的なので、
+    # 緯度が横一直線に揃うことを優先し、3列目(col3_rows)と同じ段位置に並べ替える:
+    # 段0=AUPQ35下段(500hPa)⇔col3_rows[0](FXFE502上段、500hPa)、段3=AUPQ78下段(850hPa)
+    # ⇔col3_rows[3](FXFE5782下段、850hPa)。対応する段の無いAUPQ35上段(300hPa)・
+    # AUPQ78上段(700hPa)は段1・段2の位置を借りる(意味は異なるが位置だけ揃える)。
+    #
+    # AXFE578/FXFE502は緯度40度線がそれぞれの絵柄の高さに対しておよそ36.6%の位置に
+    # あり(目視測定)、たまたま縦横比が近いため既存のfill_cell/fit_to_cellだけで
+    # ほぼ一致している。一方AUPQ35/AUPQ78(下段)は同じ測り方でおよそ30.7%の位置に
+    # あり、そのままだと緯度がずれる。上に余白を足してこの比率を36.6%に揃えてから
+    # fit_to_cellする(縦横比・絵柄は変えず、位置だけ補正する)。
+    AXFE578_40N_FRACTION = 0.366
+    AUPQ_40N_FRACTION = 0.307
+
+    def pad_top_to_match_latitude(img: Image.Image) -> Image.Image:
+        h = img.height
+        pad = (AXFE578_40N_FRACTION * h - AUPQ_40N_FRACTION * h) / (1 - AXFE578_40N_FRACTION)
+        pad = max(0, int(round(pad)))
+        if pad == 0:
+            return img
+        canvas = Image.new("RGB", (img.width, h + pad), "white")
+        canvas.paste(img, (0, pad))
+        return canvas
+
+    # 緯度合わせの余白(pad_top_to_match_latitude)をそのままresize_to_heightすると、
+    # セル上部に白い余白として残ってしまう。左下(絵柄の南側)を基準に固定したまま
+    # 右上方向へ拡大し、その余白ぶんも絵柄で埋める(fill_cellのbottom/left版)。
+    # 見た目の拡大率はENLARGE_FACTORで調整する(大きいほど北側が多く切れる代わりに
+    # 絵柄が大きく見える)。
+    ENLARGE_FACTOR = 1.0
+
+    def enlarge_bottom_left(img_padded: Image.Image, native_w: int, native_h: int, target_h: int) -> Image.Image:
+        # 余白を含まない場合の自然な幅(=そのままresize_to_heightした場合の幅)を基準に、
+        # ENLARGE_FACTOR倍だけ余分に幅を要求することで、fill_cellが高さ方向にも
+        # 余分に拡大し、南側(下端)を基準に北側(上端)を切り取る形になる。
+        natural_w = max(1, int(round(native_w * target_h / native_h)))
+        target_w = int(round(natural_w * ENLARGE_FACTOR))
+        return fill_cell(img_padded, target_w, target_h, valign="bottom", halign="left")
+
     aupa20_cell = fill_cell(aupa20, col12_w, col12_h, valign="top") if aupa20 is not None else None
-    aupa20_h = aupa20_cell.height if aupa20_cell is not None else 0
 
-    axjp_natural_total_h = sum(
-        im.height for im in (axjp140_natural, axjp130_natural) if im is not None
-    ) + (LAYOUT_GAP if axjp140_natural is not None and axjp130_natural is not None else 0)
-
-    aupq_bottom_cells = []
+    aupq35_upper_trim, aupq35_lower_trim, aupq35_lower_native = (None, None, None)
     if aupq35 is not None:
-        aupq35_h = axjp_natural_total_h if axjp_natural_total_h > 0 else col12_h
-        aupq_bottom_cells.append(fill_cell(aupq35, col12_w, aupq35_h, valign="top"))
+        u, l = split_top_bottom(aupq35)
+        aupq35_upper_trim = trim_white_margins(u)
+        aupq35_lower_native = trim_white_margins(l)
+        aupq35_lower_trim = pad_top_to_match_latitude(aupq35_lower_native)
+    aupq78_upper_trim, aupq78_lower_trim, aupq78_lower_native = (None, None, None)
     if aupq78 is not None:
-        aupq78_h = tkai_natural.height if tkai_natural is not None else col12_h
-        aupq_bottom_cells.append(fill_cell(aupq78, col12_w, aupq78_h, valign="top"))
+        u, l = split_top_bottom(aupq78)
+        aupq78_upper_trim = trim_white_margins(u)
+        aupq78_lower_native = trim_white_margins(l)
+        aupq78_lower_trim = pad_top_to_match_latitude(aupq78_lower_native)
+
+    # 気象庁配信の並び(300hPa→500hPa→700hPa→850hPa、自然順)を優先する。この並びだと
+    # AUPQ35の500hPaはcol3の1番目(FXFE502上段・500hPa VORT)ではなく2番目(地上図)の
+    # 位置に来る(col3の4段はどれもほぼ同じ高さ(誤差5px程度)なので、位置自体はcol3と
+    # 揃う)。
+    aupq_row_sources = [aupq35_upper_trim, aupq35_lower_trim, aupq78_upper_trim, aupq78_lower_trim]
+    aupq_row_natives = [None, aupq35_lower_native, None, aupq78_lower_native]
+    aupq_bottom_cells = []
+    for i, im in enumerate(aupq_row_sources):
+        if im is None:
+            continue
+        target_h = col3_rows[i].height if i < len(col3_rows) else col12_h
+        native = aupq_row_natives[i]
+        if native is not None:
+            aupq_bottom_cells.append(enlarge_bottom_left(im, native.width, native.height, target_h))
+        else:
+            aupq_bottom_cells.append(resize_to_height(im, target_h))
 
     aupq_cells = ([aupa20_cell] if aupa20_cell is not None else []) + aupq_bottom_cells
-    aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP) if aupq_cells else None
+    aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP, halign="left") if aupq_cells else None
 
     # ---- 左端(1列目): 一段目は空白(他列の一段目と同じ高さ)、AXJP140 / AXJP130 / 短期予報解説情報。
     # 3つとも切り取らず自然なサイズのまま並べる(上でAUPQ35/AUPQ78側をこの高さに合わせている)。
