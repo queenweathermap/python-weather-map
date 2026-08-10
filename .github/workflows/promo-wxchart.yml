@@ -48,7 +48,7 @@ jobs:
       # ------------------------------------------------------------
       # X（climate-akita と同じアカウント）
       # ------------------------------------------------------------
-      X_ENABLE: "1"
+      X_ENABLE: "0"  # Xの有料枠を使わないため無効化
       X_API_KEY: ${{ secrets.X_API_KEY }}
       X_API_SECRET: ${{ secrets.X_API_SECRET }}
       X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
