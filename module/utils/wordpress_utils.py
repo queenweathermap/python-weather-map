@@ -98,21 +98,49 @@ def get_or_create_tag(name: str) -> int:
     return r.json()["id"]
 
 
-def create_post(title: str, content_html: str, *, tag_ids: List[int] = (), status: str = "publish") -> dict:
+def get_or_create_category(slug: str, name: str, parent: int = 0) -> int:
+    """
+    /categories をslugで検索し、無ければ作成してIDを返す。失敗時は例外を投げる。
+    """
+    r = requests.get(
+        f"{WP_API_BASE}/categories",
+        auth=_auth(),
+        params={"slug": slug},
+        timeout=30,
+    )
+    r.raise_for_status()
+    results = r.json()
+    if results:
+        return results[0]["id"]
+
+    r = requests.post(
+        f"{WP_API_BASE}/categories",
+        auth=_auth(),
+        json={"name": name, "slug": slug, "parent": parent},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()["id"]
+
+
+def create_post(
+    title: str, content_html: str, *,
+    tag_ids: List[int] = (), category_ids: List[int] = (), status: str = "publish",
+) -> dict:
     """
     /posts に記事を作成する。失敗時は例外を投げる。
+    category_ids を省略/空のままだと WordPress既定の「未分類」になる。
     """
-    r = requests.post(
-        f"{WP_API_BASE}/posts",
-        auth=_auth(),
-        json={
-            "title": title,
-            "content": content_html,
-            "status": status,
-            "tags": list(tag_ids),
-        },
-        timeout=60,
-    )
+    payload = {
+        "title": title,
+        "content": content_html,
+        "status": status,
+        "tags": list(tag_ids),
+    }
+    if category_ids:
+        payload["categories"] = list(category_ids)
+
+    r = requests.post(f"{WP_API_BASE}/posts", auth=_auth(), json=payload, timeout=60)
     r.raise_for_status()
     return r.json()
 
@@ -123,6 +151,9 @@ def post_climate_article(
     description: str,
     *,
     tags: List[str] = (),
+    category_slug: str = "",
+    parent_category_slug: str = "climate",
+    parent_category_name: str = "Climate",
 ) -> str:
     """
     気象まとめ記事をWordPressに投稿する高レベル関数。
@@ -130,6 +161,9 @@ def post_climate_article(
     images: [(png_bytes, filename), ...]  本文にこの順で並ぶ画像として埋め込む（アイキャッチは設定しない）。
     description: 本文の <p> とすべての画像の alt に使う説明文。
     tags: 記事に付けるタグ名のリスト（既存タグを検索し、無ければ自動作成）。
+    category_slug: 記事を紐付けるカテゴリーのslug（例: "sendai"）。
+        親カテゴリー(既定 "climate"/"Climate")の子として検索し、無ければ作成する。
+        空文字なら未分類のままにする。
 
     成功時は投稿URL、失敗時（無効化含む）は "" を返す。
     ここで例外は握りつぶし、呼び出し元のDiscord/SNS配信を止めない。
@@ -156,7 +190,15 @@ def post_climate_article(
             except Exception as e:
                 print(f"[WARN] WordPressタグ解決失敗（{name}）: {e}")
 
-        post = create_post(title, content_html, tag_ids=tag_ids, status="publish")
+        category_ids = []
+        if category_slug:
+            try:
+                parent_id = get_or_create_category(parent_category_slug, parent_category_name, parent=0)
+                category_ids.append(get_or_create_category(category_slug, category_slug, parent=parent_id))
+            except Exception as e:
+                print(f"[WARN] WordPressカテゴリー解決失敗（{category_slug}）: {e}")
+
+        post = create_post(title, content_html, tag_ids=tag_ids, category_ids=category_ids, status="publish")
         url = post.get("link", "")
         print(f"[OK] WordPress posted: {url}")
         return url

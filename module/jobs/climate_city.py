@@ -148,6 +148,7 @@ def main(city_key: str) -> None:
         [(daylength_png, "daylength.png"), (climate_png, "climate.png")],
         wp_description,
         tags=wp_tags,
+        category_slug=city_key,
     )
 
     # --- SNS。Discordは秋田専用のため投稿しない。 ---
