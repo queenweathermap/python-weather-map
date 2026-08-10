@@ -1,13 +1,13 @@
-name: Run Climate Fukuoka
+name: Run Climate Sendai
 
 on:
   schedule:
-    # GitHub Actions の cron は UTC。JST 01:15 に投稿したい（climate-akita の15分後）。
-    #   16日 01:15 JST = 15日 16:15 UTC
-    #   1日  01:15 JST = 前月末日 16:15 UTC（末日は月で変わるため 28-31 を広めに指定し、
+    # GitHub Actions の cron は UTC。JST 01:20 に投稿したい（climate-akita の20分後）。
+    #   16日 01:20 JST = 15日 16:20 UTC
+    #   1日  01:20 JST = 前月末日 16:20 UTC（末日は月で変わるため 28-31 を広めに指定し、
     #                    実際に JST 1日/16日でない起動は本体スクリプト側でゲートして即終了）
-    - cron: "15 16 15 * *"
-    - cron: "15 16 28,29,30,31 * *"
+    - cron: "20 16 15 * *"
+    - cron: "20 16 28,29,30,31 * *"
 
   workflow_dispatch:
     inputs:
@@ -73,7 +73,7 @@ jobs:
       INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
 
       # ------------------------------------------------------------
-      # R2（Threads公開URL用。climate-akita とは別prefixで分離）
+      # R2（Threads公開URL用。他都市とは別prefixで分離）
       # ------------------------------------------------------------
       R2_ENABLE: "1"
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -81,7 +81,7 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
-      R2_PREFIX: "climate-fukuoka"
+      R2_PREFIX: "climate-sendai"
       R2_RETENTION_DAYS: "30"
       R2_CLEANUP_DRY_RUN: "0"
 
@@ -105,9 +105,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pandas lxml matplotlib boto3 astral tzdata pillow tweepy
 
-      - name: Run Climate Fukuoka (2枚まとめ投稿)
+      - name: Run Climate Sendai (WordPress投稿＋SNSはブログ誘導)
         run: |
-          python scripts/climate_fukuoka.py
+          python scripts/climate_sendai.py
 
       - name: Cleanup old R2 objects
         if: always()

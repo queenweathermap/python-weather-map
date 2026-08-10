@@ -112,8 +112,12 @@ def draw_clock(ax, cx, cy, r, sr_h, ss_h, *, daylen_str=None, daylen_fs=6.0, tic
                 fontsize=daylen_fs, color="#333", zorder=4)
 
 
-def draw_map(ax, highlight_pref: str = "秋田県"):
-    """日本地図（highlight_pref を強調。省略時は秋田県）。GeoJSON が無ければ静かにスキップ。"""
+def draw_map(ax, highlight_pref: str = "秋田県", *, xlim=(128, 146), ylim=(30, 46)):
+    """
+    日本地図（highlight_pref を強調。省略時は秋田県）。GeoJSON が無ければ静かにスキップ。
+    xlim/ylim: 既定は本州〜九州が収まる範囲。沖縄県のように範囲外の地域を
+    強調する場合は、その地域が収まる範囲を明示的に渡す。
+    """
     if not os.path.exists(GEOJSON_PATH):
         print(f"[WARN] geojson 無し: {GEOJSON_PATH}（地図スキップ）")
         ax.axis("off")
@@ -131,8 +135,8 @@ def draw_map(ax, highlight_pref: str = "秋田県"):
                 ys = [p[1] for p in outer]
                 ax.fill(xs, ys, facecolor=fc, edgecolor="#a5a5a5", linewidth=0.3,
                         zorder=(3 if akita else 1))
-        ax.set_xlim(128, 146)
-        ax.set_ylim(30, 46)
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
         ax.set_aspect(1.0 / math.cos(math.radians(38)))  # 緯度補正
     except Exception as e:
         print(f"[WARN] 地図描画失敗: {e}")
@@ -145,8 +149,13 @@ def draw_map(ax, highlight_pref: str = "秋田県"):
 def build_figure(
     year: int, month: int, start_day: int, end_day: int,
     *, city_label: str = "秋田県", observer=OBS, highlight_pref: str = "秋田県",
+    map_xlim=(128, 146), map_ylim=(30, 46),
 ) -> bytes:
-    """city_label/observer/highlight_pref を省略すると従来通り秋田県版になる。"""
+    """
+    city_label/observer/highlight_pref を省略すると従来通り秋田県版になる。
+    map_xlim/map_ylim: 地図の表示範囲。沖縄県など既定範囲(本州〜九州)に
+    収まらない地域を強調する場合に指定する。
+    """
     _setup_japanese_font()
 
     days = [date(year, month, d) for d in range(start_day, end_day + 1)]
@@ -219,7 +228,7 @@ def build_figure(
 
     # 右上: 日本地図
     ax_map = fig.add_axes([0.775, 0.50, 0.215, 0.45])
-    draw_map(ax_map, highlight_pref)
+    draw_map(ax_map, highlight_pref, xlim=map_xlim, ylim=map_ylim)
 
     # 右下: 反対側の至の参照円
     ax_ref = fig.add_axes([0.775, 0.06, 0.215, 0.40])
