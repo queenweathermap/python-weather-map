@@ -140,15 +140,19 @@ def main(city_key: str) -> None:
     alt_cli = f"{station_names} 過去3年 {elem_phrase} 比較 {span}"
 
     # --- WordPress（本文記事: 昼の長さ＋気温の2枚＋説明文。アイキャッチは設定しない） ---
-    wp_title = f"{now_jst():%Y年%m月%d日} 日の出・日の入りと気温の推移（{cfg['label']}）"
+    wp_title = f"{month}月{half}日の出・日の入りと気温の推移（{cfg['label']}）"
     wp_description = f"{cfg['label']}（{station_names}）の日の出・日の入りと、過去3年間の最高・最低気温の推移です。"
     wp_tags = [city_key.capitalize(), "日の出", "日の入", "気温の推移"]
+    # タイトルが日本語のみだとWordPressの自動スラッグ生成で数字だけの読みにくいURLに
+    # なりやすいため、半角英数字のスラッグを明示的に指定する（例: tokyo-20260801）。
+    wp_slug = f"{city_key}-{year}{month:02d}{start_day:02d}"
     wp_url = post_climate_article(
         wp_title,
         [(daylength_png, "daylength.png"), (climate_png, "climate.png")],
         wp_description,
         tags=wp_tags,
         category_slug=city_key,
+        slug=wp_slug,
     )
 
     # --- SNS。Discordは秋田専用のため投稿しない。 ---

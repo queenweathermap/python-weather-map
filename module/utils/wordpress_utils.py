@@ -125,11 +125,13 @@ def get_or_create_category(slug: str, name: str, parent: int = 0) -> int:
 
 def create_post(
     title: str, content_html: str, *,
-    tag_ids: List[int] = (), category_ids: List[int] = (), status: str = "publish",
+    tag_ids: List[int] = (), category_ids: List[int] = (), slug: str = "", status: str = "publish",
 ) -> dict:
     """
     /posts に記事を作成する。失敗時は例外を投げる。
     category_ids を省略/空のままだと WordPress既定の「未分類」になる。
+    slug を省略すると、日本語タイトルから自動生成される（数字だけの読みにくいスラッグに
+    なりがちなので、呼び出し側で半角英数字のslugを指定することを推奨）。
     """
     payload = {
         "title": title,
@@ -139,10 +141,20 @@ def create_post(
     }
     if category_ids:
         payload["categories"] = list(category_ids)
+    if slug:
+        payload["slug"] = slug
 
     r = requests.post(f"{WP_API_BASE}/posts", auth=_auth(), json=payload, timeout=60)
     r.raise_for_status()
     return r.json()
+
+
+def _err_detail(e: Exception) -> str:
+    """例外にHTTPレスポンスが紐付いていれば本文も添えて返す（診断用）。"""
+    resp = getattr(e, "response", None)
+    if resp is not None:
+        return f"{e} / body={resp.text[:500]}"
+    return str(e)
 
 
 def post_climate_article(
@@ -154,6 +166,7 @@ def post_climate_article(
     category_slug: str = "",
     parent_category_slug: str = "climate",
     parent_category_name: str = "Climate",
+    slug: str = "",
 ) -> str:
     """
     気象まとめ記事をWordPressに投稿する高レベル関数。
@@ -164,6 +177,7 @@ def post_climate_article(
     category_slug: 記事を紐付けるカテゴリーのslug（例: "sendai"）。
         親カテゴリー(既定 "climate"/"Climate")の子として検索し、無ければ作成する。
         空文字なら未分類のままにする。
+    slug: 投稿のURLスラッグ（半角英数字推奨）。省略するとタイトルから自動生成される。
 
     成功時は投稿URL、失敗時（無効化含む）は "" を返す。
     ここで例外は握りつぶし、呼び出し元のDiscord/SNS配信を止めない。
@@ -188,7 +202,7 @@ def post_climate_article(
             try:
                 tag_ids.append(get_or_create_tag(name))
             except Exception as e:
-                print(f"[WARN] WordPressタグ解決失敗（{name}）: {e}")
+                print(f"[WARN] WordPressタグ解決失敗（{name}）: {_err_detail(e)}")
 
         category_ids = []
         if category_slug:
@@ -196,12 +210,14 @@ def post_climate_article(
                 parent_id = get_or_create_category(parent_category_slug, parent_category_name, parent=0)
                 category_ids.append(get_or_create_category(category_slug, category_slug, parent=parent_id))
             except Exception as e:
-                print(f"[WARN] WordPressカテゴリー解決失敗（{category_slug}）: {e}")
+                print(f"[WARN] WordPressカテゴリー解決失敗（{category_slug}）: {_err_detail(e)}")
 
-        post = create_post(title, content_html, tag_ids=tag_ids, category_ids=category_ids, status="publish")
+        post = create_post(
+            title, content_html, tag_ids=tag_ids, category_ids=category_ids, slug=slug, status="publish",
+        )
         url = post.get("link", "")
-        print(f"[OK] WordPress posted: {url}")
+        print(f"[OK] WordPress posted: {url} (categories={category_ids}, tags={tag_ids})")
         return url
     except Exception as e:
-        print(f"[ERR] WordPress post failed: {e}")
+        print(f"[ERR] WordPress post failed: {_err_detail(e)}")
         return ""
