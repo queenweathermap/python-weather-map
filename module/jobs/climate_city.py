@@ -139,14 +139,15 @@ def main(city_key: str) -> None:
     alt_day = f"{cfg['label']} 日の出・日の入り・昼の長さ {span}"
     alt_cli = f"{station_names} 過去3年 {elem_phrase} 比較 {span}"
 
-    # --- WordPress（本文記事: 昼の長さ＋気温の2枚＋説明文。気温グラフをアイキャッチに） ---
+    # --- WordPress（本文記事: 昼の長さ＋気温の2枚＋説明文。アイキャッチは設定しない） ---
     wp_title = f"{now_jst():%Y年%m月%d日} 日の出・日の入りと気温の推移（{cfg['label']}）"
     wp_description = f"{cfg['label']}（{station_names}）の日の出・日の入りと、過去3年間の最高・最低気温の推移です。"
+    wp_tags = [city_key.capitalize(), "日の出", "日の入", "気温の推移"]
     wp_url = post_climate_article(
         wp_title,
         [(daylength_png, "daylength.png"), (climate_png, "climate.png")],
         wp_description,
-        featured_index=1,
+        tags=wp_tags,
     )
 
     # --- SNS。Discordは秋田専用のため投稿しない。 ---
