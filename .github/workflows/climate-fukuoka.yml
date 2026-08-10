@@ -49,14 +49,6 @@ jobs:
       BLUESKY_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
       BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
 
-      # ------------------------------------------------------------
-      # X（climate-akita と同じアカウント）: tweepy でメディア付き投稿
-      # ------------------------------------------------------------
-      X_ENABLE: "0"  # Xの有料枠を使わないため無効化
-      X_API_KEY: ${{ secrets.X_API_KEY }}
-      X_API_SECRET: ${{ secrets.X_API_SECRET }}
-      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-      X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
 
       # ------------------------------------------------------------
       # Threads（climate-akita と同じアカウント）: 画像は公開URL(R2)から取得される
@@ -103,7 +95,7 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas lxml matplotlib boto3 astral tzdata pillow tweepy
+          pip install requests pandas lxml matplotlib boto3 astral tzdata pillow
 
       - name: Run Climate Fukuoka (2枚まとめ投稿)
         run: |

@@ -26,7 +26,7 @@ from module.jobs.weather_map import (
     jma_source_caption,
     make_discord_thumbnail,
 )
-from module.utils.sns_utils import post_bluesky, post_threads, post_x
+from module.utils.sns_utils import post_bluesky, post_threads
 from scripts.emagram_discord import (
     STATIONS as EMAGRAM_STATIONS,
     append_caption_bar,
@@ -130,7 +130,6 @@ def main() -> None:
         )
 
         post_bluesky(text=caption, images=images)
-        post_x(text=caption, images=images)
         post_threads(text=caption, images=images, r2_upload=upload_r2)
 
         print("=== Done ===")

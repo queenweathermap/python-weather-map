@@ -4,14 +4,14 @@
 #
 # SNS 自動投稿ユーティリティ（複数画像対応 = 1投稿に複数枚）
 #   ・Bluesky（AT Protocol / 無料）      : embed.images に最大4枚
-#   ・X（従量課金）                       : media_ids に最大4枚
 #   ・Threads（Meta / 無料）             : 1枚=単一投稿 / 2枚以上=カルーセル
 #
 # 画像は images=[(png_bytes, alt), ...] の形で渡す。
 #
+# X（旧Twitter）は有料枠を使わないため対応を廃止した。
+#
 # 必要な環境変数（GitHub Actions secrets 推奨）:
 #   Bluesky : BLUESKY_ENABLE / BLUESKY_HANDLE / BLUESKY_APP_PASSWORD
-#   X       : X_ENABLE / X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_SECRET
 #   Threads : THREADS_ENABLE / THREADS_USER_ID / THREADS_ACCESS_TOKEN
 # =============================================================================
 
@@ -184,58 +184,6 @@ def post_bluesky(*, text: str, images: List[Image_]) -> bool:
         return True
     except Exception as e:
         print(f"[ERR] Bluesky post failed: {e}")
-        return False
-
-
-# =============================================================================
-# X (旧Twitter) ※2026-02以降は従量課金。tweepy で v1.1メディアアップ→v2投稿。
-# =============================================================================
-def x_enabled() -> bool:
-    return (
-        os.environ.get("X_ENABLE", "0").lower() in ("1", "true", "yes", "on")
-        and all(os.environ.get(k, "").strip() for k in
-                ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"))
-    )
-
-
-def post_x(*, text: str, images: List[Image_]) -> bool:
-    """X に画像付きで投稿（最大4枚）。成功で True。"""
-    if not x_enabled():
-        print("[INFO] X 無効（X_ENABLE / キー未設定）")
-        return False
-    try:
-        import tweepy
-    except Exception as e:
-        print(f"[ERR] tweepy 未インストール: {e}")
-        return False
-
-    images = list(images)[:4]
-    api_key = os.environ["X_API_KEY"].strip()
-    api_secret = os.environ["X_API_SECRET"].strip()
-    access_token = os.environ["X_ACCESS_TOKEN"].strip()
-    access_secret = os.environ["X_ACCESS_SECRET"].strip()
-    try:
-        auth = tweepy.OAuth1UserHandler(api_key, api_secret, access_token, access_secret)
-        api = tweepy.API(auth)  # v1.1: メディアアップロード
-        media_ids = []
-        for idx, (png, alt) in enumerate(images):
-            media = api.media_upload(filename=f"post_{idx}.png", file=io.BytesIO(png))
-            if alt:
-                try:
-                    api.create_media_metadata(media.media_id, alt)
-                except Exception as e:
-                    print(f"[WARN] X alt設定失敗: {e}")
-            media_ids.append(media.media_id)
-
-        client = tweepy.Client(
-            consumer_key=api_key, consumer_secret=api_secret,
-            access_token=access_token, access_token_secret=access_secret,
-        )  # v2: 投稿作成
-        client.create_tweet(text=text[:280], media_ids=media_ids)
-        print(f"[OK] X posted ({len(media_ids)} images)")
-        return True
-    except Exception as e:
-        print(f"[ERR] X post failed: {e}")
         return False
 
 
