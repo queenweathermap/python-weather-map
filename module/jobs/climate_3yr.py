@@ -366,12 +366,6 @@ def build_figure(
             ax.set_xticks(days)
             ax.tick_params(labelsize=8)
 
-    # 凡例（右上に一括）
-    handles = [plt.Line2D([0], [0], color=YEAR_COLORS[i % len(YEAR_COLORS)], lw=3)
-               for i in range(n_years)]
-    labels = [str(y) for y in comparison_years]
-    fig.legend(handles, labels, loc="upper right", ncol=n_years, frameon=False, fontsize=10)
-
     elem_names = {"tmax": "最高気温", "tmin": "最低気温", "snow": "最深積雪"}
     subtitle_elems = "・".join(elem_names[k] for k, _t in elements)
     fig.suptitle(
@@ -380,7 +374,15 @@ def build_figure(
         f" ／ {subtitle_elems}",
         fontsize=13,
     )
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+
+    # 凡例（タイトルの下・グラフの上に右寄せ。タイトルと重ならないよう
+    # bbox_to_anchorで明示的に少し下げた位置に固定する）
+    handles = [plt.Line2D([0], [0], color=YEAR_COLORS[i % len(YEAR_COLORS)], lw=3)
+               for i in range(n_years)]
+    labels = [str(y) for y in comparison_years]
+    fig.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.99, 0.965),
+               ncol=n_years, frameon=False, fontsize=10)
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=140)
