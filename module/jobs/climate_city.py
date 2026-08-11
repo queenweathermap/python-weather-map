@@ -110,7 +110,7 @@ CITY_CONFIGS = {
 }
 
 # SNS(Bluesky/X/Threads/Instagram)は東京の投稿1本にまとめ、他都市はそこで紹介するだけにする。
-NOTE_URL = "https://wx-chart.com/note"
+NOTE_URL = "https://wx-chart.com/note-tokyo"
 SNS_CITY_KEY = "tokyo"
 
 
