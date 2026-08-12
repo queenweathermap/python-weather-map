@@ -1658,6 +1658,11 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         if col is None:
             return None
         target_w = col.width
+        # 広域版(ASAS_MONO等)はPDF自体に左右の白余白があり、そのままだと
+        # halign="left"で揃えても絵柄の左端がFXFE502/FXJP854のT12側と揃わない。
+        # 先に切り詰めておく(観測点名等の枠は無いシンプルな広域図なので、
+        # AXJP140等と違って全体をそのまま切り詰めて問題ない)。
+        wide_img = trim_white_margins(wide_img) if wide_img is not None else None
 
         # 日本周辺白黒版はすべて同じサイズ(header_h×NEAR_MONO_BADGE_SCALE)に揃える。
         # 広域版と並ぶ場合はその分だけ広域版を小さくし、単独の場合もこれより大きくしない。
@@ -1675,7 +1680,9 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         x = 0
         if wide_img is not None:
             wide_target_w = max(1, target_w - badge_w)
-            wide_cell = fit_to_cell(wide_img, wide_target_w, header_h, valign="top")
+            # halign="left"でスロット内の中央寄せをやめ、絵柄の左端をスロットの
+            # 左端(=列の左端、FXFE502のT12側・FXJP854のT12側と共通)にきっちり揃える。
+            wide_cell = fit_to_cell(wide_img, wide_target_w, header_h, valign="top", halign="left")
             header.paste(wide_cell, (0, 0))
             x = wide_cell.width
         if badge_cell is not None:
@@ -1757,8 +1764,6 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         target_w = int(round(natural_w * ENLARGE_FACTOR))
         return fill_cell(img_padded, target_w, target_h, valign="bottom", halign="left")
 
-    aupa20_cell = fill_cell(aupa20, col12_w, col12_h, valign="top") if aupa20 is not None else None
-
     aupq35_upper_trim, aupq35_lower_trim, aupq35_lower_native = (None, None, None)
     if aupq35 is not None:
         u, l = split_top_bottom(aupq35)
@@ -1785,9 +1790,23 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         target_h = col3_rows[i].height if i < len(col3_rows) else col12_h
         native = aupq_row_natives[i]
         if native is not None:
-            aupq_bottom_cells.append(enlarge_bottom_left(im, native.width, native.height, target_h))
+            cell = enlarge_bottom_left(im, native.width, native.height, target_h)
         else:
-            aupq_bottom_cells.append(resize_to_height(im, target_h))
+            cell = resize_to_height(im, target_h)
+        aupq_bottom_cells.append(cell)
+
+    # AUPA20はAUPQ35(300hPa・500hPa)と左右端を揃える。300hPaは自然な幅のまま
+    # (resize_to_height)なので500hPa側より広いことがあり、その場合も足りなく
+    # ならないよう、AUPQ35側2枚(aupq_bottom_cellsの先頭2つ)の最大幅に合わせる。
+    # 幅を広げる分、縦横比を保ったまま拡大すると高さがheader_hを超えるため、
+    # 下端(=AUPQ35との境目)を基準に上側を切り詰める(fill_cellのbottom版)。
+    aupq35_widths = [c.width for c in aupq_bottom_cells[:2]]
+    aupa20_target_w = max(aupq35_widths) if aupq35_widths else col12_w
+    aupa20_cell = (
+        fill_cell(aupa20, aupa20_target_w, col12_h, valign="bottom", halign="left")
+        if aupa20 is not None
+        else None
+    )
 
     aupq_cells = ([aupa20_cell] if aupa20_cell is not None else []) + aupq_bottom_cells
     aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP, halign="left") if aupq_cells else None
