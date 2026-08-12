@@ -333,7 +333,7 @@ def build_content(dt_jst: datetime, urls: List[str]) -> str:
         f"🔗 [気象庁 ウィンドプロファイラ（地点別）](<{PORTAL_URL}>)",
     ]
     for label, url in zip(GROUP_LABELS, urls):
-        lines.append(f"**[📥高解像度PNG {label} をダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)**")
+        lines.append(f"[📥高解像度PNG {label} をダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)")
     return "\n".join(lines)
 
 

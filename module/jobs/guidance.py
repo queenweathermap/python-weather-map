@@ -1175,7 +1175,7 @@ def main():
             if url:
                 content = (
                     f"**MSM 時別ガイダンス {day_label}（秋田県全地点）**\n"
-                    f"**[📥高解像度PNGをダウンロード（{retention}日間有効）](<{url}>)**"
+                    f"[📥高解像度PNGをダウンロード（{retention}日間有効）](<{url}>)"
                 )
                 thumb_name = fname.replace(".png", "_thumb.jpg")
                 _post_msm_r2(data, thumb_name, content)
