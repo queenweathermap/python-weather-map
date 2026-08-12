@@ -1000,6 +1000,7 @@ def jma_source_caption(dt_utc: datetime) -> str:
     return (
         f"作成日時: {dt_utc.strftime('%Y年%m月%d日 %H:%M')} UTC"
         "　出典: 気象庁ホームページ（気象庁提供の情報を編集・加工して作成）"
+        "　https://www.jma.go.jp/jma/kishou/know/expert/"
         "　作成: WxChart Premium"
     )
 
