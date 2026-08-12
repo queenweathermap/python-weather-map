@@ -996,12 +996,10 @@ def append_caption_bar(
     return canvas
 
 
-def jma_source_caption(dt_utc: datetime) -> str:
+def jma_source_caption() -> str:
     return (
-        f"作成日時: {dt_utc.strftime('%Y年%m月%d日 %H:%M')} UTC"
-        "　出典: 気象庁ホームページ（気象庁提供の情報を編集・加工して作成）"
-        "　https://www.jma.go.jp/jma/kishou/know/expert/"
-        "　作成: WxChart Premium"
+        "出典：気象庁　https://www.jma.go.jp/jma/kishou/know/expert/"
+        "　提供資料を合成編集　作成：WxChart Premium"
     )
 
 
@@ -1170,11 +1168,7 @@ def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
     if canvas is None:
         return None
 
-    # 週間4列結合はSKAISETU等の更新(JST 10時頃)を待って正午に1日1回作成するだけで、
-    # 天気図ダッシュボードのような00Z/12Z発表サイクルが無いため、作成日時には
-    # (発表時刻ではなく)実際の作成時刻をそのまま使う。
-    now_utc = datetime.now(timezone.utc)
-    caption = jma_source_caption(now_utc)
+    caption = jma_source_caption()
     canvas = append_caption_bar(canvas, caption)
 
     return pil_to_attachment(canvas, "LAYOUT_4_WEEKLY")
@@ -1889,8 +1883,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
 
     final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=20)
     final_canvas = trim_right_whitespace(final_canvas, right_pad=20)
-    issue_dt_utc = issue_dt_jst - timedelta(hours=9)
-    caption = jma_source_caption(issue_dt_utc)
+    caption = jma_source_caption()
     final_canvas = append_caption_bar(final_canvas, caption)
     return pil_to_attachment(final_canvas, "DASHBOARD_JMA_DIRECT")
 
@@ -2346,7 +2339,7 @@ def main_dashboard_jma() -> None:
                 if os.path.exists(src_path):
                     thumb_path, thumb_mime = make_discord_thumbnail(
                         src_path,
-                        caption_text=jma_source_caption(issue_dt_jst - timedelta(hours=9)),
+                        caption_text=jma_source_caption(),
                     )
                     post_discord_file_image(
                         webhook_url=discord_jma_webhook_url(),
@@ -2449,7 +2442,7 @@ def main_layout4() -> None:
                 if os.path.exists(src_path):
                     thumb_path, thumb_mime = make_discord_thumbnail(
                         src_path,
-                        caption_text=jma_source_caption(datetime.now(timezone.utc)),
+                        caption_text=jma_source_caption(),
                     )
                     post_discord_file_image(
                         webhook_url=discord_jma_webhook_url(),
