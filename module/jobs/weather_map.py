@@ -1510,10 +1510,11 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # (T=72のfxfe507/fxfe577は1コマのみのPDFで、T12/24を並べたfxfe502等より幅が狭い。
     #  列ごとに幅が違ってよく、無理に他列と同じ幅に揃えると余白だらけになる)
     ref_surface = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe502", cycle))
-    # FXJP854の幅合わせの基準として、列4(FXFE5782)・列5(FXFE504)の絵柄部分を先に取得しておく
+    # FXJP854の幅合わせの基準として、列4(FXFE5782)・列5(FXFE5784)の絵柄部分を先に取得しておく
     # (build_period_columnの中で改めて取得されるが、ここでは絵柄の左位置・幅を測るためだけに使う)。
     fxfe5782_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe5782", cycle))
     fxfe504_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe504", cycle))
+    fxfe5784_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe5784", cycle))
 
     fxjp854_page = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxjp854", cycle))
     if fxjp854_page is None:
@@ -1521,31 +1522,23 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         fxjp854_upper, fxjp854_lower = None, None
     else:
         fxjp854_upper, fxjp854_lower = split_top_bottom(fxjp854_page)
-        # FXJP854自身の白余白を切り詰めてから、列4(FXFE5782)・列5(FXFE504)の
-        # 絵柄部分(左位置・幅)に合わせて配置する。これにより、セルの大きさだけでなく
-        # 実際の絵柄の左端・幅も揃う(切り詰め前は自身の余白が残った分だけ縮小率が
-        # 小さくなり、絵柄がFXFE5782/FXFE504より少しはみ出て見えていた)。
+        # FXJP854自身の白余白を切り詰めてから、列4(FXFE5782)・列5(FXFE5784)の
+        # 幅いっぱいに引き伸ばす。col3/col4の各段(build_period_rows)も同じく
+        # 「トリミング→列のネイティブ幅まで引き伸ばす」方式(余白ゼロで絵柄が
+        # 列幅いっぱいに広がる)で作っているため、同じ方式にしないと列側は余白ゼロ・
+        # FXJP854側だけ絵柄が縮こまって左右に余白が残る、という不一致が起きる。
         fxjp854_upper = trim_white_margins(fxjp854_upper)
         fxjp854_lower = trim_white_margins(fxjp854_lower)
 
-        fxjp_target_w = ref_surface.width if ref_surface is not None else fxjp854_upper.width
-        fxjp_target_h = ref_surface.height if ref_surface is not None else fxjp854_upper.height
-
         def fit_fxjp854_half(img: Image.Image, ref_img: Optional[Image.Image]) -> Image.Image:
-            if ref_img is None:
-                return resize_to_width(img, fxjp_target_w)
-            left, _, right, _ = content_bbox(ref_img)
-            scale = min(fxjp_target_w / ref_img.width, fxjp_target_h / ref_img.height)
-            content_w = max(1, int((right - left + 1) * scale))
-            left_scaled = int(left * scale)
-            scaled = resize_to_width(img, content_w)
-            canvas = Image.new("RGB", (fxjp_target_w, scaled.height), "white")
-            canvas.paste(scaled, (min(left_scaled, fxjp_target_w - scaled.width), 0))
-            return canvas
+            target_w = ref_img.width if ref_img is not None else (
+                ref_surface.width if ref_surface is not None else img.width
+            )
+            return resize_to_width(img, target_w)
 
-        # 上段(T12/24)はFXFE5782(列4)、下段(T36/48)はFXFE504(列5)の絵柄幅・左位置に合わせる。
+        # 上段(T12/24)はFXFE5782(列4)、下段(T36/48)はFXFE5784(列5)の列幅に合わせる。
         fxjp854_upper = fit_fxjp854_half(fxjp854_upper, fxfe5782_ref)
-        fxjp854_lower = fit_fxjp854_half(fxjp854_lower, fxfe504_ref)
+        fxjp854_lower = fit_fxjp854_half(fxjp854_lower, fxfe5784_ref)
 
     # 列3・4・5は同じ種類のパネル(地上天気図・上層天気図)。FXFE507/577(T72)は
     # T12/24等を並べたfxfe502等よりネイティブ幅が狭い(1コマのみのPDFのため)が、
@@ -1586,7 +1579,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # そうしないと、列4・5だけがFXJP854の分だけ高くなり、他列がそれに引きずられて
     # 余分な白余白を抱えることになる。
     col3_rows = build_period_rows("fxfe502", "fxfe5782", surface_pre=ref_surface, upper_pre=fxfe5782_ref)
-    col4_rows = build_period_rows("fxfe504", "fxfe5784", surface_pre=fxfe504_ref)
+    col4_rows = build_period_rows("fxfe504", "fxfe5784", surface_pre=fxfe504_ref, upper_pre=fxfe5784_ref)
     # T72はFXJP854(T=12/24/36/48のみ)に対応する時刻が無いため、FXJP854は付けない。
     col5_rows = build_period_rows("fxfe507", "fxfe577")
     # T72(col5)はfxfe507/577がfxfe502/5782等と別テンプレート(1コマのみ)のため、
