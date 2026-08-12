@@ -415,7 +415,8 @@ def post_discord(png: bytes, title: str, r2_url: str = "") -> None:
 
     content = title
     if r2_url:
-        content += f"\n**[★高解像度PNGを表示](<{r2_url}>)**"
+        retention = os.environ.get("R2_RETENTION_DAYS", "30")
+        content += f"\n**[★高解像度PNGをダウンロード（{retention}日間有効）](<{r2_url}>)**"
 
     import json
     payload = {"content": content[:1900], "allowed_mentions": {"parse": []}, "flags": 4}

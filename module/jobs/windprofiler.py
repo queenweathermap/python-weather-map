@@ -330,7 +330,7 @@ def make_thumbnail(img_bytes: bytes, dt_jst: datetime, *, baked_font_size: int =
 def build_content(dt_jst: datetime, urls: List[str]) -> str:
     lines = [f"🌀 **ウィンドプロファイラ（高層風） / {dt_jst.strftime('%Y-%m-%d %H:%M')} JST**"]
     for label, url in zip(GROUP_LABELS, urls):
-        lines.append(f"**[★高解像度PNG {label} を表示](<{url}>)**")
+        lines.append(f"**[★高解像度PNG {label} をダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)**")
     lines.append(f"🔗 [気象庁 ウィンドプロファイラ（地点別）](<{PORTAL_URL}>)")
     return "\n".join(lines)
 

@@ -343,8 +343,8 @@ WYOMING_PORTAL_URL = "https://weather.arcc.uwyo.edu/upperair/"
 def build_content(dt: datetime, highres_url: str) -> str:
     return (
         f"🌡️ **エマグラム / {dt.strftime('%Y-%m-%d %H')}Z**\n"
-        f"**[★高解像度PNG（R2 / {R2_RETENTION_DAYS}日保存）を表示](<{highres_url}>)**\n"
-        f"🔗 [University of Wyoming 高層観測アーカイブ](<{WYOMING_PORTAL_URL}>)"
+        f"🔗 [University of Wyoming 高層観測アーカイブ](<{WYOMING_PORTAL_URL}>)\n"
+        f"**[★高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{highres_url}>)**"
     )
 
 

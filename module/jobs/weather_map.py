@@ -2082,7 +2082,7 @@ def notify_discord_images(
                 highres_url = all_urls[idx]
                 content = (
                     f"{init_jst} / {title}\n"
-                    f"**[★高解像度PNG（R2 / 30日保存）を表示](<{highres_url}>)**"
+                    f"**[★高解像度PNGをダウンロード（30日間有効）](<{highres_url}>)**"
                 )
 
                 if os.path.exists(src_path):
@@ -2288,7 +2288,7 @@ def main_dashboard_jma() -> None:
                     title += "\n" + "\n".join(f"・[{t}](<{u}>)" for t, u in extra_links)
                 content = (
                     f"{init_jst} / {title}\n"
-                    f"**[★高解像度PNG（R2 / 30日保存）を表示](<{url}>)**"
+                    f"**[★高解像度PNGをダウンロード（30日間有効）](<{url}>)**"
                 )
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
@@ -2391,7 +2391,7 @@ def main_layout4() -> None:
                     title += "\n" + "\n".join(f"・[{t}](<{u}>)" for t, u in extra_links)
                 content = (
                     f"{init_jst} / {title}\n"
-                    f"**[★高解像度PNG（R2 / 30日保存）を表示](<{url}>)**"
+                    f"**[★高解像度PNGをダウンロード（30日間有効）](<{url}>)**"
                 )
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
