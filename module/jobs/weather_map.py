@@ -1454,13 +1454,28 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # AXJP140は1ページにALONG 140E(上)とALONG 130E(下)の2断面図が
     # 縦に並んでいるので、上下分割してAXJP140/AXJP130として別々に使う。
     # 気象庁からは1枚のPDFとして配信されており、軸ラベル・観測点名など周囲の
-    # 文字情報を含めてそのまま使う(トリミングしない)。
+    # 文字情報を含めて外枠は一切トリミングしない。ただし外枠のさらに外側にある
+    # 純粋な白余白(文字・枠線が何も無い部分)だけは削り、AUPQ78との上端合わせの
+    # ズレを無くす(枠や文字は絶対に切り取らない)。
+    # 左右の余白は分割前(結合ページ全体)の共通の範囲でまとめて切り詰める。
+    # 140E/130Eそれぞれ個別に左右トリミングすると、切り詰め量のわずかな違いで
+    # 実効的な幅が変わり、2つの図の拡大率(=図柄の大きさ)がずれて見えてしまう
+    # ため、左右は共通・上下だけ個別にトリミングする。
     axjp140_raw = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axjp140", cycle))
     if axjp140_raw is None:
         errors.append("DashboardJMA: AXJP140 missing")
         axjp140, axjp130 = None, None
     else:
-        axjp140, axjp130 = split_top_bottom(axjp140_raw)
+        left, _, right, _ = content_bbox(axjp140_raw)
+        axjp140_raw_lr = axjp140_raw.crop((left, 0, right + 1, axjp140_raw.height))
+        axjp140_half, axjp130_half = split_top_bottom(axjp140_raw_lr)
+
+        def _trim_vertical_only(im: Image.Image) -> Image.Image:
+            _, top, _, bottom = content_bbox(im)
+            return im.crop((0, top, im.width, bottom + 1))
+
+        axjp140 = _trim_vertical_only(axjp140_half)
+        axjp130 = _trim_vertical_only(axjp130_half)
 
     aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle))
     if aupa20 is None:
@@ -1679,12 +1694,28 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
 
     # 短期予報解説資料(TKAISETU)・AXJP140・AXJP130はいずれも気象庁配信のPDFページ
     # そのままの外枠(タイトル・軸ラベル・観測点表など)を欠かさず見せたいので、
-    # fill_cell(クロップして詰める)ではなく、幅基準でそのまま縮小するだけ(切り取らない)。
-    # 高さは絵柄なりの自然な値になるため、AUPQ35/AUPQ78側をその高さに合わせる
-    # (用紙サイズが変わっても構わない)。
-    tkai_natural = resize_to_width(tkai, col12_w) if tkai is not None else None
-    axjp140_natural = resize_to_width(axjp140, col12_w) if axjp140 is not None else None
-    axjp130_natural = resize_to_width(axjp130, col12_w) if axjp130 is not None else None
+    # fill_cell(クロップして詰める)ではなく、縦横比を保ったまま拡大縮小するだけ
+    # (切り取らない)。TKAISETUの上端がAUPQ35(300hPa)の上端、下端がAUPQ35(500hPa)
+    # の下端に、AXJP140の上端がAUPQ78(700hPa)の上端に、AXJP130の下端がAUPQ78
+    # (850hPa)の下端にそれぞれ揃うよう、col3_rows(段の高さ)から算出した高さに
+    # 合わせて拡大する(resize_to_height、切り取りなし)。
+    tkai_target_h = (
+        col3_rows[0].height + LAYOUT_GAP + col3_rows[1].height if len(col3_rows) > 1 else col12_h
+    )
+    axjp130_target_h = col3_rows[3].height if len(col3_rows) > 3 else col12_h
+    tkai_natural = resize_to_height(tkai, tkai_target_h) if tkai is not None else None
+    axjp130_natural = resize_to_height(axjp130, axjp130_target_h) if axjp130 is not None else None
+    # AXJP140は140E/130Eの図柄の大きさ(拡大率)がAXJP130と揃うよう、AXJP130と
+    # 同じ縮尺(scale)で拡大する(col3_rows[2]には個別に合わせない)。
+    # 左右トリミングを共通化済み(幅が同じ)なので、縮尺を揃えれば図柄の大きさも揃う。
+    if axjp140 is not None and axjp130 is not None and axjp130.height > 0:
+        axjp140_scale = axjp130_target_h / axjp130.height
+        axjp140_natural = axjp140.resize(
+            (max(1, round(axjp140.width * axjp140_scale)), max(1, round(axjp140.height * axjp140_scale))),
+            Image.LANCZOS,
+        )
+    else:
+        axjp140_natural = None
 
     # ---- 2列目(aupq_col): ヘッダー相当=AUPA20 / 本体=AUPQ35(500hPa・300hPa) / AUPQ78(700hPa・850hPa)。
     # 「同じ場所が時間経過でどう変わるか」を横に並べて見せるのが目的なので、
@@ -1772,7 +1803,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         left_parts.append(axjp140_natural)
     if axjp130_natural is not None:
         left_parts.append(axjp130_natural)
-    left_col = combine_vertical(left_parts, gap=LAYOUT_GAP) if left_parts else None
+    left_col = combine_vertical(left_parts, gap=LAYOUT_GAP, halign="left") if left_parts else None
 
     # 1段目(ヘッダー/AUPA20など)はどの列も特殊な構成で余白の性質がバラバラなので、
     # 列間の余白測定は2段目以降(header_h+LAYOUT_GAPより下)だけを見て行う。
