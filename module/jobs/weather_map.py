@@ -122,7 +122,7 @@ OUTPUT_FILENAMES = [
 # Discord に送る画像とタイトル（AXJP140・AUPA20 は Notion のみ）
 DISCORD_TITLES = {
     "04_LAYOUT_4_WEEKLY": "週間4列結合",
-    "07_DASHBOARD_JMA_DIRECT": "全部入り（気象庁データのみ版）",
+    "07_DASHBOARD_JMA_DIRECT": "高層天気図・数値予報天気図 結合図",
 }
 DISCORD_SKIP_FILENAMES = {"02_AXJP140", "03_AUPA20"}
 
@@ -2029,7 +2029,7 @@ IMAGE_EXTRA_LINKS: dict = {
 
 
 def discord_links_text() -> str:
-    return "\n".join(["**参考リンク**"] + [f"・[{t}](<{u}>)" for t, u in DISCORD_LINKS])
+    return "\n".join(["**参考リンク**"] + [f"🔗 [{t}](<{u}>)" for t, u in DISCORD_LINKS])
 
 
 def notify_dm_subscribers(content: str, thumb_path: str, thumb_mime: str) -> None:
@@ -2071,7 +2071,7 @@ def notify_discord_images(
         title = DISCORD_TITLES.get(filename, filename)
         extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
         if extra_links:
-            title += "\n" + "\n".join(f"・[{t}](<{u}>)" for t, u in extra_links)
+            title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
         src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
 
         # 4枚目・5枚目の結合画像は、Discordには軽量サムネイルを1枚だけ添付する。
@@ -2082,7 +2082,7 @@ def notify_discord_images(
                 highres_url = all_urls[idx]
                 content = (
                     f"{init_jst} / {title}\n"
-                    f"**[★高解像度PNGをダウンロード（30日間有効）](<{highres_url}>)**"
+                    f"**[📥高解像度PNGをダウンロード（30日間有効）](<{highres_url}>)**"
                 )
 
                 if os.path.exists(src_path):
@@ -2263,7 +2263,7 @@ def main_dashboard_jma() -> None:
         filename = "07_DASHBOARD_JMA_DIRECT"
         url = all_urls[0] if all_urls else ""
 
-        notion_items = [(filename, "全部入り（気象庁版）", "DASHBOARD_JMA_DIRECT", url)]
+        notion_items = [(filename, "高層天気図・数値予報天気図 結合図", "DASHBOARD_JMA_DIRECT", url)]
         page_id = notion_write_db(
             issue_dt_jst=issue_dt_jst,
             rjtd=rjtd,
@@ -2285,10 +2285,10 @@ def main_dashboard_jma() -> None:
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
-                    title += "\n" + "\n".join(f"・[{t}](<{u}>)" for t, u in extra_links)
+                    title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
                     f"{init_jst} / {title}\n"
-                    f"**[★高解像度PNGをダウンロード（30日間有効）](<{url}>)**"
+                    f"**[📥高解像度PNGをダウンロード（30日間有効）](<{url}>)**"
                 )
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
@@ -2388,10 +2388,10 @@ def main_layout4() -> None:
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
-                    title += "\n" + "\n".join(f"・[{t}](<{u}>)" for t, u in extra_links)
+                    title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
                     f"{init_jst} / {title}\n"
-                    f"**[★高解像度PNGをダウンロード（30日間有効）](<{url}>)**"
+                    f"**[📥高解像度PNGをダウンロード（30日間有効）](<{url}>)**"
                 )
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")

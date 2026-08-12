@@ -20,7 +20,7 @@
 # その場合は「データなし」のプレースホルダー画像を出す。
 #
 # 結合した高解像度PNGはR2へアップロードし、Discordにはサムネイル1枚と
-# 「★高解像度PNGを表示」というテキストリンクだけを投稿する
+# 「📥高解像度PNGを表示」というテキストリンクだけを投稿する
 # （weather_map.py の LAYOUT_4_WEEKLY / DASHBOARD と同じ形式）。
 
 from __future__ import annotations
@@ -344,7 +344,7 @@ def build_content(dt: datetime, highres_url: str) -> str:
     return (
         f"🌡️ **エマグラム / {dt.strftime('%Y-%m-%d %H')}Z**\n"
         f"🔗 [University of Wyoming 高層観測アーカイブ](<{WYOMING_PORTAL_URL}>)\n"
-        f"**[★高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{highres_url}>)**"
+        f"**[📥高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{highres_url}>)**"
     )
 
 

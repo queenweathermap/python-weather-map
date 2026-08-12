@@ -384,7 +384,7 @@ def main() -> None:
 
     _post_images_bulk(
         images,
-        content="**気象防災アドバイザー ガイダンス帳票**\n[気象防災アドバイザー向け資料集](<{}>)".format(JMA_ADV_PORTAL),
+        content="**気象防災アドバイザー ガイダンス帳票**\n🔗 [気象防災アドバイザー向け資料集](<{}>)".format(JMA_ADV_PORTAL),
     )
 
     print("=== Done ===")

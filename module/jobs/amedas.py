@@ -1234,7 +1234,7 @@ def post_wcn_amedas_to_discord(images: List[Tuple[str, bytes]]) -> None:
             print(f"[WARN] Discord POST 失敗: {e}")
 
     if allamedas:
-        _post_multipart(allamedas, content=f"**アメダス観測値（WCN）**\n[アメダス（秋田）](<{JMA_AMEDAS_URL}>)")
+        _post_multipart(allamedas, content=f"**アメダス観測値（WCN）**\n🔗 [アメダス（秋田）](<{JMA_AMEDAS_URL}>)")
     for i, item in enumerate(rankings):
         _post_multipart([item], content="**アメダスランキング（WCN）**" if i == 0 else "")
 

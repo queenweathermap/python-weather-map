@@ -114,7 +114,7 @@ def main():
     screenshots = take_screenshots()
 
     for i, s in enumerate(screenshots):
-        extra_line = "[秋田地方気象台](<https://www.jma-net.go.jp/akita/>)" if i == 0 else None
+        extra_line = "🔗 [秋田地方気象台](<https://www.jma-net.go.jp/akita/>)" if i == 0 else None
         status = send_discord_with_image(s["title"], s["url"], s["data"], s["filename"], extra_line)
         print(f"送信: {s['title']} → {status}", flush=True)
         time.sleep(1)  # レート制限対策
