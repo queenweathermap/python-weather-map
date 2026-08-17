@@ -999,7 +999,7 @@ def append_caption_bar(
 def jma_source_caption() -> str:
     return (
         "出典：気象庁　https://www.jma.go.jp/jma/kishou/know/expert/"
-        "　提供資料を合成編集　作成：WxChart Premium"
+        "　提供資料を合成編集　作成：177chart"
     )
 
 

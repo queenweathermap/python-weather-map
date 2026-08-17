@@ -222,7 +222,7 @@ def caption_text_for(dt_jst: datetime) -> str:
     return (
         f"作成日時: {dt_jst.strftime('%Y年%m月%d日 %H:%M')} JST"
         "　出典: 気象庁 ウィンドプロファイラ (jma.go.jp/bosai/windprofiler)"
-        "　作成: WxChart Premium"
+        "　作成: 177chart"
     )
 
 
