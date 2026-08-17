@@ -2,7 +2,7 @@
 # =============================================================================
 # module/utils/wordpress_utils.py
 #
-# WordPress (wx-chart.com) REST API 投稿ユーティリティ
+# WordPress (177chart.com) REST API 投稿ユーティリティ
 #   ・認証: アプリケーションパスワード（Basic認証）
 #   ・画像を /media にアップロード → 本文に埋め込んで /posts を publish（アイキャッチは設定しない）
 #   ・タグは名前指定で自動解決（既存タグを検索、無ければ作成）して付与する
@@ -11,7 +11,10 @@
 #   WP_ENABLE        : "1" で有効化（既定 "1"。未設定/認証情報なしなら自動的に無効）
 #   WP_USERNAME       : WordPressユーザー名
 #   WP_APP_PASSWORD   : アプリケーションパスワード（半角スペース入り可）
-#   WP_API_BASE       : 既定 "https://wx-chart.com/wp-json/wp/v2"
+#   WP_API_BASE       : 既定 "https://177chart.com/wp-json/wp/v2"
+#                        （旧ドメイン wx-chart.com は177chart.comへ301リダイレクトされる
+#                          設定になっているが、POSTがGETに化けるリスクがあるため
+#                          新ドメインを直接指定する）
 #
 # 呼び出し側の方針:
 #   WordPress側のAPIエラーはここで吸収し、失敗時は "" を返すだけにする
@@ -25,7 +28,7 @@ from typing import List, Tuple
 
 import requests
 
-WP_API_BASE = os.environ.get("WP_API_BASE", "https://wx-chart.com/wp-json/wp/v2").rstrip("/")
+WP_API_BASE = os.environ.get("WP_API_BASE", "https://177chart.com/wp-json/wp/v2").rstrip("/")
 
 
 def wp_enabled() -> bool:

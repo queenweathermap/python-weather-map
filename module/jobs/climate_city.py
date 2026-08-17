@@ -4,9 +4,9 @@
 #
 # 札幌(北海道)・東京・福岡・仙台(宮城)・大阪・沖縄 個別投稿ジョブ
 #   ・各都市ごとに「昼の長さ(日の出/日の入り)」と「過去3年の気温比較(代表3地点)」の
-#     2枚を生成し、WordPress(wx-chart.com)に本文記事として投稿する（6都市とも）。
+#     2枚を生成し、WordPress(177chart.com)に本文記事として投稿する（6都市とも）。
 #   ・SNS(Bluesky/X/Threads/Instagram)投稿は東京のみ1本にまとめる。
-#     昼の長さ＋気温グラフの2枚＋固定のブログ紹介ページ(https://wx-chart.com/note)への
+#     昼の長さ＋気温グラフの2枚＋固定のブログ紹介ページ(https://177chart.com/note-tokyo)への
 #     リンクを投稿し、他5都市（札幌・福岡・仙台・大阪・沖縄）はブログで公開した旨だけを
 #     文中で紹介する（個別のSNS投稿はしない）。
 #   ・秋田(climate_akita.py)と同じ枠組み（climate_3yr / daylength の build_figure を再利用）。
@@ -110,7 +110,7 @@ CITY_CONFIGS = {
 }
 
 # SNS(Bluesky/X/Threads/Instagram)は東京の投稿1本にまとめ、他都市はそこで紹介するだけにする。
-NOTE_URL = "https://wx-chart.com/note-tokyo"
+NOTE_URL = "https://177chart.com/note-tokyo"
 SNS_CITY_KEY = "tokyo"
 
 
