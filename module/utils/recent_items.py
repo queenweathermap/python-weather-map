@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -66,3 +66,74 @@ def record_recent_item(title: str, url: str, category: str) -> None:
             print(f"[WARN] PWA配信履歴の記録失敗 status={r.status_code} body={r.text[:300]}", file=sys.stderr)
     except requests.RequestException as exc:
         print(f"[WARN] PWA配信履歴の記録中に例外: {exc}", file=sys.stderr)
+
+
+def _resolve_data_source_id(db_id: str) -> str:
+    r = requests.get(f"{API_BASE}/databases/{db_id}", headers=_headers(), timeout=30)
+    r.raise_for_status()
+    data_sources = r.json().get("data_sources", [])
+    if not data_sources:
+        raise RuntimeError(f"NOTION_PWA_HISTORY_DATABASE_ID={db_id} has no data_sources")
+    return data_sources[0]["id"]
+
+
+def cleanup_old_recent_items(retention_days: int = 30) -> None:
+    """R2オブジェクトの保存期間（既定30日）に合わせて、それより古いPWA配信履歴を削除する。
+    これをしないと、R2側で画像が消えた後もギャラリーにリンク切れの項目が残ってしまう。
+    NOTION_PWA_HISTORY_DATABASE_ID未設定の場合（このDBを使わないワークフロー）は何もしない。"""
+    db_id = _env("NOTION_PWA_HISTORY_DATABASE_ID")
+    if not db_id:
+        return
+
+    try:
+        data_source_id = _resolve_data_source_id(db_id)
+    except requests.RequestException as exc:
+        print(f"[WARN] PWA配信履歴のクリーンアップ中に例外: {exc}", file=sys.stderr)
+        return
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    deleted = 0
+    cursor = None
+
+    while True:
+        body = {
+            "filter": {"property": "配信日時", "date": {"before": cutoff}},
+            "page_size": 100,
+        }
+        if cursor:
+            body["start_cursor"] = cursor
+
+        try:
+            r = requests.post(
+                f"{API_BASE}/data_sources/{data_source_id}/query",
+                headers=_headers(),
+                json=body,
+                timeout=30,
+            )
+            r.raise_for_status()
+        except requests.RequestException as exc:
+            print(f"[WARN] PWA配信履歴のクリーンアップ中に例外: {exc}", file=sys.stderr)
+            return
+
+        data = r.json()
+        for page in data.get("results", []):
+            try:
+                del_res = requests.patch(
+                    f"{API_BASE}/pages/{page['id']}",
+                    headers=_headers(),
+                    json={"archived": True},
+                    timeout=30,
+                )
+                if del_res.ok:
+                    deleted += 1
+                else:
+                    print(f"[WARN] PWA配信履歴の削除失敗 status={del_res.status_code}", file=sys.stderr)
+            except requests.RequestException as exc:
+                print(f"[WARN] PWA配信履歴の削除中に例外: {exc}", file=sys.stderr)
+
+        if data.get("has_more"):
+            cursor = data.get("next_cursor")
+        else:
+            break
+
+    print(f"[PWA-HISTORY-CLEANUP] retention_days={retention_days} deleted={deleted}")

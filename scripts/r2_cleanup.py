@@ -17,10 +17,17 @@ Optional env:
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import boto3
 from botocore.config import Config
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from module.utils.recent_items import cleanup_old_recent_items
 
 
 def env(name: str, default: str = "") -> str:
@@ -84,6 +91,11 @@ def main() -> None:
         s3.delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
 
     print(f"[R2-CLEANUP] checked={checked} deleted={deleted} bytes_deleted={bytes_deleted}")
+
+    if not dry_run:
+        # R2の画像が消えた後もPWA配信履歴（ギャラリー表示）にリンク切れの項目が
+        # 残らないよう、同じ保存期間で古い記録を削除する。
+        cleanup_old_recent_items(retention_days)
 
 
 if __name__ == "__main__":
