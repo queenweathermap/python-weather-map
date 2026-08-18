@@ -42,6 +42,7 @@ from module.utils.discord_utils import (
 from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails
 from module.utils.discord_dm import send_dm_to_all
 from module.utils.onesignal_push import send_push_to_all
+from module.utils.recent_items import record_recent_item
 
 
 # =============================================================================
@@ -100,6 +101,13 @@ DISCORD_R2_PNG_LINK_FILENAMES = {
 DM_SAFE_FILENAMES = {
     "04_LAYOUT_4_WEEKLY",
     "07_DASHBOARD_JMA_DIRECT",
+}
+
+# PWA配信履歴（Notion「PWA配信履歴」DB）に記録する際のカテゴリ名。
+# 選択肢はNotion側のselectプロパティと一致させる必要がある。
+PWA_CATEGORY_BY_FILENAME = {
+    "07_DASHBOARD_JMA_DIRECT": "全部入り天気図",
+    "04_LAYOUT_4_WEEKLY": "週間天気予報資料",
 }
 DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
 DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "84"))
@@ -2071,7 +2079,13 @@ def discord_links_text() -> str:
 
 
 def notify_dm_subscribers(
-    content: str, thumb_path: str, thumb_mime: str, *, push_title: str = "", push_url: str = ""
+    content: str,
+    thumb_path: str,
+    thumb_mime: str,
+    *,
+    push_title: str = "",
+    push_url: str = "",
+    pwa_category: str = "",
 ) -> None:
     """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
     Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
@@ -2101,6 +2115,9 @@ def notify_dm_subscribers(
             send_push_to_all(emails, push_title, "新しい配信が届きました", url=push_url or None)
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
+
+    if pwa_category and push_title and push_url:
+        record_recent_item(push_title, push_url, pwa_category)
 
 
 def notify_discord_images(
@@ -2154,6 +2171,7 @@ def notify_discord_images(
                                 thumb_mime,
                                 push_title=DISCORD_TITLES.get(filename, filename),
                                 push_url=highres_url,
+                                pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
                             )
                     except Exception as e:
                         print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
@@ -2368,6 +2386,7 @@ def main_dashboard_jma() -> None:
                         thumb_mime,
                         push_title=DISCORD_TITLES.get(filename, filename),
                         push_url=url,
+                        pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
                     )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
@@ -2477,6 +2496,7 @@ def main_layout4() -> None:
                             thumb_mime,
                             push_title=DISCORD_TITLES.get(filename, filename),
                             push_url=url,
+                            pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")

@@ -44,6 +44,7 @@ from module.utils.r2_utils import put_bytes, make_url
 from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails
 from module.utils.discord_dm import send_dm_to_all
 from module.utils.onesignal_push import send_push_to_all
+from module.utils.recent_items import record_recent_item
 
 STATIONS = [
     ("47401", "稚内"),
@@ -373,6 +374,8 @@ def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str) ->
             send_push_to_all(emails, "エマグラム", "新しいエマグラムが届きました", url=highres_url)
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
+
+    record_recent_item("エマグラム", highres_url, "エマグラム")
 
 
 def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:
