@@ -2131,7 +2131,8 @@ def notify_discord_images(
     if not discord_jma_enabled():
         return
 
-    init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
+    # Discord本文・PWAギャラリーとも、イニシャル時刻表示はUTCで統一する
+    init_utc = issue_dt_jst.astimezone(timezone.utc).strftime("%Y-%m-%d %HZ")
     webhook_url = discord_jma_webhook_url()
 
     for idx, filename in enumerate(OUTPUT_FILENAMES):
@@ -2150,7 +2151,7 @@ def notify_discord_images(
             if idx < len(all_urls) and all_urls[idx]:
                 highres_url = all_urls[idx]
                 content = (
-                    f"{init_jst} / {title}\n"
+                    f"{init_utc} / {title}\n"
                     f"📥 [高解像度PNGをダウンロード（30日間有効）](<{highres_url}>)"
                 )
 
@@ -2173,7 +2174,7 @@ def notify_discord_images(
                                 push_title=DISCORD_TITLES.get(filename, filename),
                                 push_url=highres_url,
                                 pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
-                                pwa_issue_time=init_jst,
+                                pwa_issue_time=init_utc,
                             )
                     except Exception as e:
                         print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
@@ -2193,7 +2194,7 @@ def notify_discord_images(
                     upload_path, mime = prepare_discord_upload_image(src_path)
                     post_discord_file_image(
                         webhook_url=webhook_url,
-                        title=f"{init_jst} / {title}",
+                        title=f"{init_utc} / {title}",
                         image_path=upload_path,
                         mime=mime,
                     )
@@ -2206,7 +2207,7 @@ def notify_discord_images(
             try:
                 post_discord_item_image_urls(
                     webhook_url=webhook_url,
-                    title=f"{init_jst} / {title}",
+                    title=f"{init_utc} / {title}",
                     image_urls=[all_urls[idx]],
                     notion_url="",
                     rjtd=rjtd,
@@ -2358,13 +2359,14 @@ def main_dashboard_jma() -> None:
 
         try:
             if discord_jma_enabled() and url:
-                init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
+                # Discord本文・PWAギャラリーとも、イニシャル時刻表示はUTCで統一する
+                init_utc = issue_dt_jst.astimezone(timezone.utc).strftime("%Y-%m-%d %HZ")
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
                     title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
-                    f"{init_jst} / {title}\n"
+                    f"{init_utc} / {title}\n"
                     f"📥 [高解像度PNGをダウンロード（30日間有効）](<{url}>)"
                 )
 
@@ -2389,7 +2391,7 @@ def main_dashboard_jma() -> None:
                         push_title=DISCORD_TITLES.get(filename, filename),
                         push_url=url,
                         pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
-                        pwa_issue_time=init_jst,
+                        pwa_issue_time=init_utc,
                     )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
@@ -2469,13 +2471,14 @@ def main_layout4() -> None:
 
         try:
             if discord_jma_enabled() and url:
-                init_jst = issue_dt_jst.strftime("%Y-%m-%d %H:%M JST")
+                # Discord本文・PWAギャラリーとも、イニシャル時刻表示はUTCで統一する
+                init_utc = issue_dt_jst.astimezone(timezone.utc).strftime("%Y-%m-%d %HZ")
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
                     title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
-                    f"{init_jst} / {title}\n"
+                    f"{init_utc} / {title}\n"
                     f"📥 [高解像度PNGをダウンロード（30日間有効）](<{url}>)"
                 )
 
@@ -2500,7 +2503,7 @@ def main_layout4() -> None:
                             push_title=DISCORD_TITLES.get(filename, filename),
                             push_url=url,
                             pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
-                            pwa_issue_time=init_jst,
+                            pwa_issue_time=init_utc,
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
