@@ -43,8 +43,13 @@ def _headers() -> dict:
     }
 
 
-def record_recent_item(title: str, url: str, category: str) -> None:
-    """PWA配信履歴に1行追加する。失敗しても配信自体は止めたくないので例外は握りつぶす。"""
+def record_recent_item(title: str, url: str, category: str, issue_time_label: str = "") -> None:
+    """PWA配信履歴に1行追加する。失敗しても配信自体は止めたくないので例外は握りつぶす。
+
+    issue_time_label: Discordの投稿文と同じ「発行基準時刻」の表示文字列
+    （例: "2026-08-18 09:00 JST" や "2026-08-18 00Z"）。ギャラリー表示用で、
+    配信日時（このNotion行が作られた時刻・30日保存期限の判定に使う）とは別物。
+    """
     db_id = _env("NOTION_PWA_HISTORY_DATABASE_ID")
     if not db_id:
         print("[INFO] NOTION_PWA_HISTORY_DATABASE_ID未設定のためPWA配信履歴の記録をスキップ")
@@ -57,6 +62,7 @@ def record_recent_item(title: str, url: str, category: str) -> None:
             "URL": {"url": url},
             "カテゴリ": {"select": {"name": category}},
             "配信日時": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
+            "発行時刻表示": {"rich_text": [{"text": {"content": issue_time_label}}]},
         },
     }
 

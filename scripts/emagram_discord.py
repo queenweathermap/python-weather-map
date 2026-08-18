@@ -350,7 +350,7 @@ def build_content(dt: datetime, highres_url: str) -> str:
     )
 
 
-def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str) -> None:
+def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str, dt: datetime) -> None:
     """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
     Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
     OneSignal Web Pushを送る。"""
@@ -375,7 +375,7 @@ def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str) ->
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
-    record_recent_item("エマグラム", highres_url, "エマグラム")
+    record_recent_item("エマグラム", highres_url, "エマグラム", f"{dt.strftime('%Y-%m-%d %H')}Z")
 
 
 def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:
@@ -430,7 +430,7 @@ def main() -> int:
 
     if post_combined(webhook_url, dt, thumb, highres_url):
         print("POSTED")
-        notify_dm_subscribers(build_content(dt, highres_url), thumb, highres_url)
+        notify_dm_subscribers(build_content(dt, highres_url), thumb, highres_url, dt)
         return 0
 
     return 1

@@ -2086,6 +2086,7 @@ def notify_dm_subscribers(
     push_title: str = "",
     push_url: str = "",
     pwa_category: str = "",
+    pwa_issue_time: str = "",
 ) -> None:
     """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
     Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
@@ -2117,7 +2118,7 @@ def notify_dm_subscribers(
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
     if pwa_category and push_title and push_url:
-        record_recent_item(push_title, push_url, pwa_category)
+        record_recent_item(push_title, push_url, pwa_category, pwa_issue_time)
 
 
 def notify_discord_images(
@@ -2172,6 +2173,7 @@ def notify_discord_images(
                                 push_title=DISCORD_TITLES.get(filename, filename),
                                 push_url=highres_url,
                                 pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
+                                pwa_issue_time=init_jst,
                             )
                     except Exception as e:
                         print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
@@ -2387,6 +2389,7 @@ def main_dashboard_jma() -> None:
                         push_title=DISCORD_TITLES.get(filename, filename),
                         push_url=url,
                         pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
+                        pwa_issue_time=init_jst,
                     )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
@@ -2497,6 +2500,7 @@ def main_layout4() -> None:
                             push_title=DISCORD_TITLES.get(filename, filename),
                             push_url=url,
                             pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
+                            pwa_issue_time=init_jst,
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
