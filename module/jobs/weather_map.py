@@ -20,6 +20,7 @@ import os
 import shutil
 import time
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from typing import List, Optional, Tuple
 
 import requests
@@ -63,6 +64,13 @@ JMA_FXXN519_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxxn519.pn
 JMA_FZCX50_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fzcx50.png"
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
+
+# JMA数値予報天気図PDFは日付を含まない固定URL（cycleごとに上書き）で配信されるため、
+# 実行タイミングによっては前サイクル（丸1日前）のファイルがまだ残っていることがある。
+# PDFに埋め込まれた発表日時を読み取り、期待する日付と食い違う場合は少し待って
+# 再取得することで、配信タイミング自体は変えずに新しいデータを取りに行く。
+JMA_STALE_RETRY_MAX = int(os.environ.get("JMA_STALE_RETRY_MAX", "2"))
+JMA_STALE_RETRY_WAIT_SEC = float(os.environ.get("JMA_STALE_RETRY_WAIT_SEC", "90"))
 
 # 既存workflowの JPEG_DPI をそのまま読めるようにしつつ、内部ではPDF_DPIとして扱う
 PDF_DPI = int(os.environ.get("PDF_DPI", os.environ.get("JPEG_DPI", "220")))
@@ -420,11 +428,35 @@ def fetch_pdf_pages(session: requests.Session, name: str) -> List[Image.Image]:
     return []
 
 
-def fetch_jma_numeric_pdf_pages(code: str, cycle: str) -> List[Image.Image]:
+def _response_last_modified_date(r: requests.Response):
+    """レスポンスのLast-Modifiedヘッダを日付(UTC)として返す。無ければNone。
+    JMAのこのPDFは日付を含まない固定URLに上書き配信されるため、レスポンス本文
+    そのものからは更新日時が分からない。Last-Modifiedがサーバ側の実際の
+    ファイル更新日時を表すので、これで新旧を判定する。"""
+    raw = r.headers.get("Last-Modified")
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw).astimezone(timezone.utc).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_jma_numeric_pdf_pages(
+    code: str,
+    cycle: str,
+    issue_dt_jst: Optional[datetime] = None,
+) -> List[Image.Image]:
     """
     気象庁の数値予報天気図PDFを取得して全ページのPIL Imageリストを返す。
       code : 'aupq35' / 'aupq78'
       cycle: '00' / '12'
+      issue_dt_jst: この配信が想定しているJST初期時刻。渡された場合、
+        優先cycleで取得したレスポンスのLast-Modified日付を、期待するUTC日付と
+        照合する。JMAはこのPDFを日付を含まない固定URLに上書き配信しているため、
+        実行タイミングによっては前サイクル（丸1日前）のファイルがまだ残っている
+        ことがあり、Last-Modifiedがそれを検出できる。食い違っていれば
+        （＝まだ上書きされていない）少し待って再取得する。
 
     指定された cycle で取得できなかった場合は、
     反対側の cycle も試す。
@@ -440,30 +472,57 @@ def fetch_jma_numeric_pdf_pages(code: str, cycle: str) -> List[Image.Image]:
     fallback_cycle = "12" if preferred_cycle == "00" else "00"
     cycles = [preferred_cycle, fallback_cycle]
 
+    expected_date = (
+        issue_dt_jst.astimezone(timezone.utc).date() if issue_dt_jst is not None else None
+    )
+
     for cyc in cycles:
         url = f"{JMA_NUMERIC_BASE_URL}/{code}_{cyc}.pdf"
+        # 優先cycle（配信が本来欲しいサイクル）だけ、古いファイルのままなら
+        # 待って再取得する。反対側cycleへのフォールバックは従来通り即採用する。
+        attempts_left = JMA_STALE_RETRY_MAX + 1 if (expected_date is not None and cyc == preferred_cycle) else 1
 
-        try:
-            r = requests.get(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0",
-                    "Accept": "application/pdf,*/*",
-                },
-                timeout=60,
-                allow_redirects=True,
-            )
-            ct = (r.headers.get("Content-Type") or "").lower()
+        while attempts_left > 0:
+            attempts_left -= 1
+            try:
+                r = requests.get(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 jma-weather-map-bot/1.0",
+                        "Accept": "application/pdf,*/*",
+                    },
+                    timeout=60,
+                    allow_redirects=True,
+                )
+                ct = (r.headers.get("Content-Type") or "").lower()
 
-            if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
-                pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
-                print(f"[OK] JMA {code}_{cyc}: pages={len(pages)} URL={url}")
-                return pages
+                if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
+                    if expected_date is not None and cyc == preferred_cycle:
+                        actual_date = _response_last_modified_date(r)
+                        if actual_date is not None and actual_date != expected_date:
+                            print(
+                                f"[WARN] JMA {code}_{cyc}: Last-Modified不一致 "
+                                f"(期待={expected_date}, 実際={actual_date}) URL={url}"
+                            )
+                            if attempts_left > 0:
+                                print(
+                                    f"[INFO] JMA {code}_{cyc}: {JMA_STALE_RETRY_WAIT_SEC:.0f}秒待って再取得します"
+                                    f"（残り{attempts_left}回）"
+                                )
+                                time.sleep(JMA_STALE_RETRY_WAIT_SEC)
+                                continue
+                            print(f"[WARN] JMA {code}_{cyc}: 再取得しても古いままのため、このデータを使用します")
 
-            print(f"[NG] JMA {code}_{cyc}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
+                    pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+                    print(f"[OK] JMA {code}_{cyc}: pages={len(pages)} URL={url}")
+                    return pages
 
-        except Exception as e:
-            print(f"[ERR] JMA {code}_{cyc}: {e}")
+                print(f"[NG] JMA {code}_{cyc}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
+
+            except Exception as e:
+                print(f"[ERR] JMA {code}_{cyc}: {e}")
+
+            break
 
     print(f"[NG] JMA {code}: both cycles failed ({preferred_cycle}, {fallback_cycle})")
     return []
@@ -1201,8 +1260,8 @@ def build_layout_5(session: requests.Session, errors: List[str]) -> Optional[Att
     # TKAISETU: JMA直取得（kaisetsu_tanki_latest.pdf = 最新版）。
     # WCN経由は朝03:40版で貼り付くことがあるため、03:40/15:40の最新へ追従するJMA公開URLを使う。
     tkai = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_TKAISETU_URL, "TKAISETU"))
-    aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
-    aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
+    aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle, issue_dt_jst))
+    aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle, issue_dt_jst))
 
     asas = get_first_page_or_none(fetch_pdf_pages(session, "ASAS"))
     fsas24 = get_first_page_or_none(fetch_pdf_pages(session, "FSAS24"))
@@ -1465,7 +1524,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # 140E/130Eそれぞれ個別に左右トリミングすると、切り詰め量のわずかな違いで
     # 実効的な幅が変わり、2つの図の拡大率(=図柄の大きさ)がずれて見えてしまう
     # ため、左右は共通・上下だけ個別にトリミングする。
-    axjp140_raw = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axjp140", cycle))
+    axjp140_raw = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axjp140", cycle, issue_dt_jst))
     if axjp140_raw is None:
         errors.append("DashboardJMA: AXJP140 missing")
         axjp140, axjp130 = None, None
@@ -1481,7 +1540,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         axjp140 = _trim_vertical_only(axjp140_half)
         axjp130 = _trim_vertical_only(axjp130_half)
 
-    aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle))
+    aupa20 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupa20", cycle, issue_dt_jst))
     if aupa20 is None:
         errors.append("DashboardJMA: AUPA20 missing")
     else:
@@ -1490,8 +1549,8 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         # あらかじめ切り詰めておく。
         aupa20 = trim_white_margins(aupa20)
 
-    aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle))
-    aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle))
+    aupq35 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq35", cycle, issue_dt_jst))
+    aupq78 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("aupq78", cycle, issue_dt_jst))
     if aupq35 is None:
         errors.append("DashboardJMA: AUPQ35 missing")
     else:
@@ -1504,7 +1563,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     else:
         aupq78 = trim_white_margins(aupq78)
 
-    axfe578 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axfe578", cycle))
+    axfe578 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axfe578", cycle, issue_dt_jst))
     if axfe578 is None:
         errors.append("DashboardJMA: AXFE578 missing")
         axfe578_upper, axfe578_lower = None, None
@@ -1518,14 +1577,14 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # ---- 列3・4・5: 各列とも、その列の地上天気図(surface)のネイティブ幅をそのまま使う ----
     # (T=72のfxfe507/fxfe577は1コマのみのPDFで、T12/24を並べたfxfe502等より幅が狭い。
     #  列ごとに幅が違ってよく、無理に他列と同じ幅に揃えると余白だらけになる)
-    ref_surface = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe502", cycle))
+    ref_surface = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe502", cycle, issue_dt_jst))
     # FXJP854の幅合わせの基準として、列4(FXFE5782)・列5(FXFE5784)の絵柄部分を先に取得しておく
     # (build_period_columnの中で改めて取得されるが、ここでは絵柄の左位置・幅を測るためだけに使う)。
-    fxfe5782_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe5782", cycle))
-    fxfe504_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe504", cycle))
-    fxfe5784_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe5784", cycle))
+    fxfe5782_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe5782", cycle, issue_dt_jst))
+    fxfe504_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe504", cycle, issue_dt_jst))
+    fxfe5784_ref = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxfe5784", cycle, issue_dt_jst))
 
-    fxjp854_page = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxjp854", cycle))
+    fxjp854_page = get_first_page_or_none(fetch_jma_numeric_pdf_pages("fxjp854", cycle, issue_dt_jst))
     if fxjp854_page is None:
         errors.append("DashboardJMA: FXJP854 missing")
         fxjp854_upper, fxjp854_lower = None, None
@@ -1566,8 +1625,8 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         (500hPa/ASAS地上/AUPQ35(500hPa)/AXFE578下段(850hPa))と種類ごとに
         揃えるため、それぞれ上下に分割し、4段(自然な高さ、切り取らない)として返す。
         """
-        surface = surface_pre if surface_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(surface_code, cycle))
-        upper = upper_pre if upper_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(upper_code, cycle))
+        surface = surface_pre if surface_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(surface_code, cycle, issue_dt_jst))
+        upper = upper_pre if upper_pre is not None else get_first_page_or_none(fetch_jma_numeric_pdf_pages(upper_code, cycle, issue_dt_jst))
         if surface is None:
             errors.append(f"DashboardJMA: {surface_code} missing")
         if upper is None:
