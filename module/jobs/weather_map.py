@@ -388,6 +388,60 @@ def jma_cycle_suffix(issue_dt_jst: datetime) -> str:
     return "00" if issue_dt_jst.hour == 9 else "12"
 
 
+# 「全部入り天気図」は1日4回cronが動くが、天気図の中身(00Z/12Z数値予報)が
+# 実際に新しくなるのは00:30/14:30 UTC(11:30/23:30 JST)の2回だけ。
+# 08:00/20:00 UTC(17:30/05:30 JST)の2回は、天気図は直前の00Z/12Zのままで、
+# 短期予報解説資料(TKAISETU、03:40/15:40 JST発表)の更新だけを拾うための回。
+# (JMAは数値予報天気図・解析図を06Z/18Zでは公開していないため、天気図自体を
+#  4回に増やすことはできない。)
+_TKAISETU_ONLY_SLOTS = (
+    (17 * 60 + 30, "15:40"),
+    (5 * 60 + 30, "03:40"),
+)
+_NUMERIC_FRESH_SLOTS = (11 * 60 + 30, 23 * 60 + 30)
+
+
+def tkaisetu_only_refresh_time(now: Optional[datetime] = None) -> Optional[str]:
+    """
+    現在時刻(JST)が「天気図は前回と同じ・TKAISETUの更新だけを拾う回」に
+    最も近い場合、そのTKAISETU公式発表時刻('HH:MM')を返す。
+    数値予報が新しくなる回に最も近い場合はNoneを返す。
+    """
+    now = now or now_jst()
+    minute_of_day = now.hour * 60 + now.minute
+
+    def circular_dist(a: int, b: int) -> int:
+        d = abs(a - b)
+        return min(d, 1440 - d)
+
+    best_numeric = min(circular_dist(minute_of_day, m) for m in _NUMERIC_FRESH_SLOTS)
+    best_tkaisetu_only, best_tkaisetu_dist = None, None
+    for slot_minute, tkaisetu_time in _TKAISETU_ONLY_SLOTS:
+        d = circular_dist(minute_of_day, slot_minute)
+        if best_tkaisetu_dist is None or d < best_tkaisetu_dist:
+            best_tkaisetu_dist = d
+            best_tkaisetu_only = tkaisetu_time
+
+    if best_tkaisetu_dist is not None and best_tkaisetu_dist < best_numeric:
+        return best_tkaisetu_only
+    return None
+
+
+def issue_time_overlay_text(issue_dt_jst: datetime, now: Optional[datetime] = None) -> str:
+    """
+    ダッシュボード画像の左上に焼き込む、イニシャル時刻ラベルの文字列。
+      ・数値予報が新しくなる回 → 例: "2026/08/19　00Z UTC(09:00JST)"
+      ・TKAISETU更新だけを拾う回(天気図は直前の00Z/12Zのまま)
+        → 例: "短期予報解説資料 15:40更新版"
+    """
+    tkaisetu_time = tkaisetu_only_refresh_time(now)
+    if tkaisetu_time is not None:
+        return f"短期予報解説資料 {tkaisetu_time}更新版"
+
+    cyc = jma_cycle_suffix(issue_dt_jst)
+    return f"{issue_dt_jst.strftime('%Y/%m/%d')}　{cyc}Z UTC({issue_dt_jst.strftime('%H:%M')}JST)"
+
+
 def notion_page_url(page_id: str) -> str:
     clean = (page_id or "").replace("-", "")
     return f"https://www.notion.so/{clean}" if clean else ""
@@ -1069,6 +1123,26 @@ def jma_source_caption() -> str:
         "出典：気象庁　https://www.jma.go.jp/jma/kishou/know/expert/"
         "　提供資料を合成編集　作成：177chart"
     )
+
+
+def overlay_top_left_label(
+    img: Image.Image,
+    text: str,
+    *,
+    font_size: int = 40,
+    pad: int = 14,
+) -> Image.Image:
+    """画像左上に、白背景付きでイニシャル時刻ラベルを焼き込む(画像を直接書き換える)。
+    「全部入り天気図」左端の1段目は元々空白セルのため、ここに重ねても
+    他のパネルとは重ならない。"""
+    img = img.convert("RGB")
+    draw = ImageDraw.Draw(img)
+    font = _load_caption_font(font_size)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.rectangle((0, 0, text_w + pad * 2, text_h + pad * 2), fill=(255, 255, 255))
+    draw.text((pad - bbox[0], pad - bbox[1]), text, fill=(30, 30, 30), font=font)
+    return img
 
 
 def prepare_comp_panel(img: Image.Image, target_w: int) -> Image.Image:
@@ -1944,6 +2018,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
 
     final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=20)
     final_canvas = trim_right_whitespace(final_canvas, right_pad=20)
+    final_canvas = overlay_top_left_label(final_canvas, issue_time_overlay_text(issue_dt_jst))
     caption = jma_source_caption()
     final_canvas = append_caption_bar(final_canvas, caption)
     return pil_to_attachment(final_canvas, "DASHBOARD_JMA_DIRECT")
