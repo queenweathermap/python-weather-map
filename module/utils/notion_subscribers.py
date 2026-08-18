@@ -69,6 +69,10 @@ def _prop_discord_id() -> str:
     return _env("NOTION_SUB_PROP_DISCORD_ID", "Discord User ID")
 
 
+def _prop_email() -> str:
+    return _env("NOTION_SUB_PROP_EMAIL", "Email")
+
+
 def _raise_with_body(r: requests.Response) -> None:
     """Notion APIのエラーはbodyに具体的な理由(code/message)が入っているため、
     ステータスコードだけでなくbodyもログに残す。"""
@@ -108,10 +112,11 @@ def _existing_select_options(data_source_id: str, prop_name: str) -> set:
     return {opt.get("name", "") for opt in options}
 
 
-def get_active_discord_ids() -> List[str]:
-    """購読者データベースから配信対象（active/beta/admin/lifetime）のDiscord User IDを返す。
+def _query_eligible_pages() -> List[dict]:
+    """購読者データベースから配信対象（active/beta/admin/lifetime）のページ一覧を返す。
     ただしbetaはBETA_CUTOFFを過ぎたら対象外にする（Notion側のStatusは
-    手動更新不要で、ここでの日付判定だけで自動的に配信が止まる）。"""
+    手動更新不要で、ここでの日付判定だけで自動的に配信が止まる）。
+    Discord経由・PWA(メール)経由どちらの購読者もこの1つの判定を共有する。"""
     db_id = _must_env("NOTION_SUBSCRIBERS_DATABASE_ID")
     data_source_id = _resolve_data_source_id(db_id)
 
@@ -138,7 +143,7 @@ def get_active_discord_ids() -> List[str]:
 
     beta_still_open = datetime.now(JST) < BETA_CUTOFF
 
-    ids: List[str] = []
+    pages: List[dict] = []
     cursor = None
 
     while True:
@@ -157,20 +162,40 @@ def get_active_discord_ids() -> List[str]:
 
         for page in data.get("results", []):
             props = page.get("properties", {})
-
             status = (props.get(_prop_status(), {}).get("select") or {}).get("name", "")
             if status == "beta" and not beta_still_open:
                 continue
-
-            rich_text = props.get(_prop_discord_id(), {}).get("rich_text", [])
-            if rich_text:
-                discord_id = rich_text[0].get("plain_text", "").strip()
-                if discord_id:
-                    ids.append(discord_id)
+            pages.append(page)
 
         if data.get("has_more"):
             cursor = data.get("next_cursor")
         else:
             break
 
+    return pages
+
+
+def _rich_text_value(page: dict, prop_name: str) -> str:
+    rich_text = page.get("properties", {}).get(prop_name, {}).get("rich_text", [])
+    return rich_text[0].get("plain_text", "").strip() if rich_text else ""
+
+
+def get_active_discord_ids() -> List[str]:
+    """配信対象のうち、Discord User IDが設定されている購読者のIDを返す。"""
+    ids = []
+    for page in _query_eligible_pages():
+        discord_id = _rich_text_value(page, _prop_discord_id())
+        if discord_id:
+            ids.append(discord_id)
     return ids
+
+
+def get_active_emails() -> List[str]:
+    """配信対象のうち、Emailが設定されている購読者のメールアドレスを返す
+    （PWA/OneSignal向けのexternal_id）。"""
+    emails = []
+    for page in _query_eligible_pages():
+        email = _rich_text_value(page, _prop_email())
+        if email:
+            emails.append(email)
+    return emails

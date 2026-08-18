@@ -41,8 +41,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from module.utils.r2_utils import put_bytes, make_url
-from module.utils.notion_subscribers import get_active_discord_ids
+from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails
 from module.utils.discord_dm import send_dm_to_all
+from module.utils.onesignal_push import send_push_to_all
 
 STATIONS = [
     ("47401", "稚内"),
@@ -348,18 +349,30 @@ def build_content(dt: datetime, highres_url: str) -> str:
     )
 
 
-def notify_dm_subscribers(content: str, thumb_bytes: bytes) -> None:
-    """有料DM購読者（Notion管理）へ、公開チャンネルと同じ内容をDMする。"""
+def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str) -> None:
+    """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
+    Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
+    OneSignal Web Pushを送る。"""
     try:
         discord_ids = get_active_discord_ids()
     except Exception as e:
         print(f"[WARN] DM購読者リスト取得失敗: {e}")
-        return
+        discord_ids = []
 
-    if not discord_ids:
-        return
+    if discord_ids:
+        send_dm_to_all(discord_ids, content, thumb_bytes, "emagram_thumb.jpg")
 
-    send_dm_to_all(discord_ids, content, thumb_bytes, "emagram_thumb.jpg")
+    try:
+        emails = get_active_emails()
+    except Exception as e:
+        print(f"[WARN] Push購読者リスト取得失敗: {e}")
+        emails = []
+
+    if emails:
+        try:
+            send_push_to_all(emails, "エマグラム", "新しいエマグラムが届きました", url=highres_url)
+        except Exception as e:
+            print(f"[WARN] OneSignal push送信失敗: {e}")
 
 
 def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:
@@ -414,7 +427,7 @@ def main() -> int:
 
     if post_combined(webhook_url, dt, thumb, highres_url):
         print("POSTED")
-        notify_dm_subscribers(build_content(dt, highres_url), thumb)
+        notify_dm_subscribers(build_content(dt, highres_url), thumb, highres_url)
         return 0
 
     return 1

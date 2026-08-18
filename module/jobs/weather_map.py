@@ -39,8 +39,9 @@ from module.utils.discord_utils import (
     post_discord_item_image_urls,
     post_discord_complete,
 )
-from module.utils.notion_subscribers import get_active_discord_ids
+from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails
 from module.utils.discord_dm import send_dm_to_all
+from module.utils.onesignal_push import send_push_to_all
 
 
 # =============================================================================
@@ -2069,24 +2070,37 @@ def discord_links_text() -> str:
     return "\n".join(["**参考リンク**"] + [f"🔗 [{t}](<{u}>)" for t, u in DISCORD_LINKS])
 
 
-def notify_dm_subscribers(content: str, thumb_path: str, thumb_mime: str) -> None:
-    """有料DM購読者（Notion管理）へ、公開チャンネルと同じ内容をDMする。
-    購読者取得やDM送信に失敗しても、公開チャンネルへの投稿自体は
+def notify_dm_subscribers(
+    content: str, thumb_path: str, thumb_mime: str, *, push_title: str = "", push_url: str = ""
+) -> None:
+    """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
+    Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
+    OneSignal Web Pushを送る（どちらも同じNotion DBのStatus判定を共有）。
+    購読者取得や送信に失敗しても、公開チャンネルへの投稿自体は
     既に完了しているため、ここでの例外は握りつぶしてログのみ出す。"""
     try:
         discord_ids = get_active_discord_ids()
     except Exception as e:
         print(f"[WARN] DM購読者リスト取得失敗: {e}")
-        return
+        discord_ids = []
 
-    if not discord_ids:
-        return
+    if discord_ids:
+        with open(thumb_path, "rb") as f:
+            thumb_bytes = f.read()
+        filename = "thumb.jpg" if thumb_mime == "image/jpeg" else "thumb.png"
+        send_dm_to_all(discord_ids, content, thumb_bytes, filename)
 
-    with open(thumb_path, "rb") as f:
-        thumb_bytes = f.read()
+    try:
+        emails = get_active_emails()
+    except Exception as e:
+        print(f"[WARN] Push購読者リスト取得失敗: {e}")
+        emails = []
 
-    filename = "thumb.jpg" if thumb_mime == "image/jpeg" else "thumb.png"
-    send_dm_to_all(discord_ids, content, thumb_bytes, filename)
+    if emails and push_title:
+        try:
+            send_push_to_all(emails, push_title, "新しい配信が届きました", url=push_url or None)
+        except Exception as e:
+            print(f"[WARN] OneSignal push送信失敗: {e}")
 
 
 def notify_discord_images(
@@ -2134,7 +2148,13 @@ def notify_discord_images(
                             suppress_embeds=True,
                         )
                         if filename in DM_SAFE_FILENAMES:
-                            notify_dm_subscribers(content, thumb_path, thumb_mime)
+                            notify_dm_subscribers(
+                                content,
+                                thumb_path,
+                                thumb_mime,
+                                push_title=DISCORD_TITLES.get(filename, filename),
+                                push_url=highres_url,
+                            )
                     except Exception as e:
                         print(f"[WARN] Discord thumbnail upload failed: {src_path} / {e}")
                         # 添付に失敗した場合だけ、R2 URLの自動プレビューに戻す。
@@ -2342,7 +2362,13 @@ def main_dashboard_jma() -> None:
                         suppress_embeds=True,
                     )
                     # 有料DM配信対象は気象庁直接取得版のみ(DM_SAFE_FILENAMES参照)。
-                    notify_dm_subscribers(content, thumb_path, thumb_mime)
+                    notify_dm_subscribers(
+                        content,
+                        thumb_path,
+                        thumb_mime,
+                        push_title=DISCORD_TITLES.get(filename, filename),
+                        push_url=url,
+                    )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
 
@@ -2445,7 +2471,13 @@ def main_layout4() -> None:
                         suppress_embeds=True,
                     )
                     if filename in DM_SAFE_FILENAMES:
-                        notify_dm_subscribers(content, thumb_path, thumb_mime)
+                        notify_dm_subscribers(
+                            content,
+                            thumb_path,
+                            thumb_mime,
+                            push_title=DISCORD_TITLES.get(filename, filename),
+                            push_url=url,
+                        )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
 

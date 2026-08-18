@@ -48,10 +48,13 @@ jobs:
       NOTION_PROP_AUTOGEN: "自動生成"
 
       # ------------------------------------------------------------
-      # 有料DM配信（気象庁公開データのみで構成しているため対象）
+      # 有料配信（気象庁公開データのみで構成しているため対象。
+      # Discord DM + PWA/メールログイン購読者へのOneSignal Push）
       # ------------------------------------------------------------
       DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
       NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
+      ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+      ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
 
       # ------------------------------------------------------------
       # Discord（公開チャンネル）
