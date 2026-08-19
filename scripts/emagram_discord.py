@@ -40,7 +40,7 @@ from PIL import Image, ImageDraw, ImageFont
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from module.utils.r2_utils import put_bytes, make_url
+from module.utils.r2_utils import put_bytes, get_bytes, make_url
 from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails
 from module.utils.discord_dm import send_dm_to_all
 from module.utils.onesignal_push import send_push_to_all
@@ -77,6 +77,12 @@ LABEL_H = 60
 THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1400"))
 THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "85"))
 R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "30")
+
+# 地点ごとの連続欠測回数を数え、一定回数を超えたらプレースホルダー画像内で
+# 目立たせる。観測は1日2回(00Z/12Z)なので、14回=7日間連続欠測が既定の閾値。
+# カウンタはR2に小さなJSONとして保存し、実行(GitHub Actions)をまたいで引き継ぐ。
+NO_DATA_STATE_KEY = "state/no_data_streak.json"
+NO_DATA_ALERT_STREAK = int(os.environ.get("EMAGRAM_NO_DATA_ALERT_STREAK", "14"))
 
 REQUEST_TIMEOUT_SECONDS = 60
 DISCORD_TIMEOUT_SECONDS = 30
@@ -148,24 +154,66 @@ def load_font(candidates: list, size: int):
     return ImageFont.load_default()
 
 
-def placeholder_image(name: str, dt: datetime) -> bytes:
-    """データが取得できなかった地点用の「データなし」プレースホルダー画像。"""
+def load_no_data_streaks() -> dict[str, int]:
+    """地点ごとの連続欠測回数をR2から読み込む。無ければ空の辞書。"""
+    try:
+        raw = get_bytes(NO_DATA_STATE_KEY)
+    except Exception as e:
+        print(f"[WARN] 欠測カウンタの読み込みに失敗: {e}", file=sys.stderr)
+        return {}
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        print(f"[WARN] 欠測カウンタのパースに失敗: {e}", file=sys.stderr)
+        return {}
+
+
+def save_no_data_streaks(streaks: dict[str, int]) -> None:
+    """地点ごとの連続欠測回数をR2に保存する。失敗しても配信自体は止めない。"""
+    try:
+        put_bytes(
+            NO_DATA_STATE_KEY,
+            json.dumps(streaks, ensure_ascii=False).encode("utf-8"),
+            content_type="application/json",
+            cache_control="no-cache",
+        )
+    except Exception as e:
+        print(f"[WARN] 欠測カウンタの保存に失敗: {e}", file=sys.stderr)
+
+
+def placeholder_image(name: str, dt: datetime, streak: int = 0) -> bytes:
+    """データが取得できなかった地点用のプレースホルダー画像。
+    連続欠測がNO_DATA_ALERT_STREAK回(既定14回=観測1日2回×7日分)以上続いている
+    場合は「欠測継続 要調査」を表示して目立たせる。"""
     img = Image.new("RGB", (CELL_W, CELL_H), "white")
     draw = ImageDraw.Draw(img)
 
     font_large = load_font(CJK_BOLD_CANDIDATES, 40)
     font_small = load_font(CJK_REGULAR_CANDIDATES, 24)
 
-    lines = [
-        ("データなし", font_large),
-        (f"{dt.strftime('%Y-%m-%d %H')}Z", font_small),
-    ]
+    if streak >= NO_DATA_ALERT_STREAK:
+        days = streak // 2
+        lines = [
+            ("⚠ 欠測継続 要調査", font_large),
+            (f"約{days}日間データなし", font_small),
+            (f"{dt.strftime('%Y-%m-%d %H')}Z", font_small),
+        ]
+        text_color = "red"
+    else:
+        lines = [
+            ("データなし", font_large),
+            (f"{dt.strftime('%Y-%m-%d %H')}Z", font_small),
+        ]
+        text_color = "black"
+
     total_h = sum(draw.textbbox((0, 0), t, font=f)[3] for t, f in lines) + 20 * (len(lines) - 1)
     y = (CELL_H - total_h) // 2
     for text, font in lines:
         bbox = draw.textbbox((0, 0), text, font=font)
         w = bbox[2] - bbox[0]
-        draw.text(((CELL_W - w) // 2, y), text, fill="black", font=font)
+        draw.text(((CELL_W - w) // 2, y), text, fill=text_color, font=font)
         y += (bbox[3] - bbox[1]) + 20
 
     buf = BytesIO()
@@ -177,14 +225,15 @@ RETRY_COUNT = 3
 RETRY_WAIT_SECONDS = 180
 
 
-def fetch_image_with_fallback(stnm: str, name: str, dt: datetime) -> bytes:
+def fetch_image_with_fallback(stnm: str, name: str, dt: datetime, streak: int) -> tuple[bytes, bool]:
     """当該時刻の画像を確保する。無ければプレースホルダー。
     地点間で時系列がずれるのを避けるため、前回観測への遡りはしない。
     一部地点はサーバー側の反映が観測から数時間後にずれ込むことがあるため、
-    取得できない場合は少し待って数回リトライしてから諦める。"""
+    取得できない場合は少し待って数回リトライしてから諦める。
+    戻り値: (画像bytes, データ取得に成功したか)"""
     img_bytes = fetch_image(stnm, dt)
     if img_bytes:
-        return img_bytes
+        return img_bytes, True
 
     for attempt in range(1, RETRY_COUNT + 1):
         print(f"RETRY {attempt}/{RETRY_COUNT}: {name} を{RETRY_WAIT_SECONDS}秒後に再試行します")
@@ -192,10 +241,11 @@ def fetch_image_with_fallback(stnm: str, name: str, dt: datetime) -> bytes:
         img_bytes = fetch_image(stnm, dt)
         if img_bytes:
             print(f"RETRY OK: {name}")
-            return img_bytes
+            return img_bytes, True
 
-    print(f"NO DATA: {name} はプレースホルダーを使用")
-    return placeholder_image(name, dt)
+    new_streak = streak + 1
+    print(f"NO DATA: {name} はプレースホルダーを使用（連続{new_streak}回目)")
+    return placeholder_image(name, dt, new_streak), False
 
 
 def build_grid_image(stations_with_images: list) -> bytes:
@@ -411,9 +461,13 @@ def main() -> int:
 
     dt = target_sounding_time()
 
-    stations_with_images = [
-        (name, fetch_image_with_fallback(stnm, name, dt)) for stnm, name in STATIONS
-    ]
+    streaks = load_no_data_streaks()
+    stations_with_images = []
+    for stnm, name in STATIONS:
+        img_bytes, ok = fetch_image_with_fallback(stnm, name, dt, streaks.get(stnm, 0))
+        streaks[stnm] = 0 if ok else streaks.get(stnm, 0) + 1
+        stations_with_images.append((name, img_bytes))
+    save_no_data_streaks(streaks)
 
     combined = build_grid_image(stations_with_images)
     combined = append_caption_bar(combined, dt)

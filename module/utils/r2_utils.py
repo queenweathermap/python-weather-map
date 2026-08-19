@@ -24,6 +24,7 @@ from typing import Optional, Dict, Any
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 
 def _env(name: str, default: str = "") -> str:
@@ -109,6 +110,24 @@ def put_bytes(
 
     s3 = _client()
     s3.put_object(Bucket=bucket, Key=k, Body=data, **extra)
+
+
+def get_bytes(key: str) -> Optional[bytes]:
+    """
+    R2からbytesを取得する。オブジェクトが存在しなければNoneを返す
+    （例: 状態ファイルの初回実行時にまだ何も無い場合）。
+    """
+    bucket = _must_env("R2_BUCKET")
+    k = normalize_key(key)
+    s3 = _client()
+    try:
+        resp = s3.get_object(Bucket=bucket, Key=k)
+        return resp["Body"].read()
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code in ("NoSuchKey", "404"):
+            return None
+        raise
 
 
 def make_url(key: str) -> str:
