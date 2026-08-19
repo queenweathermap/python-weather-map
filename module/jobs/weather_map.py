@@ -2302,7 +2302,10 @@ def notify_dm_subscribers(
         print(f"[WARN] DM購読者リスト取得失敗: {e}")
         discord_ids = []
 
-    if discord_ids:
+    # 有料購読はPWA配信(OneSignal Push)のみに一本化したため、Discord DMは既定で停止する。
+    # 既存のDiscord購読者向けに再開したくなった場合は、workflowのenvに
+    # DISCORD_DM_ENABLE: "1" を追加するだけで良い(コードの削除はまだしていない)。
+    if discord_ids and env_bool("DISCORD_DM_ENABLE", "0"):
         with open(thumb_path, "rb") as f:
             thumb_bytes = f.read()
         filename = "thumb.jpg" if thumb_mime == "image/jpeg" else "thumb.png"

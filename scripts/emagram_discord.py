@@ -78,6 +78,11 @@ THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1400"))
 THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "85"))
 R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "30")
 
+# 有料購読はPWA配信(OneSignal Push)のみに一本化したため、Discord DMは既定で停止する。
+# 既存のDiscord購読者向けに再開したくなった場合は、workflowのenvに
+# DISCORD_DM_ENABLE: "1" を追加するだけで良い(コードの削除はまだしていない)。
+DISCORD_DM_ENABLE = os.environ.get("DISCORD_DM_ENABLE", "0").strip().lower() in ("1", "true", "yes", "on")
+
 # 地点ごとの連続欠測回数を数え、一定回数を超えたらプレースホルダー画像内で
 # 目立たせる。観測は1日2回(00Z/12Z)なので、14回=7日間連続欠測が既定の閾値。
 # カウンタはR2に小さなJSONとして保存し、実行(GitHub Actions)をまたいで引き継ぐ。
@@ -410,7 +415,7 @@ def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str, dt
         print(f"[WARN] DM購読者リスト取得失敗: {e}")
         discord_ids = []
 
-    if discord_ids:
+    if discord_ids and DISCORD_DM_ENABLE:
         send_dm_to_all(discord_ids, content, thumb_bytes, "emagram_thumb.jpg")
 
     try:

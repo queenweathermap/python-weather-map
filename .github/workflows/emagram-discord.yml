@@ -26,8 +26,12 @@ jobs:
       R2_CLEANUP_DRY_RUN: "0"
 
       # ------------------------------------------------------------
-      # 有料配信（Discord DM + PWA/メールログイン購読者へのOneSignal Push）
+      # 有料配信（PWA/メールログイン購読者へのOneSignal Push）
+      # Discord DMは2026-08-19付けで停止（有料購読はPWA配信のみに一本化）。
+      # 当面はコードを残し、必要なら DISCORD_DM_ENABLE: "1" を追加するだけで
+      # 再開できるようにしてある。のちに正式に廃止・削除する予定。
       # ------------------------------------------------------------
+      DISCORD_DM_ENABLE: "0"
       DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
