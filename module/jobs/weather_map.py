@@ -1145,6 +1145,31 @@ def overlay_top_left_label(
     return img
 
 
+def build_period_labels_row(
+    width: int,
+    labels: List[Tuple[int, str]],
+    *,
+    font_size: int = 40,
+    pad: int = 10,
+) -> Image.Image:
+    """T=12/24/36/48/72ラベルを、指定したx中心位置に横並びで描いた白帯を作る。
+    labels: [(中心x座標, 表示文字列), ...]"""
+    font = _load_caption_font(font_size)
+    tmp_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    line_h = max(tmp_draw.textbbox((0, 0), text, font=font)[3] for _, text in labels)
+    height = line_h + pad * 2
+
+    row = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(row)
+    for center_x, text in labels:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = bbox[2] - bbox[0]
+        x = center_x - text_w / 2 - bbox[0]
+        y = pad - bbox[1]
+        draw.text((x, y), text, fill=(30, 30, 30), font=font)
+    return row
+
+
 def prepare_comp_panel(img: Image.Image, target_w: int) -> Image.Image:
     """
     COMP12/36/72の外周余白を整理してから、上段セル幅いっぱいまで拡大する。
@@ -1961,6 +1986,8 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     grid_cols = [c for c in (aupq_col, col2, col3, col4, col5) if c is not None]
     grid_row = None
     col3_x_in_grid_row = 0
+    col4_x_in_grid_row = 0
+    col5_x_in_grid_row = 0
     if grid_cols:
         grid_h = max(c.height for c in grid_cols)
         padded_cols = [pad_to_height(c, grid_h) for c in grid_cols]
@@ -1977,9 +2004,16 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             grid_row.paste(c, (x, 0))
         # col3(FXFE502列)はgrid_cols内でaupq_col,col2の次(index=2)にあたる。
         # FXJP854をこの列の真下に正確に揃えるため、実際の貼り付けx座標を控えておく。
+        # col4・col5も、最下段のT=12〜72ラベル行を各列の真下に揃えるために同様に控える。
         if col3 is not None:
             col3_index = grid_cols.index(col3)
             col3_x_in_grid_row = grid_positions[col3_index]
+        if col4 is not None:
+            col4_index = grid_cols.index(col4)
+            col4_x_in_grid_row = grid_positions[col4_index]
+        if col5 is not None:
+            col5_index = grid_cols.index(col5)
+            col5_x_in_grid_row = grid_positions[col5_index]
         # 1列目(left_col)はcol2(3列目)の元の高さに合わせて作られているが、
         # col2自体はここでgrid_h(4列目以降を含む最大高さ)まで白余白でパディングされる。
         # そのままだとleft_colの下端がgrid_rowの下端より短く、段差ができてしまうため、
@@ -2004,6 +2038,16 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # grid_row(2列目以降)がmain_grid内で実際に貼り付けられたx座標。
     grid_row_x_in_main = top_level_positions[-1] if left_col is not None and grid_row is not None else 0
 
+    # 最下段のT=72ラベル用に、col5(T72列)のmain_grid内での絶対x座標を控えておく。
+    # T=12/24/36/48はFXJP854の実際の貼り付け位置・幅を直接使う(下記)。
+    # col3・col4はcombine_vertical()が既定でセンター揃え(halign="center")のため、
+    # col3.width/col4.width基準で単純に4等分すると、行ごとの元画像の幅の違いで
+    # 実際のパネル位置とズレることがある。
+    col5_abs_x = grid_row_x_in_main + col5_x_in_grid_row
+    period_labels: List[Tuple[int, str]] = []
+    if col5 is not None:
+        period_labels.append((col5_abs_x + col5.width // 2, "T=72"))
+
     # FXJP854(T12/24/36/48)を、列4(FXFE502列)・列5(FXFE504列)の真下だけに
     # 独立した段として追加する(他列の下には余白のまま何も置かない)。
     fxjp854_parts = [im for im in (fxjp854_upper, fxjp854_lower) if im is not None]
@@ -2013,11 +2057,36 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         strip = Image.new("RGB", (main_grid.width, fxjp854_row.height), "white")
         strip.paste(fxjp854_row.convert("RGB"), (left_pad_w, 0))
         final_canvas = combine_vertical([main_grid, strip], gap=LAYOUT_GAP, halign="left")
+
+        # T=12/24/36/48は、実際にfxjp854_upper/lowerが貼り付けられた
+        # x座標・幅をそのまま使う(fxjp854_upper内で左半分=T12・右半分=T24、
+        # fxjp854_lower内で左半分=T36・右半分=T48という構成に対応する)。
+        x = left_pad_w
+        if fxjp854_upper is not None:
+            period_labels.append((x + fxjp854_upper.width // 4, "T=12"))
+            period_labels.append((x + fxjp854_upper.width * 3 // 4, "T=24"))
+            x += fxjp854_upper.width
+        if fxjp854_lower is not None:
+            period_labels.append((x + fxjp854_lower.width // 4, "T=36"))
+            period_labels.append((x + fxjp854_lower.width * 3 // 4, "T=48"))
     else:
         final_canvas = main_grid
+        # FXJP854が取得できなかった場合のフォールバック。col3/col4基準のため
+        # 多少ズレる可能性があるが、無いよりはまし。
+        col3_abs_x = grid_row_x_in_main + col3_x_in_grid_row
+        col4_abs_x = grid_row_x_in_main + col4_x_in_grid_row
+        if col3 is not None:
+            period_labels.append((col3_abs_x + col3.width // 4, "T=12"))
+            period_labels.append((col3_abs_x + col3.width * 3 // 4, "T=24"))
+        if col4 is not None:
+            period_labels.append((col4_abs_x + col4.width // 4, "T=36"))
+            period_labels.append((col4_abs_x + col4.width * 3 // 4, "T=48"))
 
     final_canvas = trim_bottom_whitespace(final_canvas, bottom_pad=20)
     final_canvas = trim_right_whitespace(final_canvas, right_pad=20)
+    if period_labels:
+        labels_row = build_period_labels_row(final_canvas.width, period_labels)
+        final_canvas = combine_vertical([final_canvas, labels_row], gap=4, halign="left")
     final_canvas = overlay_top_left_label(final_canvas, issue_time_overlay_text(issue_dt_jst))
     caption = jma_source_caption()
     final_canvas = append_caption_bar(final_canvas, caption)
