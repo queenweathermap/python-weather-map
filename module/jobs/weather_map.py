@@ -62,6 +62,13 @@ JMA_SKAISETU_URL = "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_
 JMA_FEFE19_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fefe19.png"
 JMA_FXXN519_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxxn519.png"
 JMA_FZCX50_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fzcx50.png"
+
+# OneSignal pushの遷移先。以前は配信画像のR2直URLを指していたが、iOSの
+# ホーム画面追加(スタンドアロン)アプリでは外部ドメインへの直リンクが
+# ツールバーの無い画面のまま身動きが取れなくなることがあるため、
+# 必ずこのPWA会員ページ(自前のモーダルビューアで画像を表示する)を開かせる。
+PWA_MEMBER_URL = os.environ.get("PWA_MEMBER_URL", "https://177chart.com/member/").strip()
+
 DATA_DIR = "/tmp/jma_data"
 OUTPUT_DIR = "/tmp/jma_weather_map"
 
@@ -2319,7 +2326,7 @@ def notify_dm_subscribers(
 
     if emails and push_title:
         try:
-            send_push_to_all(emails, push_title, "新しい配信が届きました", url=push_url or None)
+            send_push_to_all(emails, push_title, "新しい配信が届きました", url=PWA_MEMBER_URL)
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
 

@@ -83,6 +83,12 @@ R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "30")
 # DISCORD_DM_ENABLE: "1" を追加するだけで良い(コードの削除はまだしていない)。
 DISCORD_DM_ENABLE = os.environ.get("DISCORD_DM_ENABLE", "0").strip().lower() in ("1", "true", "yes", "on")
 
+# OneSignal pushの遷移先。以前は配信画像のR2直URLを指していたが、iOSの
+# ホーム画面追加(スタンドアロン)アプリでは外部ドメインへの直リンクが
+# ツールバーの無い画面のまま身動きが取れなくなることがあるため、
+# 必ずこのPWA会員ページ(自前のモーダルビューアで画像を表示する)を開かせる。
+PWA_MEMBER_URL = os.environ.get("PWA_MEMBER_URL", "https://177chart.com/member/").strip()
+
 # 地点ごとの連続欠測回数を数え、一定回数を超えたらプレースホルダー画像内で
 # 目立たせる。観測は1日2回(00Z/12Z)なので、14回=7日間連続欠測が既定の閾値。
 # カウンタはR2に小さなJSONとして保存し、実行(GitHub Actions)をまたいで引き継ぐ。
@@ -426,7 +432,7 @@ def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str, dt
 
     if emails:
         try:
-            send_push_to_all(emails, "エマグラム", "新しいエマグラムが届きました", url=highres_url)
+            send_push_to_all(emails, "エマグラム", "新しいエマグラムが届きました", url=PWA_MEMBER_URL)
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
