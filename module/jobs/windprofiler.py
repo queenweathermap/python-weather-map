@@ -4,8 +4,13 @@
 #
 # 気象庁「ウィンドプロファイラ」(WINDAS) 全33地点のチャートを
 # 公式ページ (https://www.jma.go.jp/bosai/windprofiler/) から
-# Playwrightでスクリーンショットし、1枚の画像（4列×9行、地点ごとの解像度は
-# 変えない）に結合してDiscordへ配信する。
+# Playwrightでスクリーンショットし、1枚の画像（7列×5行、地点ごとの解像度は
+# 変えない）に結合してDiscordへ配信する（main()、1日4回、購読者向け）。
+#
+# 加えて、実行のたびに地点ごとのraw画像も個別にR2へ保存しておき、1日1回
+# （最後の実行の後）その日の分を「1地点＝1段、実行分を横に並べる」形に
+# 組み直して、自分用のDiscordチャンネルへ通常投稿する
+# （main_daily_stations()、購読者向け配信とは別枠・DMではない）。
 #
 # チャートはJS(SVG)描画のSPAで、ページ内の #wpr-chart 要素が
 # 「地点名・緯度経度」ラベルとグラフ本体（時間の向き矢印込み）をまとめて含む。
@@ -35,7 +40,7 @@ from PIL import Image, ImageDraw, ImageFont
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from module.utils.r2_utils import put_bytes, make_url
+from module.utils.r2_utils import put_bytes, get_bytes, list_keys_with_prefix, make_url
 
 JST = timezone(timedelta(hours=9))
 
@@ -350,6 +355,140 @@ def post_combined(webhook_url: str, dt_jst: datetime, thumb: bytes, url: str) ->
     return False
 
 
+def station_key(code: str, dt_jst: datetime) -> str:
+    """地点1件・1回分のraw画像のR2キー（R2_PREFIXは別途自動で付く）。"""
+    return f"stations/{code}/{dt_jst.strftime('%Y%m%d%H%M')}.png"
+
+
+def upload_station_images(all_images: List[Tuple[str, bytes]], dt_jst: datetime) -> None:
+    """地点ごとのraw画像を個別にR2へ保存する（1日1回のmain_daily_stations()が
+    後でまとめ直すための材料）。購読者向けDiscord配信(main())の成否には
+    影響させないよう、失敗しても例外は握りつぶしログのみ出す。"""
+    for (code, name), (_name, img_bytes) in zip(STATIONS_ALL, all_images):
+        try:
+            put_bytes(station_key(code, dt_jst), img_bytes, content_type="image/png")
+        except Exception as e:
+            print(f"[WARN] {name} ({code}) の個別画像アップロードに失敗: {e}", file=sys.stderr)
+
+
+def build_daily_station_sheets(dt_jst: datetime, *, stations_per_sheet: int = 11) -> List[bytes]:
+    """
+    dt_jstと同じJST日付に撮影された、地点ごとの生画像を集めて
+    「1地点＝横一列（その日の全実行分を横に並べる）」にし、
+    stations_per_sheet地点ずつ複数枚のシートに縦積みする。
+
+    各画像はサイト側のローリングウィンドウ（約7時間分）をそのまま切り出したもので、
+    実行間隔(6時間)より長いため隣り合うコマは約1時間分重なる。真に継ぎ目のない
+    24時間軸を作るには元データからの再描画が必要だが、それは元データを持たない
+    このジョブでは不可能なため、「多少重なりのある複数コマを並べる」方式にする。
+    """
+    sheets: List[bytes] = []
+    rows: List[Image.Image] = []
+
+    for code, name in STATIONS_ALL:
+        keys = sorted(
+            k for k in list_keys_with_prefix(f"stations/{code}/{dt_jst.strftime('%Y%m%d')}")
+            if k.endswith(".png")
+        )
+        if not keys:
+            continue
+
+        panels = []
+        for key in keys:
+            data = get_bytes(key)
+            if data is None:
+                continue
+            with Image.open(BytesIO(data)) as im:
+                rgb = im.convert("RGB")
+                if rgb.size != (CELL_W, CELL_H):
+                    rgb = rgb.resize((CELL_W, CELL_H), Image.Resampling.LANCZOS)
+                panels.append(rgb)
+        if not panels:
+            continue
+
+        row = Image.new("RGB", (CELL_W * len(panels), CELL_H), "white")
+        for i, panel in enumerate(panels):
+            row.paste(panel, (i * CELL_W, 0))
+        rows.append(row)
+
+        if len(rows) == stations_per_sheet:
+            sheets.append(_stack_rows_to_png(rows))
+            rows = []
+
+    if rows:
+        sheets.append(_stack_rows_to_png(rows))
+
+    return sheets
+
+
+def _stack_rows_to_png(rows: List[Image.Image]) -> bytes:
+    max_w = max(r.width for r in rows)
+    total_h = sum(r.height for r in rows)
+    canvas = Image.new("RGB", (max_w, total_h), "white")
+    y = 0
+    for row in rows:
+        canvas.paste(row, (0, y))
+        y += row.height
+
+    buf = BytesIO()
+    canvas.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def post_daily_station_sheets(webhook_url: str, dt_jst: datetime, sheets: List[bytes]) -> bool:
+    """自分用チャンネルへ、その日の「1地点1段・全実行分横並び」シートをそのまま投稿する
+    （購読者向けDiscord/PWA配信とは別枠。DMではなく通常のWebhook投稿）。"""
+    content = (
+        f"🌀 **ウィンドプロファイラ 1日まとめ（地点別） / {dt_jst.strftime('%Y-%m-%d')}**\n"
+        f"1地点＝1段、その日の実行分（最大4回、約1時間ずつ重なりあり）を横に並べています。"
+    )
+    payload = {
+        "username": "ウィンドプロファイラ（自分用）",
+        "content": content,
+        "flags": 4,  # SUPPRESS_EMBEDS
+    }
+    files = {
+        "payload_json": (None, json.dumps(payload)),
+    }
+    for i, sheet in enumerate(sheets):
+        files[f"files[{i}]"] = (f"windprofiler_daily_{i + 1}.png", sheet, "image/png")
+
+    try:
+        r = requests.post(webhook_url, files=files, timeout=DISCORD_TIMEOUT_SECONDS)
+    except requests.RequestException as exc:
+        print(f"ERROR: Discord投稿中に例外が発生しました: {exc}", file=sys.stderr)
+        return False
+
+    if 200 <= r.status_code < 300:
+        return True
+
+    print(f"ERROR: Discord投稿失敗 status={r.status_code} body={r.text[:500]}", file=sys.stderr)
+    return False
+
+
+def main_daily_stations() -> int:
+    """1日1回（最後の実行の後）、その日の地点別raw画像を「1地点1段・横並び」に
+    組み直し、自分用のDiscordチャンネルへ通常投稿する（DMではない）。
+    購読者向けのDiscord/PWA配信（main()）とは完全に独立しており、影響しない。"""
+    webhook_url = os.environ.get("DISCORD_WINDPROFILER_DAILY_WEBHOOK_URL", "").strip()
+    if not webhook_url:
+        print("ERROR: DISCORD_WINDPROFILER_DAILY_WEBHOOK_URL未設定", file=sys.stderr)
+        return 1
+
+    dt_jst = _jst_now()
+
+    sheets = build_daily_station_sheets(dt_jst)
+    if not sheets:
+        print("[WARN] 本日分の地点別画像が見つかりませんでした。スキップします")
+        return 1
+
+    if post_daily_station_sheets(webhook_url, dt_jst, sheets):
+        print(f"POSTED ({len(sheets)}枚)")
+        return 0
+
+    return 1
+
+
 def main() -> int:
     webhook_url = os.environ.get("DISCORD_WINDPROFILER_WEBHOOK_URL", "").strip()
     if not webhook_url:
@@ -359,6 +498,7 @@ def main() -> int:
     dt_jst = _jst_now()
 
     all_images = screenshot_all_stations()
+    upload_station_images(all_images, dt_jst)
 
     now_utc = datetime.now(timezone.utc)
     key_stub = f"{dt_jst.strftime('%Y%m%d%H%M')}_{now_utc.strftime('%S')}"

@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import boto3
 from botocore.config import Config
@@ -128,6 +128,33 @@ def get_bytes(key: str) -> Optional[bytes]:
         if code in ("NoSuchKey", "404"):
             return None
         raise
+
+
+def list_keys_with_prefix(prefix: str) -> List[str]:
+    """
+    指定したprefix（R2_PREFIXは自動で先頭に付く）に一致するオブジェクトの
+    キー一覧を返す。戻り値はput_bytes/get_bytesと同じ「R2_PREFIXを含まない」
+    形式（呼び出し側でそのままget_bytes()に渡せる）。
+    例: 1日分のウィンドプロファイラ画像をまとめてZip化する際に使う。
+    """
+    bucket = _must_env("R2_BUCKET")
+    p = normalize_key(prefix)
+    own_prefix_len = len(p) - len(prefix.lstrip("/"))
+    s3 = _client()
+
+    keys: List[str] = []
+    continuation_token = None
+    while True:
+        kwargs: Dict[str, Any] = {"Bucket": bucket, "Prefix": p}
+        if continuation_token:
+            kwargs["ContinuationToken"] = continuation_token
+        resp = s3.list_objects_v2(**kwargs)
+        keys.extend(obj["Key"][own_prefix_len:] for obj in resp.get("Contents", []))
+        if not resp.get("IsTruncated"):
+            break
+        continuation_token = resp.get("NextContinuationToken")
+
+    return keys
 
 
 def make_url(key: str) -> str:
