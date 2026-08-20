@@ -4,7 +4,7 @@
 #
 # 秋田・気象まとめ投稿（本番エントリ）
 #   ・「昼の長さ(日の出/日の入り)」と「過去3年の気温(冬は積雪も)比較」の2枚を生成し、
-#     Discord・Bluesky・X・Threads すべてに **1投稿2枚** でまとめて投稿する。
+#     Discord・Bluesky・Threads・Instagram すべてに **1投稿2枚** でまとめて投稿する。
 #   ・図の生成は climate_3yr / daylength の build_figure を再利用（重複なし）。
 #   ・期間・投稿日ゲート・R2・Discordのwebhookも climate_3yr の関数を再利用。
 #
