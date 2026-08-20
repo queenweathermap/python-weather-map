@@ -371,18 +371,21 @@ def upload_station_images(all_images: List[Tuple[str, bytes]], dt_jst: datetime)
             print(f"[WARN] {name} ({code}) の個別画像アップロードに失敗: {e}", file=sys.stderr)
 
 
-def build_daily_station_sheets(dt_jst: datetime, *, stations_per_sheet: int = 11) -> List[bytes]:
+def build_daily_station_grid(dt_jst: datetime, *, cols: int = 2) -> Tuple[bytes, int]:
     """
     dt_jstと同じJST日付に撮影された、地点ごとの生画像を集めて
     「1地点＝横一列（その日の全実行分を横に並べる）」にし、
-    stations_per_sheet地点ずつ複数枚のシートに縦積みする。
+    全地点をcols列のグリッドに並べて1枚の画像にする
+    （「全部入り天気図」と同程度の解像度で問題なく扱えている実績があるため、
+    分割せず1枚にまとめる）。
 
     各画像はサイト側のローリングウィンドウ（約7時間分）をそのまま切り出したもので、
     実行間隔(6時間)より長いため隣り合うコマは約1時間分重なる。真に継ぎ目のない
     24時間軸を作るには元データからの再描画が必要だが、それは元データを持たない
     このジョブでは不可能なため、「多少重なりのある複数コマを並べる」方式にする。
+
+    戻り値: (PNGのbytes, 含まれる地点数)
     """
-    sheets: List[bytes] = []
     rows: List[Image.Image] = []
 
     for code, name in STATIONS_ALL:
@@ -411,47 +414,38 @@ def build_daily_station_sheets(dt_jst: datetime, *, stations_per_sheet: int = 11
             row.paste(panel, (i * CELL_W, 0))
         rows.append(row)
 
-        if len(rows) == stations_per_sheet:
-            sheets.append(_stack_rows_to_png(rows))
-            rows = []
+    if not rows:
+        return b"", 0
 
-    if rows:
-        sheets.append(_stack_rows_to_png(rows))
-
-    return sheets
-
-
-def _stack_rows_to_png(rows: List[Image.Image]) -> bytes:
-    max_w = max(r.width for r in rows)
-    total_h = sum(r.height for r in rows)
-    canvas = Image.new("RGB", (max_w, total_h), "white")
-    y = 0
-    for row in rows:
-        canvas.paste(row, (0, y))
-        y += row.height
+    row_w = max(r.width for r in rows)
+    grid_rows = ceil(len(rows) / cols)
+    canvas = Image.new("RGB", (row_w * cols, CELL_H * grid_rows), "white")
+    for idx, row in enumerate(rows):
+        col = idx % cols
+        grid_row = idx // cols
+        canvas.paste(row, (col * row_w, grid_row * CELL_H))
 
     buf = BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
+    return buf.getvalue(), len(rows)
 
 
-def post_daily_station_sheets(webhook_url: str, dt_jst: datetime, sheets: List[bytes]) -> bool:
-    """自分用チャンネルへ、その日の「1地点1段・全実行分横並び」シートをそのまま投稿する
-    （購読者向けDiscord/PWA配信とは別枠。DMではなく通常のWebhook投稿）。"""
+def post_daily_station_grid(webhook_url: str, dt_jst: datetime, image_bytes: bytes) -> bool:
+    """既存の購読者向けjma-windprofilerチャンネルへ、その日の「1地点1段・全実行分
+    横並び」グリッドを通常投稿する（DMではなく、main()と同じWebhookを使う）。"""
     content = (
         f"🌀 **ウィンドプロファイラ 1日まとめ（地点別） / {dt_jst.strftime('%Y-%m-%d')}**\n"
         f"1地点＝1段、その日の実行分（最大4回、約1時間ずつ重なりあり）を横に並べています。"
     )
     payload = {
-        "username": "ウィンドプロファイラ（自分用）",
+        "username": "ウィンドプロファイラ（1日まとめ）",
         "content": content,
         "flags": 4,  # SUPPRESS_EMBEDS
     }
     files = {
         "payload_json": (None, json.dumps(payload)),
+        "files[0]": ("windprofiler_daily.png", image_bytes, "image/png"),
     }
-    for i, sheet in enumerate(sheets):
-        files[f"files[{i}]"] = (f"windprofiler_daily_{i + 1}.png", sheet, "image/png")
 
     try:
         r = requests.post(webhook_url, files=files, timeout=DISCORD_TIMEOUT_SECONDS)
@@ -467,23 +461,24 @@ def post_daily_station_sheets(webhook_url: str, dt_jst: datetime, sheets: List[b
 
 
 def main_daily_stations() -> int:
-    """1日1回（最後の実行の後）、その日の地点別raw画像を「1地点1段・横並び」に
-    組み直し、自分用のDiscordチャンネルへ通常投稿する（DMではない）。
-    購読者向けのDiscord/PWA配信（main()）とは完全に独立しており、影響しない。"""
-    webhook_url = os.environ.get("DISCORD_WINDPROFILER_DAILY_WEBHOOK_URL", "").strip()
+    """1日1回（最後の実行の後）、その日の地点別raw画像を「1地点1段・横並び」の
+    1枚のグリッド画像に組み直し、既存の購読者向けjma-windprofilerチャンネルへ
+    通常投稿する（main()の1日4回の配信内容とは別に追加投稿されるだけで、
+    main()自体には影響しない）。"""
+    webhook_url = os.environ.get("DISCORD_WINDPROFILER_WEBHOOK_URL", "").strip()
     if not webhook_url:
-        print("ERROR: DISCORD_WINDPROFILER_DAILY_WEBHOOK_URL未設定", file=sys.stderr)
+        print("ERROR: DISCORD_WINDPROFILER_WEBHOOK_URL未設定", file=sys.stderr)
         return 1
 
     dt_jst = _jst_now()
 
-    sheets = build_daily_station_sheets(dt_jst)
-    if not sheets:
+    image_bytes, station_count = build_daily_station_grid(dt_jst)
+    if station_count == 0:
         print("[WARN] 本日分の地点別画像が見つかりませんでした。スキップします")
         return 1
 
-    if post_daily_station_sheets(webhook_url, dt_jst, sheets):
-        print(f"POSTED ({len(sheets)}枚)")
+    if post_daily_station_grid(webhook_url, dt_jst, image_bytes):
+        print(f"POSTED ({station_count}地点、1枚)")
         return 0
 
     return 1

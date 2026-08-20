@@ -16,10 +16,10 @@ jobs:
       TZ: Asia/Tokyo
 
       # ------------------------------------------------------------
-      # Discord（自分用チャンネル。購読者向けjma-windprofilerとは別webhook。
-      # DMではなく通常のチャンネル投稿）
+      # Discord（既存のjma-windprofilerチャンネルと同じWebhookを再利用。
+      # DMではなく通常のチャンネル投稿として、1日まとめを追加投稿する）
       # ------------------------------------------------------------
-      DISCORD_WINDPROFILER_DAILY_WEBHOOK_URL: ${{ secrets.DISCORD_WINDPROFILER_DAILY_WEBHOOK_URL }}
+      DISCORD_WINDPROFILER_WEBHOOK_URL: ${{ secrets.DISCORD_WINDPROFILER_WEBHOOK_URL }}
 
       # ------------------------------------------------------------
       # R2（main()と同じバケット・prefixを共有し、地点別rawの保存/読み出しに使う）
