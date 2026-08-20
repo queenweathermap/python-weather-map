@@ -94,41 +94,5 @@ def send_dm_to_all(discord_user_ids: list, content: str, image_bytes: bytes, fil
         print(f"DM {'OK' if ok else 'FAILED'}: {discord_user_id}")
 
 
-def send_dm_multi(discord_user_id: str, content: str, images: list) -> bool:
-    """指定ユーザーへ、テキスト内容＋複数枚の画像添付のDMを送る（1メッセージにまとめる）。
-    images: [(filename, image_bytes), ...]"""
-    channel_id = _open_dm_channel(discord_user_id)
-    if not channel_id:
-        return False
-
-    files = {"payload_json": (None, json.dumps({"content": content}))}
-    for i, (filename, image_bytes) in enumerate(images):
-        files[f"files[{i}]"] = (
-            filename,
-            image_bytes,
-            "image/jpeg" if filename.endswith((".jpg", ".jpeg")) else "image/png",
-        )
-
-    try:
-        r = requests.post(
-            f"{API_BASE}/channels/{channel_id}/messages",
-            headers=_headers(),
-            files=files,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as exc:
-        print(f"ERROR: DM送信中に例外 ({discord_user_id}): {exc}", file=sys.stderr)
-        return False
-
-    if 200 <= r.status_code < 300:
-        return True
-
-    print(f"ERROR: DM送信失敗 ({discord_user_id}) status={r.status_code} body={r.text[:300]}", file=sys.stderr)
-    return False
 
 
-def send_dm_multi_to_all(discord_user_ids: list, content: str, images: list) -> None:
-    """購読者全員へ、複数枚まとめたDMを順に送る。1件の失敗が全体を止めないようにする。"""
-    for discord_user_id in discord_user_ids:
-        ok = send_dm_multi(discord_user_id, content, images)
-        print(f"DM {'OK' if ok else 'FAILED'}: {discord_user_id}")

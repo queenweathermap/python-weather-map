@@ -26,7 +26,6 @@ import io
 import math
 import os
 import re
-import sys
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple

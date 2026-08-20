@@ -20,7 +20,7 @@ import json
 import os
 import urllib.request
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 # =============================================================================
 # 設定
@@ -92,47 +92,6 @@ def _add_label_banner(img_bytes: bytes, label: str) -> bytes:
         return buf.getvalue()
     except Exception as e:
         print(f"[WARN] label追加失敗: {e}")
-        return img_bytes
-
-
-def _split_wind_two_cols(img_bytes: bytes) -> bytes:
-    """風速帳票（秋田県）を 沿岸 / 内陸 で垂直分割して横2列に並べる。
-    分割点: 左端列の色変化（沿岸→内陸 の section header row）を検出。
-    検出失敗時は縦半分で分割。
-    """
-    try:
-        from PIL import Image
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        W, H = img.size
-        px = img.load()
-
-        split_y = None
-        scan_xs = [2, 4, 6, 8, 10]
-        prev_colors = [(px[x, 0][0], px[x, 0][1], px[x, 0][2]) for x in scan_xs]
-        for y in range(10, H - 10):
-            cur_colors = [(px[x, y][0], px[x, y][1], px[x, y][2]) for x in scan_xs]
-            diffs = [abs(c[0]-p[0])+abs(c[1]-p[1])+abs(c[2]-p[2])
-                     for c, p in zip(cur_colors, prev_colors)]
-            if sum(diffs) > 300 and y > H * 0.3:
-                split_y = y
-                break
-            prev_colors = cur_colors
-
-        if split_y is None:
-            split_y = H // 2
-
-        top = img.crop((0, 0, W, split_y))
-        bot = img.crop((0, split_y, W, H))
-        new_img = Image.new("RGB", (W * 2, max(top.height, bot.height)), (255, 255, 255))
-        new_img.paste(top, (0, 0))
-        new_img.paste(bot, (W, 0))
-
-        buf = io.BytesIO()
-        new_img.save(buf, format="PNG", optimize=True)
-        print(f"[INFO] wind split at y={split_y} (H={H})")
-        return buf.getvalue()
-    except Exception as e:
-        print(f"[WARN] wind split 失敗: {e}")
         return img_bytes
 
 

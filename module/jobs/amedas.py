@@ -2,13 +2,13 @@
 # =============================================================================
 # module/jobs/amedas.py
 #
-# JMA AMeDAS データ → Discord(#amedas) PNG 画像配信
-# urllib + Pillow のみ・認証不要・Playwright不使用
+# JMA AMeDAS データ / WCN画面 → Discord(#amedas) 画像配信
 #
+# main()     : JMA公開API(urllib + Pillow, 認証不要)から鷹巣・秋田・横手
+#              3地点の時系列詳細テーブルPNGを作る。
+# main_wcn() : WCN(Weathercaster.jp)会員ページを Playwright でスクリーンショット
+#              （積算降水量/気温ランキング等）。
 # 配信: 朝3時 / 午後3時（JST）
-# 出力:
-#   [1] 秋田県 各局一覧（気温・最高最低・湿度・風速・1h/24h降水）
-#   [2] 全国ランキング（気温高低・1h/3h/24h降水・最大風速・最小湿度・積雪深）
 # =============================================================================
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from typing import Dict, List, Optional, Tuple
 # JMA AMeDAS 公開API（認証不要）
 # =============================================================================
 LATEST_TIME_URL = "https://www.jma.go.jp/bosai/amedas/data/latest_time.json"
-AMEDAS_TABLE_URL = "https://www.jma.go.jp/bosai/amedas/const/amedastable.json"
 MAP_BASE_URL = "https://www.jma.go.jp/bosai/amedas/data/map"
 
 DISCORD_AMEDAS_WEBHOOK_URL = os.environ.get("DISCORD_AMEDAS_WEBHOOK_URL", "")
@@ -40,11 +39,6 @@ JMA_AMEDAS_URL = (
 )
 
 WCN_KISHO_URL = "https://www.weathercaster.jp/member/member_only/kisho_shiryo/"
-
-# JMA AMeDAS コードプレフィックス 32 = 秋田県
-AKITA_CODE_PREFIX = "32"
-
-RANK_TOP_N = int(os.environ.get("AMEDAS_RANK_TOP_N", "10"))
 
 JST = timezone(timedelta(hours=9))
 
@@ -69,7 +63,6 @@ C_ROW_ODD    = (255, 255, 255)
 C_ROW_EVEN   = (238, 246, 255)
 C_BORDER     = (190, 205, 220)
 C_TEXT       = (30,  30,  30)
-C_SECTION_BG = (60, 110, 170)
 
 FONT_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # ubuntu apt
@@ -133,23 +126,6 @@ def _hourly_ts_list(base_utc: datetime, hours: int) -> List[str]:
 
 
 # =============================================================================
-# 地点テーブル
-# =============================================================================
-
-def _load_akita_stations(table: dict) -> Dict[str, str]:
-    result = {}
-    for code, info in table.items():
-        if not code.startswith(AKITA_CODE_PREFIX):
-            continue
-        elems = info.get("elems", "")
-        if not elems or elems[0] != "1":
-            continue
-        result[code] = info.get("kjName", code)
-    print(f"[INFO] 秋田県局（気温あり）: {len(result)} stations")
-    return dict(sorted(result.items()))
-
-
-# =============================================================================
 # マップ一括取得
 # =============================================================================
 
@@ -161,123 +137,6 @@ def _fetch_maps(ts_list: List[str]) -> Dict[str, dict]:
             maps[ts] = data
     print(f"[INFO] maps fetched: {len(maps)}/{len(ts_list)}")
     return maps
-
-
-# =============================================================================
-# データ集計（秋田県）
-# =============================================================================
-
-def _collect(
-    akita: Dict[str, str],
-    maps: Dict[str, dict],
-    ts_list: List[str],
-    jst_today_start_utc: datetime,
-) -> List[dict]:
-    results = []
-    for code, name in akita.items():
-        latest_entry = maps.get(ts_list[0], {}).get(code, {}) if ts_list else {}
-
-        temp     = _val(latest_entry, "temp")
-        wind     = _val(latest_entry, "wind")
-        snow     = _val(latest_entry, "snow")
-        wind_dir = _val(latest_entry, "windDirection")
-        humidity = _val(latest_entry, "humidity")
-
-        daily_temps: List[float] = []
-        rn_by_ts: List[Tuple[datetime, float]] = []
-
-        for ts_str in ts_list:
-            ts_utc = datetime.strptime(ts_str, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-            entry = maps.get(ts_str, {}).get(code, {})
-            t_val  = _val(entry, "temp")
-            rn_val = _val(entry, "rn")
-            if t_val is not None and ts_utc >= jst_today_start_utc:
-                daily_temps.append(t_val)
-            if rn_val is not None:
-                rn_by_ts.append((ts_utc, rn_val))
-
-        max_temp = max(daily_temps) if daily_temps else None
-        min_temp = min(daily_temps) if daily_temps else None
-
-        rn_sorted = sorted(rn_by_ts, key=lambda x: x[0], reverse=True)
-        rn1h  = rn_sorted[0][1] if rn_sorted else 0.0
-        rn3h  = sum(v for _, v in rn_sorted[:3])
-        rn24h = sum(v for _, v in rn_sorted[:24])
-
-        wd_jp = WIND_DIR_JP[int(wind_dir) - 1] if wind_dir and 1 <= wind_dir <= 16 else ""
-
-        results.append({
-            "name":     name,
-            "temp":     temp,
-            "max_temp": max_temp,
-            "min_temp": min_temp,
-            "humidity": humidity,
-            "wind":     wind,
-            "wind_dir": wd_jp,
-            "snow":     snow,
-            "rn1h":     rn1h,
-            "rn3h":     rn3h,
-            "rn24h":    rn24h,
-        })
-    return results
-
-
-# =============================================================================
-# 全国ランキング
-# =============================================================================
-
-def _ranking(maps: Dict[str, dict], ts_list: List[str], table: dict):
-    latest_map = maps.get(ts_list[0], {}) if ts_list else {}
-
-    def name_of(code):
-        v = table.get(code)
-        return v.get("kjName", code) if isinstance(v, dict) else code
-
-    temps, winds, snows, hums = [], [], [], []
-    for code, obs in latest_map.items():
-        nm = name_of(code)
-        t = _val(obs, "temp")
-        w = _val(obs, "wind")
-        s = _val(obs, "snow")
-        h = _val(obs, "humidity")
-        if t is not None: temps.append((nm, t))
-        if w is not None: winds.append((nm, w))
-        if s is not None and s > 0: snows.append((nm, s))
-        if h is not None: hums.append((nm, h))
-
-    # 積算降水（maps 共用）
-    rn_totals: Dict[str, List[float]] = {}
-    for ts_str in ts_list[:24]:
-        for code, obs in maps.get(ts_str, {}).items():
-            v = _val(obs, "rn")
-            if v is not None:
-                rn_totals.setdefault(code, []).append(v)
-
-    rn1h_rank, rn3h_rank, rn24h_rank = [], [], []
-    for code, vals in rn_totals.items():
-        if not isinstance(table.get(code), dict):
-            continue
-        nm = name_of(code)
-        v1  = vals[0] if vals else 0.0
-        v3  = sum(vals[:3])
-        v24 = sum(vals[:24])
-        if v1  > 0: rn1h_rank.append((nm, v1))
-        if v3  > 0: rn3h_rank.append((nm, v3))
-        if v24 > 0: rn24h_rank.append((nm, v24))
-
-    def top(lst, n=RANK_TOP_N, reverse=True):
-        return sorted(lst, key=lambda x: x[1], reverse=reverse)[:n]
-
-    return {
-        "hot":    top(temps),
-        "cold":   top(temps, reverse=False),
-        "rn1h":   top(rn1h_rank),
-        "rn3h":   top(rn3h_rank),
-        "rn24h":  top(rn24h_rank),
-        "wind":   top(winds),
-        "dry":    top(hums, reverse=False),
-        "snow":   top(snows),
-    }
 
 
 # =============================================================================
@@ -395,147 +254,6 @@ def _draw_table_img(
     return buf.getvalue()
 
 
-def _draw_ranking_img(rankings: dict, jst_now: datetime) -> bytes:
-    """全国ランキング複数セクションを縦並びで1枚の画像にする。"""
-    from PIL import Image, ImageDraw
-
-    f_sm, f_md, f_lg = _load_fonts()
-    if f_sm is None:
-        raise ImportError("Pillow not available")
-
-    sections = [
-        ("最高気温",    rankings["hot"],   "℃"),
-        ("最低気温",    rankings["cold"],  "℃"),
-        ("1h降水量",   rankings["rn1h"],  "mm"),
-        ("3h降水量",   rankings["rn3h"],  "mm"),
-        ("24h降水量",  rankings["rn24h"], "mm"),
-        ("最大風速",   rankings["wind"],  "m/s"),
-        ("最小湿度",   rankings["dry"],   "%"),
-        ("積雪深",     rankings["snow"],  "cm"),
-    ]
-
-    # 実データがあるセクションだけ残す
-    sections = [(ttl, items, unit) for ttl, items, unit in sections if items]
-
-    if not sections:
-        sections = [("（データなし）", [], "")]
-
-    # 2列レイアウト
-    tmp = Image.new("RGB", (1, 1))
-    tmp_d = ImageDraw.Draw(tmp)
-
-    RANK_H   = 22
-    SEC_HDR  = 28
-    SEC_PAD  = 8
-    COL_PAD  = 10
-    TTL_H    = 34
-
-    # 列幅を一括計算（全セクション共通）
-    all_names = [nm for _, items, _ in sections for nm, _ in items]
-    all_vals  = [f"{v:.1f}{u}" for _, items, unit in sections for _, v in items
-                 for u in [unit]]
-
-    name_w = _cell_w(tmp_d, ["地点名"] + all_names, f_sm)
-    val_w  = _cell_w(tmp_d, ["データ"] + all_vals,  f_sm)
-    rank_w = _cell_w(tmp_d, ["順位", "10"], f_sm)
-    sec_w  = rank_w + name_w + val_w + 4  # +2 borders
-
-    # ペアで並べる
-    pairs = [(sections[i], sections[i+1] if i+1 < len(sections) else None)
-             for i in range(0, len(sections), 2)]
-
-    def pair_h(left, right):
-        n = max(len(left[1]), len(right[1]) if right else 0)
-        return TTL_H + SEC_HDR + n * RANK_H + SEC_PAD * 2
-
-    total_w = sec_w * 2 + COL_PAD * 3
-    total_h = TTL_H + sum(pair_h(*p) + SEC_PAD for p in pairs)
-
-    img = Image.new("RGB", (total_w, total_h), (245, 248, 252))
-    d   = ImageDraw.Draw(img)
-
-    # 全体タイトル
-    ts = jst_now.strftime("%Y/%m/%d %H:%M JST")
-    d.rectangle([(0, 0), (total_w, TTL_H)], fill=C_TITLE_BG)
-    d.text((COL_PAD, (TTL_H - 15) // 2), f"全国ランキング　{ts}", fill=C_TITLE_FG, font=f_lg)
-
-    def draw_section(title, items, unit, ox, oy, width):
-        # セクション見出し
-        d.rectangle([(ox, oy), (ox + width, oy + SEC_HDR)], fill=C_SECTION_BG)
-        bb = d.textbbox((0, 0), title, font=f_md)
-        d.text((ox + 8, oy + (SEC_HDR - (bb[3]-bb[1])) // 2), title, fill=C_TITLE_FG, font=f_md)
-        # 列ヘッダー
-        y = oy + SEC_HDR
-        d.rectangle([(ox, y), (ox + width, y + RANK_H)], fill=C_HEADER_BG)
-        for ci, (label, cw) in enumerate(zip(["順位", "地点名", "データ"],
-                                              [rank_w, name_w, val_w])):
-            bb = d.textbbox((0, 0), label, font=f_sm)
-            tx = ox + sum([rank_w, name_w, val_w][:ci]) + ci + (cw - (bb[2]-bb[0])) // 2
-            d.text((tx, y + (RANK_H - 13) // 2), label, fill=C_HEADER_FG, font=f_sm)
-        y += RANK_H
-        # データ行
-        for ri, (nm, v) in enumerate(items):
-            bg = C_ROW_ODD if ri % 2 == 0 else C_ROW_EVEN
-            d.rectangle([(ox, y), (ox + width, y + RANK_H)], fill=bg)
-            d.line([(ox, y), (ox + width, y)], fill=C_BORDER)
-            rank_str = str(ri + 1)
-            val_str  = f"{v:.1f}{unit}"
-            # 順位（右寄せ）
-            bb = d.textbbox((0, 0), rank_str, font=f_sm)
-            d.text((ox + rank_w - (bb[2]-bb[0]) - 6, y + (RANK_H - 13) // 2),
-                   rank_str, fill=C_TEXT, font=f_sm)
-            # 地点名（左寄せ）
-            d.text((ox + rank_w + 1 + 6, y + (RANK_H - 13) // 2),
-                   nm, fill=C_TEXT, font=f_sm)
-            # 値（右寄せ）
-            bb = d.textbbox((0, 0), val_str, font=f_sm)
-            d.text((ox + rank_w + 1 + name_w + 1 + val_w - (bb[2]-bb[0]) - 6,
-                    y + (RANK_H - 13) // 2),
-                   val_str, fill=C_TEXT, font=f_sm)
-            y += RANK_H
-        # ボーダー
-        d.rectangle([(ox, oy), (ox + width - 1, y)], outline=C_BORDER)
-        return y + SEC_PAD
-
-    y = TTL_H + SEC_PAD
-    for left, right in pairs:
-        ox_l = COL_PAD
-        ox_r = COL_PAD + sec_w + COL_PAD
-        n = max(len(left[1]), len(right[1]) if right else 0)
-        sec_h = SEC_HDR + RANK_H + n * RANK_H + SEC_PAD
-
-        draw_section(left[0], left[1], left[2], ox_l, y, sec_w)
-        if right:
-            draw_section(right[0], right[1], right[2], ox_r, y, sec_w)
-        y += sec_h + SEC_PAD
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
-
-
-def _fmt_akita_rows(results: List[dict]) -> Tuple[List[str], List[List[str]]]:
-    # "日最高/日最低" = 当日0:00〜現在の最高/最低（現在気温は削除）
-    headers = ["地点名", "日最高℃", "日最低℃", "湿度%", "風速m/s", "風向", "前1h雨mm", "日積算雨mm"]
-    rows = []
-    for r in results:
-        def tf(v): return f"{v:.1f}" if v is not None else "---"
-        def rf(v): return f"{v:.1f}" if v > 0 else "0.0"
-        hum = f"{r['humidity']:.0f}" if r["humidity"] is not None else "---"
-        wsp = f"{r['wind']:.1f}" if r["wind"] is not None else "---"
-        rows.append([
-            r["name"],
-            tf(r["max_temp"]),
-            tf(r["min_temp"]),
-            hum,
-            wsp,
-            r["wind_dir"] or "---",
-            rf(r["rn1h"]),
-            rf(r["rn24h"]),
-        ])
-    return headers, rows
-
-
 def _station_detail_rows(
     maps: Dict[str, dict],
     ts_list: List[str],
@@ -576,46 +294,6 @@ def _station_detail_rows(
         ])
 
     return list(reversed(raw))   # newest first
-
-
-def _draw_3station_detail_img(
-    maps: Dict[str, dict],
-    ts_list: List[str],
-    jst_today_start_utc: datetime,
-    jst_now: datetime,
-) -> bytes:
-    """3地点の時系列詳細テーブルを縦積みした1枚のPNGを返す。"""
-    from PIL import Image
-
-    ts_str  = jst_now.strftime("%Y/%m/%d %H:%M JST")
-    headers = ["日時", "気温℃", "前1h降水mm", "日積算降水mm", "風向", "風速m/s", "日照h", "湿度%"]
-    right_c = {1, 2, 3, 5, 6, 7}
-
-    png_list = []
-    for code, name in DETAIL_STATIONS:
-        rows = _station_detail_rows(maps, ts_list, code, jst_today_start_utc)
-        png  = _draw_table_img(
-            title=f"アメダス {name}（{code}）  {ts_str}",
-            headers=headers,
-            rows=rows,
-            right_align_cols=right_c,
-        )
-        png_list.append(png)
-
-    # 縦に連結
-    imgs  = [Image.open(io.BytesIO(p)) for p in png_list]
-    gap   = 6
-    w     = max(img.width for img in imgs)
-    h     = sum(img.height for img in imgs) + gap * (len(imgs) - 1)
-    combo = Image.new("RGB", (w, h), (235, 240, 248))
-    y_off = 0
-    for img in imgs:
-        combo.paste(img, (0, y_off))
-        y_off += img.height + gap
-
-    buf = io.BytesIO()
-    combo.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
 
 
 # =============================================================================
@@ -761,17 +439,12 @@ def main(post_discord: bool = True, post_notion: bool = True) -> List[Tuple[str,
     jst_now, latest_utc = _parse_latest()
     print(f"[INFO] latest obs: {jst_now.strftime('%Y-%m-%d %H:%M JST')}")
 
-    table = _fetch(AMEDAS_TABLE_URL) or {}
-    akita = _load_akita_stations(table)
     ts_list = _hourly_ts_list(latest_utc, 24)
     jst_today_start_utc = jst_now.replace(
         hour=0, minute=0, second=0, microsecond=0
     ).astimezone(timezone.utc)
 
     maps = _fetch_maps(ts_list)
-
-    results  = _collect(akita, maps, ts_list, jst_today_start_utc)
-    rankings = _ranking(maps, ts_list, table)
 
     ts_hourly_jst = (
         datetime.strptime(ts_list[0], "%Y%m%d%H%M%S")
@@ -814,8 +487,6 @@ def main(post_discord: bool = True, post_notion: bool = True) -> List[Tuple[str,
             _post_image(img_d, fname, content=content)
 
     return detail_imgs, r2_urls
-
-    print("=== Done ===")
 
 
 # =============================================================================
@@ -883,54 +554,6 @@ def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
     # 秋田のアンカーID（allamedas_2.cgi#XX の XX）
     ALLAMEDAS_ANCHOR = os.environ.get("WCN_ALLAMEDAS_ANCHOR", "15")
 
-    def _debug_form(page) -> None:
-        """form_area の全 select / option を DEBUG 出力。"""
-        ff = page.frame(name="form_area")
-        if not ff:
-            return
-        for si, sel in enumerate(ff.locator("select").all()):
-            name = sel.get_attribute("name") or f"[{si}]"
-            opts = [(o.get_attribute("value"), o.inner_text())
-                    for o in sel.locator("option").all()]
-            pass
-
-    def _submit_form_value(page, select_name: str, value: str) -> bool:
-        """form_area の select[name] を value に変更して送信。成功時 True。"""
-        ff = page.frame(name="form_area")
-        if not ff:
-            return False
-        # すべての select を確認し value or text で合致するものを選択
-        matched = False
-        for sel in ff.locator("select").all():
-            sname = sel.get_attribute("name") or ""
-            try:
-                sel.select_option(value=value)
-                matched = True
-                print(f"[INFO] selected value={value} in select name={sname}")
-                break
-            except Exception:
-                pass
-        if not matched:
-            # value がなければテキスト部分一致で試す
-            for sel in ff.locator("select").all():
-                for opt in sel.locator("option").all():
-                    if value in (opt.get_attribute("value") or "") or value in opt.inner_text():
-                        sel.select_option(value=opt.get_attribute("value"))
-                        matched = True
-                        break
-                if matched:
-                    break
-        if not matched:
-            print(f"[WARN] select value={value} not found")
-            return False
-        try:
-            btn = ff.locator('input[type="submit"], button[type="submit"]').first
-            btn.click()
-            _wait(page)
-            return True
-        except Exception as e:
-            print(f"[WARN] submit failed: {e}")
-            return False
 
     def _shot_pref_section(page) -> bytes:
         """秋田セクションだけを切り抜いて返す。
