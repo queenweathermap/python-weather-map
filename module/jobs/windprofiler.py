@@ -89,7 +89,7 @@ INITIAL_WAIT_MS = int(os.environ.get("WINDPROFILER_INITIAL_WAIT_MS", "2500"))
 SWITCH_WAIT_MS = int(os.environ.get("WINDPROFILER_WAIT_MS", "1200"))
 SWITCH_TIMEOUT_MS = int(os.environ.get("WINDPROFILER_SWITCH_TIMEOUT_MS", "5000"))
 
-GRID_COLS = 8  # 「全部入り天気図」に倣い、縦長ではなく横長のレイアウトにする
+GRID_COLS = 7  # 33地点 ÷ 7列 = 5段、最終段が5地点になり8列(最終段1地点のみ)より収まりが良い
 CELL_W = 752
 CELL_H = 545
 
