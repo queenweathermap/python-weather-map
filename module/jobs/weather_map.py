@@ -435,16 +435,17 @@ def tkaisetu_only_refresh_time(now: Optional[datetime] = None) -> Optional[str]:
 
 
 def numeric_fresh_issue_label(issue_dt_jst: datetime) -> str:
-    """数値予報サイクルの初期時刻表示。例: "2026/08/19　00Z UTC(09:00JST)" """
+    """数値予報サイクルの初期時刻表示。例: "2026/08/19　00Z(09:00JST)"
+    「Z」自体がUTCを表すため、"Z UTC"のような重複表記はしない。"""
     cyc = jma_cycle_suffix(issue_dt_jst)
-    return f"{issue_dt_jst.strftime('%Y/%m/%d')}　{cyc}Z UTC({issue_dt_jst.strftime('%H:%M')}JST)"
+    return f"{issue_dt_jst.strftime('%Y/%m/%d')}　{cyc}Z({issue_dt_jst.strftime('%H:%M')}JST)"
 
 
 def issue_time_overlay_text(issue_dt_jst: datetime, now: Optional[datetime] = None) -> str:
     """
     ダッシュボード画像の左上に焼き込む、イニシャル時刻ラベルの文字列
     （PWAギャラリーの発行時刻表示にも同じ文字列を使う）。
-      ・数値予報が新しくなる回 → 例: "2026/08/19　00Z UTC(09:00JST)"
+      ・数値予報が新しくなる回 → 例: "2026/08/19　00Z(09:00JST)"
       ・TKAISETU更新だけを拾う回(天気図は直前の00Z/12Zのまま)
         → 例: "短期予報解説資料 15:40更新版"
     週間4列結合(main_layout4)は1日1回のみでTKAISETU更新のみの回が
