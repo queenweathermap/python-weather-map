@@ -2,9 +2,9 @@ name: Run JMA Windprofiler (Daily Station Summary)
 
 on:
   schedule:
-    # JST 18:35（その日最後の定期実行 18:15 の後、1日1回だけ）
-    # UTC 09:35
-    - cron: "35 9 * * *"
+    # JST 03:00（前日分の4回が出そろった翌日に、前日分をまとめて配信する）
+    # UTC 18:00（前日）。他のワークフローと重複しない時刻。
+    - cron: "0 18 * * *"
 
   workflow_dispatch:
 
@@ -17,9 +17,18 @@ jobs:
 
       # ------------------------------------------------------------
       # Discord（既存のjma-windprofilerチャンネルと同じWebhookを再利用。
-      # DMではなく通常のチャンネル投稿として、1日まとめを追加投稿する）
+      # DMではなく通常のチャンネル投稿として、前日まとめを追加投稿する）
       # ------------------------------------------------------------
       DISCORD_WINDPROFILER_WEBHOOK_URL: ${{ secrets.DISCORD_WINDPROFILER_WEBHOOK_URL }}
+
+      # ------------------------------------------------------------
+      # 有料配信（PWA/メールログイン購読者へのOneSignal Push）
+      # ------------------------------------------------------------
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
+      ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+      ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+      NOTION_PWA_HISTORY_DATABASE_ID: ${{ secrets.NOTION_PWA_HISTORY_DATABASE_ID }}
 
       # ------------------------------------------------------------
       # R2（main()と同じバケット・prefixを共有し、地点別rawの保存/読み出しに使う）
@@ -31,6 +40,7 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
       R2_PREFIX: "windprofiler"
+      R2_RETENTION_DAYS: "30"
 
     steps:
       - name: Checkout

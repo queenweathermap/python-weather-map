@@ -8,9 +8,12 @@
 # 変えない）に結合してDiscordへ配信する（main()、1日4回、購読者向け）。
 #
 # 加えて、実行のたびに地点ごとのraw画像も個別にR2へ保存しておき、1日1回
-# （最後の実行の後）その日の分を「1地点＝1段、実行分を横に並べる」形に
-# 組み直して、自分用のDiscordチャンネルへ通常投稿する
-# （main_daily_stations()、購読者向け配信とは別枠・DMではない）。
+# （翌日3時JST、前日分が出そろってから）その日の分を「1地点＝1段、実行分を
+# 横に並べる」形の1枚の画像に組み直し、
+#   ・既存のjma-windprofilerチャンネルへ通常投稿（main()と同じWebhook・DMではない）
+#   ・PWA/メールログイン購読者へOneSignal Pushで配信
+# の両方を同時に行う（main_daily_stations()）。main()自体（1日4回配信）の
+# 内容・頻度は変えない。
 #
 # チャートはJS(SVG)描画のSPAで、ページ内の #wpr-chart 要素が
 # 「地点名・緯度経度」ラベルとグラフ本体（時間の向き矢印込み）をまとめて含む。
@@ -41,6 +44,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from module.utils.r2_utils import put_bytes, get_bytes, list_keys_with_prefix, make_url
+from module.utils.notion_subscribers import get_active_emails
+from module.utils.onesignal_push import send_push_to_all
+from module.utils.recent_items import record_recent_item
 
 JST = timezone(timedelta(hours=9))
 
@@ -430,15 +436,16 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 2) -> Tuple[bytes,
     return buf.getvalue(), len(rows)
 
 
-def post_daily_station_grid(webhook_url: str, dt_jst: datetime, image_bytes: bytes) -> bool:
-    """既存の購読者向けjma-windprofilerチャンネルへ、その日の「1地点1段・全実行分
+def post_daily_station_grid(webhook_url: str, dt_jst: datetime, image_bytes: bytes, url: str) -> bool:
+    """既存の購読者向けjma-windprofilerチャンネルへ、前日分の「1地点1段・全実行分
     横並び」グリッドを通常投稿する（DMではなく、main()と同じWebhookを使う）。"""
     content = (
-        f"🌀 **ウィンドプロファイラ 1日まとめ（地点別） / {dt_jst.strftime('%Y-%m-%d')}**\n"
-        f"1地点＝1段、その日の実行分（最大4回、約1時間ずつ重なりあり）を横に並べています。"
+        f"🌀 **ウィンドプロファイラ 前日まとめ（地点別） / {dt_jst.strftime('%Y-%m-%d')}**\n"
+        f"1地点＝1段、その日の実行分（最大4回、約1時間ずつ重なりあり）を横に並べています。\n"
+        f"📥 [高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)"
     )
     payload = {
-        "username": "ウィンドプロファイラ（1日まとめ）",
+        "username": "ウィンドプロファイラ（前日まとめ）",
         "content": content,
         "flags": 4,  # SUPPRESS_EMBEDS
     }
@@ -460,28 +467,67 @@ def post_daily_station_grid(webhook_url: str, dt_jst: datetime, image_bytes: byt
     return False
 
 
+def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int) -> None:
+    """PWA/メールログイン購読者へ、前日分のウィンドプロファイラまとめを通知する。
+    Discordへの投稿とは独立しており、失敗しても互いに影響しない
+    （購読者取得や送信に失敗しても例外は握りつぶし、ログのみ出す）。"""
+    try:
+        emails = get_active_emails()
+    except Exception as e:
+        print(f"[WARN] Push購読者リスト取得失敗: {e}")
+        emails = []
+
+    if emails:
+        try:
+            send_push_to_all(
+                emails,
+                "ウィンドプロファイラ",
+                f"前日（{dt_jst.strftime('%m/%d')}）分の高層風まとめが届きました",
+                url=url,
+            )
+        except Exception as e:
+            print(f"[WARN] OneSignal push送信失敗: {e}")
+
+    record_recent_item(
+        f"ウィンドプロファイラ 前日まとめ（{station_count}地点）",
+        url,
+        "ウィンドプロファイラ",
+        dt_jst.strftime("%Y-%m-%d"),
+    )
+
+
 def main_daily_stations() -> int:
-    """1日1回（最後の実行の後）、その日の地点別raw画像を「1地点1段・横並び」の
-    1枚のグリッド画像に組み直し、既存の購読者向けjma-windprofilerチャンネルへ
-    通常投稿する（main()の1日4回の配信内容とは別に追加投稿されるだけで、
-    main()自体には影響しない）。"""
+    """1日1回、翌日3時JSTに実行し、前日分の地点別raw画像を「1地点1段・横並び」の
+    1枚のグリッド画像に組み直して、
+      ・既存の購読者向けjma-windprofilerチャンネルへ通常投稿（DMではない）
+      ・PWA/メールログイン購読者へOneSignal Pushで配信
+    の両方を行う。main()（1日4回の配信）の内容・頻度には影響しない。"""
     webhook_url = os.environ.get("DISCORD_WINDPROFILER_WEBHOOK_URL", "").strip()
     if not webhook_url:
         print("ERROR: DISCORD_WINDPROFILER_WEBHOOK_URL未設定", file=sys.stderr)
         return 1
 
-    dt_jst = _jst_now()
+    # 実行時刻(翌日3時JST)から見て「前日」の分をまとめる
+    target_jst = _jst_now() - timedelta(days=1)
 
-    image_bytes, station_count = build_daily_station_grid(dt_jst)
+    image_bytes, station_count = build_daily_station_grid(target_jst)
     if station_count == 0:
-        print("[WARN] 本日分の地点別画像が見つかりませんでした。スキップします")
+        print("[WARN] 前日分の地点別画像が見つかりませんでした。スキップします")
         return 1
 
-    if post_daily_station_grid(webhook_url, dt_jst, image_bytes):
-        print(f"POSTED ({station_count}地点、1枚)")
-        return 0
+    r2_key = f"{target_jst.strftime('%Y%m%d')}_daily_grid.png"
+    put_bytes(r2_key, image_bytes, content_type="image/png")
+    url = make_url(r2_key)
+    print(f"R2 UPLOADED: {url}")
 
-    return 1
+    posted = post_daily_station_grid(webhook_url, target_jst, image_bytes, url)
+    if posted:
+        print(f"POSTED ({station_count}地点、1枚)")
+
+    notify_pwa_daily_stations(target_jst, url, station_count)
+    print("NOTIFIED (PWA)")
+
+    return 0 if posted else 1
 
 
 def main() -> int:
