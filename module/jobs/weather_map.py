@@ -2353,8 +2353,8 @@ def notify_discord_images(
     if not discord_jma_enabled():
         return
 
-    # Discord本文・PWAギャラリーとも、イニシャル時刻表示はUTCで統一する
-    init_utc = issue_dt_jst.astimezone(timezone.utc).strftime("%Y-%m-%d %HZ")
+    # Discord本文・PWAギャラリー・画像左上のラベルすべて同じ表記に揃える
+    init_label = issue_time_overlay_text(issue_dt_jst)
     webhook_url = discord_jma_webhook_url()
 
     for idx, filename in enumerate(OUTPUT_FILENAMES):
@@ -2373,7 +2373,7 @@ def notify_discord_images(
             if idx < len(all_urls) and all_urls[idx]:
                 highres_url = all_urls[idx]
                 content = (
-                    f"{init_utc} / {title}\n"
+                    f"{init_label} / {title}\n"
                     f"📥 [高解像度PNGをダウンロード（30日間有効）](<{highres_url}>)"
                 )
 
@@ -2416,7 +2416,7 @@ def notify_discord_images(
                     upload_path, mime = prepare_discord_upload_image(src_path)
                     post_discord_file_image(
                         webhook_url=webhook_url,
-                        title=f"{init_utc} / {title}",
+                        title=f"{init_label} / {title}",
                         image_path=upload_path,
                         mime=mime,
                     )
@@ -2429,7 +2429,7 @@ def notify_discord_images(
             try:
                 post_discord_item_image_urls(
                     webhook_url=webhook_url,
-                    title=f"{init_utc} / {title}",
+                    title=f"{init_label} / {title}",
                     image_urls=[all_urls[idx]],
                     notion_url="",
                     rjtd=rjtd,
@@ -2581,14 +2581,14 @@ def main_dashboard_jma() -> None:
 
         try:
             if discord_jma_enabled() and url:
-                # Discord本文・PWAギャラリーとも、イニシャル時刻表示はUTCで統一する
-                init_utc = issue_dt_jst.astimezone(timezone.utc).strftime("%Y-%m-%d %HZ")
+                # Discord本文・PWAギャラリー・画像左上のラベルすべて同じ表記に揃える
+                init_label = issue_time_overlay_text(issue_dt_jst)
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
                     title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
-                    f"{init_utc} / {title}\n"
+                    f"{init_label} / {title}\n"
                     f"📥 [高解像度PNGをダウンロード（30日間有効）](<{url}>)"
                 )
 
@@ -2693,14 +2693,15 @@ def main_layout4() -> None:
 
         try:
             if discord_jma_enabled() and url:
-                # Discord本文・PWAギャラリーとも、イニシャル時刻表示はUTCで統一する
-                init_utc = issue_dt_jst.astimezone(timezone.utc).strftime("%Y-%m-%d %HZ")
+                # 週間4列結合は1日1回のみでTKAISETU更新のみの回が存在しないため、
+                # issue_time_overlay_text()ではなくnumeric_fresh_issue_label()を直接使う。
+                init_label = numeric_fresh_issue_label(issue_dt_jst)
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
                     title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
-                    f"{init_utc} / {title}\n"
+                    f"{init_label} / {title}\n"
                     f"📥 [高解像度PNGをダウンロード（30日間有効）](<{url}>)"
                 )
 
