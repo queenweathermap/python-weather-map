@@ -134,7 +134,7 @@ DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "8
 
 Attachment = Tuple[str, bytes, str]
 
-# 04_LAYOUT_4_WEEKLY（週間4列結合）は scripts/jma_layout4_weekly.py / main_layout4() として、
+# 04_LAYOUT_4_WEEKLY（週間4列結合）は scripts/jma_weekly_forecast.py / main_layout4() として、
 # 07_DASHBOARD_JMA_DIRECT（気象庁直接取得版・全部入り）は scripts/jma_dashboard_direct.py /
 # main_dashboard_jma() として、それぞれ別スクリプト・別スケジュールで実行する。
 # いずれもWCN（Weathercaster.jp）を一切経由しない。
@@ -1991,7 +1991,7 @@ def main_layout4() -> None:
     """
     週間4列結合専用のエントリポイント。
     元になるSKAISETU（週間予報解説資料）はJST 10時頃更新・1日1回のため、
-    正午JST頃の1日1回だけ実行する(scripts/jma_layout4_weekly.py)。
+    正午JST頃の1日1回だけ実行する(scripts/jma_weekly_forecast.py)。
     気象庁公開データのみで構成しているため、有料DM配信の対象にもなる
     （DM_SAFE_FILENAMES参照）。
     """

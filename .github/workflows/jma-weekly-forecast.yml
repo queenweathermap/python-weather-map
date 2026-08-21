@@ -1,4 +1,4 @@
-name: Run JMA Layout4 Weekly (週間4列結合)
+name: Run JMA Weekly Forecast (週間4列結合＋2週間気温予報)
 
 on:
   schedule:
@@ -99,9 +99,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pillow pdf2image boto3 notion-client
 
-      - name: Run Weekly 4-column Layout
+      - name: Run Weekly Forecast (4-column + 2-week temperature)
         run: |
-          python scripts/jma_layout4_weekly.py
+          python scripts/jma_weekly_forecast.py
 
       - name: Cleanup old R2 objects
         if: always()
