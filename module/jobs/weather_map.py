@@ -126,8 +126,8 @@ DM_SAFE_FILENAMES = {
 # 選択肢はNotion側のselectプロパティと一致させる必要がある。
 PWA_CATEGORY_BY_FILENAME = {
     "07_DASHBOARD_JMA_DIRECT": "全部入り天気図",
-    "04_LAYOUT_4_WEEKLY": "週間天気予報資料",
-    "09_MONTHLY_FORECAST": "1か月予報資料",
+    "04_LAYOUT_4_WEEKLY": "中期予報資料",
+    "09_MONTHLY_FORECAST": "長期予報資料",
 }
 DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
 DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "84"))
@@ -141,9 +141,9 @@ Attachment = Tuple[str, bytes, str]
 
 # Discord に送る画像とタイトル
 DISCORD_TITLES = {
-    "04_LAYOUT_4_WEEKLY": "週間4列結合（＋2週間気温予報）",
+    "04_LAYOUT_4_WEEKLY": "週間予報＋2週間気温予報 結合図",
     "07_DASHBOARD_JMA_DIRECT": "高層天気図・数値予報天気図 結合図",
-    "09_MONTHLY_FORECAST": "1か月予報資料",
+    "09_MONTHLY_FORECAST": "1ヶ月予報 結合図",
 }
 
 
@@ -2184,9 +2184,9 @@ def main_monthly() -> None:
         url = all_urls[0] if all_urls else ""
         # 気象庁側の正式な初期値時刻は画像自体に焼き込まれているため、
         # ここでのラベルは配信日(週)を示すだけのシンプルな表記にする。
-        init_label = f"{issue_dt_jst.strftime('%Y/%m/%d')}　1か月予報資料"
+        init_label = f"{issue_dt_jst.strftime('%Y/%m/%d')}　長期予報資料"
 
-        notion_items = [(filename, "1か月予報資料", "MONTHLY_FORECAST", url)]
+        notion_items = [(filename, "1ヶ月予報 結合図", "MONTHLY_FORECAST", url)]
         page_id = notion_write_db(
             issue_dt_jst=issue_dt_jst,
             rjtd=rjtd,
