@@ -2106,16 +2106,26 @@ def build_layout5_monthly(errors: List[str]) -> Optional[Attachment]:
     """
     print("-> Building Monthly Forecast Layout (1か月予報資料)")
 
-    cols: List[Optional[Image.Image]] = []
+    cols: List[Image.Image] = []
     for label, url in JMA_FCVX_MONTHLY:
         img = fetch_jma_direct_png(url, label)
         if img is None:
             errors.append(f"Monthly: {label} failed")
-        cols.append(img)
+        else:
+            cols.append(img)
 
-    canvas = combine_horizontal(cols, gap=LAYOUT_GAP, valign="top")
-    if canvas is None:
+    if not cols:
         return None
+
+    # FCVX11等は右側に大きな白余白を内蔵しており、単純に画像の幅で結合すると
+    # 絵柄同士の間隔が不揃いになる。絵柄(非白領域)同士の間隔が常にLAYOUT_GAPに
+    # なるよう、各画像の余白量を測って貼り付け位置をずらす(画像自体は切らない)。
+    positions = visual_gap_positions(cols, visual_gap=LAYOUT_GAP)
+    canvas_w = max(x + c.width for x, c in zip(positions, cols))
+    canvas_h = max(c.height for c in cols)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
+    for x, c in zip(positions, cols):
+        canvas.paste(c.convert("RGB"), (x, 0))
 
     caption = jma_source_caption()
     canvas = append_caption_bar(canvas, caption)
