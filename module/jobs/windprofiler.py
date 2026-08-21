@@ -48,6 +48,12 @@ from module.utils.notion_subscribers import get_active_emails
 from module.utils.onesignal_push import send_push_to_all
 from module.utils.recent_items import record_recent_item
 
+# プッシュ通知のタップ先。R2の生画像URLに直接飛ばすと、iOSスタンドアロンで
+# ツールバー無しの画面のまま身動きが取れなくなることがあるため、モーダル
+# ビューア(閉じるボタン付き)を持つ/member/ページに飛ばす
+# （weather_map.py / emagram_discord.py と同じ対処）。
+PWA_MEMBER_URL = os.environ.get("PWA_MEMBER_URL", "https://177chart.com/member/").strip()
+
 JST = timezone(timedelta(hours=9))
 
 PORTAL_URL = "https://www.jma.go.jp/bosai/windprofiler/"
@@ -105,9 +111,16 @@ CELL_W = 752
 CELL_H = 545
 
 # 「1地点＝1段、実行分を横に並べる」画像用: 同じ地点の2枚目以降は地点名・
-# 緯度経度・標高のヘッダーを削り、余白を詰める（1枚目だけ地点名を残す）。
-# 実測（#wpr-chart のヘッダー文字～チャート枠開始まで）に基づく固定値。
+# 緯度経度・標高のヘッダー(上)と、海抜高度の目盛りラベル(左)を削り、
+# くっつくくらいまで詰める（1枚目だけ地点名・目盛りを残す）。
+# 実測（#wpr-chart のヘッダー文字～チャート枠、目盛りラベル～チャート枠の
+# 罫線位置）に基づく固定値。
 STATION_HEADER_HEIGHT = 50
+STATION_AXIS_WIDTH = 49
+
+# 同じ地点の並び（上）はほぼ隙間なし、違う地点同士（下記）は
+# はっきり区別できるよう、その2倍の余白を空ける。
+STATION_GAP = STATION_HEADER_HEIGHT * 2
 
 THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1400"))
 THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "85"))
@@ -390,9 +403,10 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
     （「全部入り天気図」と同程度の解像度で問題なく扱えている実績があるため、
     分割せず1枚にまとめる）。
 
-    同じ地点の2枚目以降は、地点名・緯度経度・標高のヘッダー行が同じ内容の
-    繰り返しになるため、STATION_HEADER_HEIGHT分だけ上端を切り詰めて余白を減らす
-    （1枚目だけヘッダーを残し、どの地点の段か分かるようにする）。
+    同じ地点の2枚目以降は、地点名・緯度経度・標高のヘッダー(上)と海抜高度の
+    目盛りラベル(左)が同じ内容の繰り返しになるため、両方切り詰めてほぼ隙間なく
+    詰める（1枚目だけヘッダー・目盛りを残し、どの地点の段か分かるようにする）。
+    その代わり、違う地点同士の境目はSTATION_GAP分の余白を空けてはっきり区別する。
 
     各画像はサイト側のローリングウィンドウ（約7時間分）をそのまま切り出したもので、
     実行間隔(6時間)より長いため隣り合うコマは約1時間分重なる。真に継ぎ目のない
@@ -424,16 +438,19 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
         if not panels:
             continue
 
-        # 2枚目以降はヘッダー(地点名・緯度経度・標高)を切り詰める
+        # 2枚目以降はヘッダー(上)と目盛りラベル(左)を切り詰める
         for i in range(1, len(panels)):
-            panels[i] = panels[i].crop((0, STATION_HEADER_HEIGHT, CELL_W, CELL_H))
+            panels[i] = panels[i].crop((STATION_AXIS_WIDTH, STATION_HEADER_HEIGHT, CELL_W, CELL_H))
 
         row_h = CELL_H  # 1枚目がヘッダー込みでCELL_Hのため、段の高さはCELL_Hのまま
-        row = Image.new("RGB", (CELL_W * len(panels), row_h), "white")
-        for i, panel in enumerate(panels):
+        row_w = sum(p.width for p in panels)
+        row = Image.new("RGB", (row_w, row_h), "white")
+        x = 0
+        for panel in panels:
             # 2枚目以降はヘッダー分だけ短いので、下端(チャート本体・矢印行)が
             # 1枚目と揃うよう、その分だけ下に寄せて貼る
-            row.paste(panel, (i * CELL_W, row_h - panel.height))
+            row.paste(panel, (x, row_h - panel.height))
+            x += panel.width
         rows.append(row)
 
     if not rows:
@@ -441,11 +458,15 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
 
     row_w = max(r.width for r in rows)
     grid_rows = ceil(len(rows) / cols)
-    canvas = Image.new("RGB", (row_w * cols, CELL_H * grid_rows), "white")
+    canvas_w = row_w * cols + STATION_GAP * (cols - 1)
+    canvas_h = CELL_H * grid_rows + STATION_GAP * (grid_rows - 1)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
     for idx, row in enumerate(rows):
         col = idx % cols
         grid_row = idx // cols
-        canvas.paste(row, (col * row_w, grid_row * CELL_H))
+        x = col * (row_w + STATION_GAP)
+        y = grid_row * (CELL_H + STATION_GAP)
+        canvas.paste(row, (x, y))
 
     buf = BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
@@ -499,7 +520,7 @@ def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int) ->
                 emails,
                 "ウィンドプロファイラ",
                 f"前日（{dt_jst.strftime('%m/%d')}）分の高層風まとめが届きました",
-                url=url,
+                url=PWA_MEMBER_URL,
             )
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
