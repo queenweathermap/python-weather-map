@@ -122,6 +122,14 @@ STATION_AXIS_WIDTH = 49
 # はっきり区別できるよう、その2倍の余白を空ける。
 STATION_GAP = STATION_HEADER_HEIGHT * 2
 
+# 同じ地点の2枚目以降は、単純に横へ並べるのではなく実行間隔(6時間)分だけ
+# ずらして重ねて貼る（2枚目を上に）。ローリングウィンドウの重複部分
+# （約1時間強）が2枚目側の絵柄でそのまま上書きされるため、時間軸が
+# 継ぎ目なく連続して見える。ずらし幅は実測のPX_PER_HOUR(x軸の目盛り間隔)
+# から算出する。
+RUN_INTERVAL_HOURS = 6
+PX_PER_HOUR = 82.5
+
 THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1400"))
 THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "85"))
 R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "30")
@@ -442,15 +450,23 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
         for i in range(1, len(panels)):
             panels[i] = panels[i].crop((STATION_AXIS_WIDTH, STATION_HEADER_HEIGHT, CELL_W, CELL_H))
 
+        # 各パネルのx位置: 1枚目は0起点。2枚目以降は「1枚目のプロット開始位置
+        # (STATION_AXIS_WIDTH)」を基準に、実行間隔(6時間)分だけ右にずらした
+        # 位置に貼る。ローリングウィンドウが約1時間強重なっているため、
+        # この位置に貼ると自然に絵柄が重なり、後から貼る（＝上になる）
+        # 2枚目以降の絵柄が優先されて継ぎ目なく見える。
+        x_positions = [0] + [
+            STATION_AXIS_WIDTH + round(i * RUN_INTERVAL_HOURS * PX_PER_HOUR)
+            for i in range(1, len(panels))
+        ]
+
         row_h = CELL_H  # 1枚目がヘッダー込みでCELL_Hのため、段の高さはCELL_Hのまま
-        row_w = sum(p.width for p in panels)
+        row_w = max(x + p.width for x, p in zip(x_positions, panels))
         row = Image.new("RGB", (row_w, row_h), "white")
-        x = 0
-        for panel in panels:
+        for x, panel in zip(x_positions, panels):
             # 2枚目以降はヘッダー分だけ短いので、下端(チャート本体・矢印行)が
             # 1枚目と揃うよう、その分だけ下に寄せて貼る
             row.paste(panel, (x, row_h - panel.height))
-            x += panel.width
         rows.append(row)
 
     if not rows:
