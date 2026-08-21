@@ -620,6 +620,31 @@ def combine_horizontal(images: List[Image.Image], *, gap: int = 0, valign: str =
     return canvas
 
 
+def combine_horizontal_justified(
+    images: List[Image.Image], *, target_width: int, valign: str = "top"
+) -> Optional[Image.Image]:
+    """combine_horizontal()と同様に横結合するが、画像そのものは拡大縮小せず、
+    間隔(gap)だけを均等に伸縮させて合計幅がちょうどtarget_widthになるようにする
+    （左端0・右端target_widthに揃う）。"""
+    valid = [im.convert("RGB") for im in images if im is not None]
+    if not valid:
+        return None
+
+    content_w = sum(im.width for im in valid)
+    gap_count = len(valid) - 1
+    gap = (target_width - content_w) / gap_count if gap_count > 0 else 0
+
+    h = max(im.height for im in valid)
+    canvas = Image.new("RGB", (target_width, h), "white")
+    x = 0.0
+    for im in valid:
+        y = (h - im.height) // 2 if valign == "center" else 0
+        canvas.paste(im, (round(x), y))
+        x += im.width + gap
+
+    return canvas
+
+
 def visual_gap_positions(
     images: List[Image.Image],
     *,
@@ -1071,8 +1096,10 @@ def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
     if twoweek_col4 is None:
         errors.append("Layout4JMA: FCVX24 failed")
 
-    twoweek_row = combine_horizontal(
-        [twoweek_col1, twoweek_col2, twoweek_col3, twoweek_col4], gap=LAYOUT_GAP, valign="top"
+    # 下段は上段(canvas)と左右の端が揃うよう、4枚の間隔を均等に伸縮させて
+    # 合計幅をcanvas.widthにちょうど合わせる。
+    twoweek_row = combine_horizontal_justified(
+        [twoweek_col1, twoweek_col2, twoweek_col3, twoweek_col4], target_width=canvas.width, valign="top"
     )
     if twoweek_row is not None:
         canvas = combine_vertical([canvas, twoweek_row], gap=LAYOUT_GAP, halign="left")
