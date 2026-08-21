@@ -141,7 +141,7 @@ Attachment = Tuple[str, bytes, str]
 
 # Discord に送る画像とタイトル
 DISCORD_TITLES = {
-    "04_LAYOUT_4_WEEKLY": "週間4列結合",
+    "04_LAYOUT_4_WEEKLY": "週間4列結合（＋2週間気温予報）",
     "07_DASHBOARD_JMA_DIRECT": "高層天気図・数値予報天気図 結合図",
     "09_MONTHLY_FORECAST": "1か月予報資料",
 }
