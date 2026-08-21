@@ -57,6 +57,28 @@ JMA_FEFE19_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fefe19.png"
 JMA_FXXN519_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxxn519.png"
 JMA_FZCX50_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fzcx50.png"
 
+# 2週間気温予報資料（週間4列結合の下段に追加）。気象庁が固定URL(cycleごとに上書き)で
+# 公開しているPNG。実際の初期値時刻は画像内にJMA自身が焼き込んでいる。
+JMA_LONGFCST_BASE_URL = "https://www.data.jma.go.jp/cpd/data/longfcst/fax"
+JMA_FCVX21_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx21_12.png"
+JMA_FCVX22_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx22_12.png"
+JMA_FCVX23_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx23_12.png"
+JMA_FCVX24_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx24_12.png"
+
+# 1か月予報資料（週1回、木曜配信の新規カテゴリ）。同じく気象庁公開の固定URL。
+JMA_FCVX11_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx11_12.png"
+JMA_FCVX12_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx12_12.png"
+JMA_FCVX13_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx13_12.png"
+JMA_FCVX14_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx14_12.png"
+JMA_FCVX15_URL = f"{JMA_LONGFCST_BASE_URL}/fcvx15_12.png"
+JMA_FCVX_MONTHLY = [
+    ("FCVX11", JMA_FCVX11_URL),
+    ("FCVX12", JMA_FCVX12_URL),
+    ("FCVX13", JMA_FCVX13_URL),
+    ("FCVX14", JMA_FCVX14_URL),
+    ("FCVX15", JMA_FCVX15_URL),
+]
+
 # OneSignal pushの遷移先。以前は配信画像のR2直URLを指していたが、iOSの
 # ホーム画面追加(スタンドアロン)アプリでは外部ドメインへの直リンクが
 # ツールバーの無い画面のまま身動きが取れなくなることがあるため、
@@ -97,10 +119,7 @@ DISCORD_MAX_UPLOAD_MB = float(os.environ.get("DISCORD_MAX_UPLOAD_MB", "8"))
 DM_SAFE_FILENAMES = {
     "04_LAYOUT_4_WEEKLY",
     "07_DASHBOARD_JMA_DIRECT",
-}
-DM_SAFE_FILENAMES = {
-    "04_LAYOUT_4_WEEKLY",
-    "07_DASHBOARD_JMA_DIRECT",
+    "09_MONTHLY_FORECAST",
 }
 
 # PWA配信履歴（Notion「PWA配信履歴」DB）に記録する際のカテゴリ名。
@@ -108,6 +127,7 @@ DM_SAFE_FILENAMES = {
 PWA_CATEGORY_BY_FILENAME = {
     "07_DASHBOARD_JMA_DIRECT": "全部入り天気図",
     "04_LAYOUT_4_WEEKLY": "週間天気予報資料",
+    "09_MONTHLY_FORECAST": "1か月予報資料",
 }
 DISCORD_THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1200"))
 DISCORD_THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "84"))
@@ -123,6 +143,7 @@ Attachment = Tuple[str, bytes, str]
 DISCORD_TITLES = {
     "04_LAYOUT_4_WEEKLY": "週間4列結合",
     "07_DASHBOARD_JMA_DIRECT": "高層天気図・数値予報天気図 結合図",
+    "09_MONTHLY_FORECAST": "1か月予報資料",
 }
 
 
@@ -336,7 +357,7 @@ def issue_time_overlay_text(issue_dt_jst: datetime, now: Optional[datetime] = No
     """
     tkaisetu_time = tkaisetu_only_refresh_time(now)
     if tkaisetu_time is not None:
-        return f"短期予報解説資料 {tkaisetu_time}更新版"
+        return f"{issue_dt_jst.strftime('%Y/%m/%d')}　短期予報解説資料 {tkaisetu_time}更新版"
 
     return numeric_fresh_issue_label(issue_dt_jst)
 
@@ -1012,6 +1033,7 @@ def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
       2列目: FEFE19（気象庁公開PNG）
       3列目: FXXN519（気象庁公開PNG）
       4列目: FZCX50（気象庁公開PNG）
+      下段: FCVX21〜24（2週間気温予報資料、気象庁公開PNG）を横結合して追加
     """
     print("-> Building Layout 4 (Weekly Multicolumn, JMA-direct)")
 
@@ -1034,6 +1056,26 @@ def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
     canvas = combine_horizontal([col1_img, col2_img, col3_img, col4_img], gap=LAYOUT_GAP, valign="top")
     if canvas is None:
         return None
+
+    # 下段: 2週間気温予報資料（FCVX21〜24、気象庁直接取得の固定URL）を横結合して追加する。
+    twoweek_col1 = fetch_jma_direct_png(JMA_FCVX21_URL, "FCVX21")
+    twoweek_col2 = fetch_jma_direct_png(JMA_FCVX22_URL, "FCVX22")
+    twoweek_col3 = fetch_jma_direct_png(JMA_FCVX23_URL, "FCVX23")
+    twoweek_col4 = fetch_jma_direct_png(JMA_FCVX24_URL, "FCVX24")
+    if twoweek_col1 is None:
+        errors.append("Layout4JMA: FCVX21 failed")
+    if twoweek_col2 is None:
+        errors.append("Layout4JMA: FCVX22 failed")
+    if twoweek_col3 is None:
+        errors.append("Layout4JMA: FCVX23 failed")
+    if twoweek_col4 is None:
+        errors.append("Layout4JMA: FCVX24 failed")
+
+    twoweek_row = combine_horizontal(
+        [twoweek_col1, twoweek_col2, twoweek_col3, twoweek_col4], gap=LAYOUT_GAP, valign="top"
+    )
+    if twoweek_row is not None:
+        canvas = combine_vertical([canvas, twoweek_row], gap=LAYOUT_GAP, halign="left")
 
     caption = jma_source_caption()
     canvas = append_caption_bar(canvas, caption)
@@ -2008,6 +2050,154 @@ def main_layout4() -> None:
                             push_url=url,
                             pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
                             pwa_issue_time=numeric_fresh_issue_label(issue_dt_jst),
+                        )
+                else:
+                    print(f"[WARN] Discord thumbnail source missing: {src_path}")
+
+            if errors:
+                notify_discord_complete(errors=errors, attach_count=len(images))
+        except Exception as e:
+            print(f"[WARN] Discord failed: {e}")
+
+        if errors:
+            print("[WARN] completed with errors:")
+            for e in errors:
+                print(f"  - {e}")
+
+        print("=== Done ===")
+
+    finally:
+        shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+        shutil.rmtree(DATA_DIR, ignore_errors=True)
+
+
+def build_layout5_monthly(errors: List[str]) -> Optional[Attachment]:
+    """
+    1か月予報資料の気象庁直接取得版。WCN（Weathercaster.jp）には一切アクセスしない。
+    FCVX11〜15（実況解析図/北半球予想図/スプレッド・高偏差確率/各種時系列/
+    熱帯・中緯度予想図）を週間4列結合と同じ要領で5枚横結合する。
+    """
+    print("-> Building Monthly Forecast Layout (1か月予報資料)")
+
+    cols: List[Optional[Image.Image]] = []
+    for label, url in JMA_FCVX_MONTHLY:
+        img = fetch_jma_direct_png(url, label)
+        if img is None:
+            errors.append(f"Monthly: {label} failed")
+        cols.append(img)
+
+    canvas = combine_horizontal(cols, gap=LAYOUT_GAP, valign="top")
+    if canvas is None:
+        return None
+
+    caption = jma_source_caption()
+    canvas = append_caption_bar(canvas, caption)
+
+    return pil_to_attachment(canvas, "MONTHLY_FORECAST")
+
+
+def build_monthly_only() -> Tuple[List[Attachment], List[str]]:
+    """
+    1か月予報資料だけを作る。FCVX11〜15はすべて気象庁が自ら公開しているデータの
+    みで構成するため、WCN（Weathercaster.jp）には一切アクセスしない。
+    """
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    images: List[Attachment] = []
+    errors: List[str] = []
+
+    monthly_att = build_layout5_monthly(errors)
+    if monthly_att:
+        fixed = rename_attachment(monthly_att, "09_MONTHLY_FORECAST")
+        images.append(fixed)
+        print(f"[OUT] {fixed[0]}")
+
+    for fname, data, _ in images:
+        try:
+            with open(os.path.join(OUTPUT_DIR, fname), "wb") as f:
+                f.write(data)
+        except Exception:
+            pass
+
+    print(f"[OK] output image count: {len(images)}")
+    return images, errors
+
+
+def main_monthly() -> None:
+    """
+    1か月予報資料専用のエントリポイント。
+    気象庁の1か月予報資料(FCVX11〜15)は毎週木曜に更新されるため、週1回だけ実行する
+    (scripts/jma_monthly_forecast.py)。週間4列結合・全部入りと同じDiscord公開チャンネルに
+    投稿し、Notionカタログ(全部入りと同じDB)にも書き込み、有料PWA配信(OneSignal push +
+    PWAギャラリー)も行う(DM_SAFE_FILENAMES参照)。
+    """
+    try:
+        print("=== Start Monthly Forecast (1か月予報資料) ===")
+
+        issue_dt_jst = now_jst()
+        rjtd = issue_dt_jst.strftime("%d%H%M")
+        day = issue_dt_jst.strftime("%Y%m%d")
+        run_prefix = f"{day}/RJTD_{rjtd}_{issue_dt_jst.strftime('%H%M%S')}"
+
+        images, errors = build_monthly_only()
+        all_urls, rep_url = upload_to_r2(run_prefix, images)
+
+        filename = "09_MONTHLY_FORECAST"
+        url = all_urls[0] if all_urls else ""
+        # 気象庁側の正式な初期値時刻は画像自体に焼き込まれているため、
+        # ここでのラベルは配信日(週)を示すだけのシンプルな表記にする。
+        init_label = f"{issue_dt_jst.strftime('%Y/%m/%d')}　1か月予報資料"
+
+        notion_items = [(filename, "1か月予報資料", "MONTHLY_FORECAST", url)]
+        page_id = notion_write_db(
+            issue_dt_jst=issue_dt_jst,
+            rjtd=rjtd,
+            run_prefix=run_prefix,
+            rep_url=rep_url,
+            all_urls=all_urls,
+            notion_items=notion_items,
+            errors=errors,
+            extra_links=IMAGE_EXTRA_LINKS.get(filename, []),
+        )
+
+        notion_url = notion_page_url(page_id) if page_id else ""
+        if notion_url:
+            print(f"[OK] Notion URL: {notion_url}")
+
+        try:
+            if discord_jma_enabled() and url:
+                title = DISCORD_TITLES.get(filename, filename)
+                extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
+                if extra_links:
+                    title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
+                content = (
+                    f"{init_label} / {title}\n"
+                    f"📥 [高解像度PNGをダウンロード（30日間有効）](<{url}>)"
+                )
+
+                src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
+                if os.path.exists(src_path):
+                    thumb_path, thumb_mime = make_discord_thumbnail(
+                        src_path,
+                        caption_text=jma_source_caption(),
+                    )
+                    post_discord_file_image(
+                        webhook_url=discord_jma_webhook_url(),
+                        title=content,
+                        image_path=thumb_path,
+                        mime=thumb_mime,
+                        suppress_embeds=True,
+                    )
+                    if filename in DM_SAFE_FILENAMES:
+                        notify_dm_subscribers(
+                            content,
+                            thumb_path,
+                            thumb_mime,
+                            push_title=DISCORD_TITLES.get(filename, filename),
+                            push_url=url,
+                            pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
+                            pwa_issue_time=init_label,
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")

@@ -14,3 +14,4 @@ service_account.json
 .DS_Store
 data/sample/*     # サンプルはOKにしたい場合
 !data/sample/.gitkeep  # 空フォルダ維持
+.wrangler/

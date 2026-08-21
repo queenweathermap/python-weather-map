@@ -30,7 +30,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -436,7 +436,9 @@ def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str, dt
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
-    record_recent_item("エマグラム", highres_url, "エマグラム", f"{dt.strftime('%Y-%m-%d %H')}Z")
+    jst = dt.astimezone(timezone(timedelta(hours=9)))
+    issue_time_label = f"{dt.strftime('%Y-%m-%d %H')}Z({jst.strftime('%H:%M')}JST)"
+    record_recent_item("エマグラム", highres_url, "エマグラム", issue_time_label)
 
 
 def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:

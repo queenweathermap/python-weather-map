@@ -1,0 +1,105 @@
+name: Run JMA Monthly Forecast (1か月予報資料)
+
+on:
+  schedule:
+    # 気象庁の1か月予報資料(FCVX11〜15)は毎週木曜更新のため週1回だけ実行する。
+    # JST 09:00（UTC 00:00）。他のワークフローと重複しない時刻。
+    - cron: "0 0 * * 4"
+
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    env:
+      TZ: Asia/Tokyo
+
+      # ------------------------------------------------------------
+      # R2
+      # ------------------------------------------------------------
+      R2_ENABLE: "1"
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
+      R2_PREFIX: "weathermap"
+      R2_RETENTION_DAYS: "30"
+      R2_CLEANUP_DRY_RUN: "0"
+
+      # ------------------------------------------------------------
+      # Notion（全部入りと同じカタログDB）
+      # ------------------------------------------------------------
+      NOTION_ENABLE: "1"
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      NOTION_IMPORT_IMAGES: "1"
+      NOTION_IMPORT_TIMEOUT_SECONDS: "240"
+      NOTION_IMPORT_POLL_SECONDS: "2.0"
+
+      NOTION_PROP_TITLE: "名前"
+      NOTION_PROP_CATEGORY: "区分"
+      NOTION_PROP_INIT_JST: "発行基準時刻"
+      NOTION_PROP_MEMO: "メモ"
+      NOTION_PROP_RJTD: "RJTD"
+      NOTION_PROP_PREFIX: "prefix"
+      NOTION_PROP_R2URL: "R2 URL"
+      NOTION_PROP_AUTOGEN: "自動生成"
+
+      # ------------------------------------------------------------
+      # 有料配信（PWA/メールログイン購読者へのOneSignal Push）
+      # ------------------------------------------------------------
+      DISCORD_DM_ENABLE: "0"
+      DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+      NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
+      ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+      ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+      NOTION_PWA_HISTORY_DATABASE_ID: ${{ secrets.NOTION_PWA_HISTORY_DATABASE_ID }}
+
+      # ------------------------------------------------------------
+      # Discord（公開チャンネル / 週間天気・全部入りと同じチャンネルに投稿）
+      # ------------------------------------------------------------
+      DISCORD_ENABLE: "1"
+      DISCORD_WEATHERCASTER_WEBHOOK_URL: ${{ secrets.DISCORD_WEATHERCASTER_WEBHOOK_URL }}
+      DISCORD_UPLOAD_AS_FILE: "1"
+      DISCORD_MAX_UPLOAD_MB: "8"
+      DISCORD_JPEG_QUALITY: "88"
+      DISCORD_THUMB_MAX_WIDTH: "1200"
+      DISCORD_THUMB_JPEG_QUALITY: "84"
+
+      # ------------------------------------------------------------
+      # PDF / PNG設定
+      # ------------------------------------------------------------
+      PDF_DPI: "220"
+      JPEG_DPI: "220"
+      JPEG_QUALITY: "85"
+      PNG_OPTIMIZE: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils fonts-noto-cjk fonts-noto-cjk-extra
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pillow pdf2image boto3 notion-client
+
+      - name: Run Monthly Forecast
+        run: |
+          python scripts/jma_monthly_forecast.py
+
+      - name: Cleanup old R2 objects
+        if: always()
+        run: |
+          python scripts/r2_cleanup.py
