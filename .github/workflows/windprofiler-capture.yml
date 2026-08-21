@@ -1,10 +1,12 @@
-name: Run JMA Windprofiler
+name: Run JMA Windprofiler (Capture Only)
 
 on:
   schedule:
     # JST 00:15 / 06:15 / 12:15 / 18:15（6時間おき。サイト表示は約7時間分の
     # ローリングウィンドウのため、約1時間の重なりで1日を切れ目なくカバーする）
     # UTC 15:15(前日) / 21:15(前日) / 03:15 / 09:15
+    # ここではDiscordへ投稿せず、地点ごとのraw画像をR2へ保存するだけ。
+    # 前日分のまとめ配信は windprofiler-daily-stations.yml（3時JST）が行う。
     - cron: "15 3,9,15,21 * * *"
 
   workflow_dispatch:
@@ -15,11 +17,6 @@ jobs:
 
     env:
       TZ: Asia/Tokyo
-
-      # ------------------------------------------------------------
-      # Discord（jma-windprofiler専用チャンネル）
-      # ------------------------------------------------------------
-      DISCORD_WINDPROFILER_WEBHOOK_URL: ${{ secrets.DISCORD_WINDPROFILER_WEBHOOK_URL }}
 
       # ------------------------------------------------------------
       # R2
@@ -76,9 +73,9 @@ jobs:
         run: |
           playwright install chromium
 
-      - name: Run JMA Windprofiler
+      - name: Run JMA Windprofiler (Capture Only)
         run: |
-          python scripts/windprofiler_discord.py
+          python scripts/windprofiler_capture.py
 
       - name: Cleanup old R2 objects
         if: always()
