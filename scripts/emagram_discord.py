@@ -437,8 +437,8 @@ def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str, dt
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
     jst = dt.astimezone(timezone(timedelta(hours=9)))
-    issue_time_label = f"{dt.strftime('%Y-%m-%d %H')}Z({jst.strftime('%H:%M')}JST)"
-    record_recent_item("エマグラム", highres_url, "エマグラム", issue_time_label)
+    issue_time_label = f"高層観測データ　{dt.strftime('%Y-%m-%d %H')}Z({jst.strftime('%H:%M')}JST)"
+    record_recent_item(f"エマグラム（{len(STATIONS)}地点）", highres_url, "エマグラム", issue_time_label)
 
 
 def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:

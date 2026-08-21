@@ -379,7 +379,7 @@ def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int) ->
         f"ウィンドプロファイラ 前日まとめ（{station_count}地点）",
         url,
         "ウィンドプロファイラ",
-        f"高層風観測データ {dt_jst.strftime('%Y/%m/%d')}まとめ",
+        f"高層観測データ {dt_jst.strftime('%Y/%m/%d')}まとめ",
     )
 
 
