@@ -56,7 +56,6 @@ JMA_SKAISETU_URL = "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_
 JMA_FEFE19_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fefe19.png"
 JMA_FXXN519_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxxn519.png"
 JMA_FZCX50_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fzcx50.png"
-WXCHART_LOGO_LIGHT_URL = "https://177chart.com/wp-content/uploads/2026/08/logo-light.png"
 
 # 2週間気温予報資料（週間4列結合の下段に追加）。気象庁が固定URL(cycleごとに上書き)で
 # 公開しているPNG。実際の初期値時刻は画像内にJMA自身が焼き込んでいる。
@@ -596,17 +595,6 @@ def rename_attachment(att: Attachment, filename_without_ext: str) -> Attachment:
 
 def get_first_page_or_none(pages: List[Image.Image]) -> Optional[Image.Image]:
     return pages[0] if pages else None
-
-
-def fetch_logo_png(url: str) -> Optional[Image.Image]:
-    """透過PNGロゴを取得する。失敗しても致命的ではないのでNoneを返して黙って諦める。"""
-    try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        return Image.open(io.BytesIO(r.content)).convert("RGB")
-    except Exception as e:
-        print(f"[WARN] logo fetch failed ({url}): {e}")
-        return None
 
 
 def combine_vertical(images: List[Image.Image], *, gap: int = 0, halign: str = "center") -> Optional[Image.Image]:
@@ -1177,6 +1165,42 @@ def split_top_bottom(
     return img.crop((0, 0, w, split_y)), img.crop((0, split_y, w, h))
 
 
+def find_trailing_caption_gap(
+    img: Image.Image, *, min_gap: int = 10, search_last_fraction: float = 0.35, threshold: int = 245
+) -> int:
+    """画像下部にJMA焼き込みのキャプション行がある場合、絵柄本体とキャプションの
+    間にある白一色の余白を探し、絵柄本体だけの高さ(その余白が始まる位置)を返す。
+    見つからなければ画像全体の高さを返す(=キャプションなし、または検出できず)。
+    trim_white_margins()は外周だけを切り詰めるため、キャプションも含めた
+    バウンディングボックス全体が残ってしまう(絵柄とキャプションの間の余白は
+    内部にあるため切り詰められない)ことへの対処。"""
+    w, h = img.size
+    px = img.load()
+
+    def row_has_content(y: int) -> bool:
+        for x in range(w):
+            r, g, b = px[x, y]
+            if r < threshold or g < threshold or b < threshold:
+                return True
+        return False
+
+    y0 = int(h * (1 - search_last_fraction))
+    gap_start = None
+    gap_len = 0
+    for y in range(y0, h):
+        if not row_has_content(y):
+            if gap_start is None:
+                gap_start = y
+            gap_len = y - gap_start + 1
+            if gap_len >= min_gap:
+                return gap_start
+        else:
+            gap_start = None
+            gap_len = 0
+
+    return h
+
+
 def resize_to_height(img: Image.Image, target_h: int) -> Image.Image:
     img = img.convert("RGB")
     if target_h <= 0 or img.height <= 0:
@@ -1230,10 +1254,6 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     for name, im in (("ASAS(wide)", asas_wide), ("FSAS24(wide)", fsas24_wide), ("FSAS48(wide)", fsas48_wide)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
-
-    # 3列目の一段目(旧・ASAS)に控えめに入れるロゴ。取得失敗は致命的ではないので
-    # errorsには積まず、無ければヘッダーが空欄のまま(prepend_header_pairが処理)になる。
-    wxchart_logo = fetch_logo_png(WXCHART_LOGO_LIGHT_URL)
 
     # AXJP140は1ページにALONG 140E(上)とALONG 130E(下)の2断面図が
     # 縦に並んでいるので、上下分割してAXJP140/AXJP130として別々に使う。
@@ -1396,36 +1416,39 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     col12_w = standard_w // 2
     col12_h = standard_h // 2
 
-    # ---- 3列目(旧・列2、AXFE578ベース): AXFE578上段(500hPa) / 177chartロゴ(控えめ) /
+    # ---- 3列目(旧・列2、AXFE578ベース): AXFE578上段(500hPa) / 薄いグレー塗り /
     # AUPQ35下段 / AXFE578下段(850hPa)。AUPA20はここから2列目(aupq_col)へ移動した。
     # ASAS(極東アジア広域)は一段目(2列目のASAS(日本周辺白黒)と対になる位置)へ
-    # 移動したので、本体側で空いたこの段には177chartロゴを控えめに置く。
-    LOGO_CELL_SCALE = 0.5  # 177chartロゴは主役ではないので控えめな大きさに留める。
+    # 移動したので、本体側で空いたこの段は薄いグレーで塗りつぶすだけにする
+    # (ロゴは入れない)。
+    EMPTY_CELL_GRAY = (230, 230, 230)
 
-    def make_logo_cell(w: int, h: int) -> Image.Image:
-        canvas = Image.new("RGB", (w, h), "white")
-        if wxchart_logo is not None:
-            logo_h = max(1, int(h * LOGO_CELL_SCALE))
-            logo_resized = resize_to_height(wxchart_logo, logo_h)
-            lx = max(0, (w - logo_resized.width) // 2)
-            ly = max(0, (h - logo_resized.height) // 2)
-            canvas.paste(logo_resized, (lx, ly))
-        return canvas
-
-    logo_row_h = col3_rows[1].height if len(col3_rows) > 1 else col12_h
-    logo_cell_for_col2 = make_logo_cell(col12_w, logo_row_h)
+    gray_row_h = col3_rows[1].height if len(col3_rows) > 1 else col12_h
+    # col3_rows[1](FXFE502下段)は、split_top_bottom()がキャプション文字を
+    # 千切らないよう境界を調整した結果、絵柄本体の下にJMA焼き込みキャプション
+    # 分の余白まで含んだ高さになっている。グレー塗りはキャプションを持たない
+    # ため、セルの高さ(gray_row_h、グリッド位置合わせに必要)はそのままに、
+    # 実際に塗るのは絵柄本体に相当する高さだけにして、その下は隣列の
+    # キャプション分と同じように白いまま残す(=隣の列の余白と合わせる)。
+    gray_content_h = (
+        find_trailing_caption_gap(col3_rows[1]) if len(col3_rows) > 1 else gray_row_h
+    )
+    gray_cell_for_col2 = Image.new("RGB", (col12_w, gray_row_h), "white")
+    if gray_content_h > 0:
+        gray_paint = Image.new("RGB", (col12_w, gray_content_h), EMPTY_CELL_GRAY)
+        gray_cell_for_col2.paste(gray_paint, (0, 0))
 
     # aupq35は既に全体を切り詰め済みだが、上下分割した境目には余白が残るので
     # 下段(500hPa)だけ改めて切り詰める。
     aupq35_lower = trim_white_margins(split_top_bottom(aupq35)[1]) if aupq35 is not None else None
 
     # 4段それぞれの種類が4列目(col3_rows)と対応するよう並べている:
-    # 0=500hPa系(AXFE578上段 ⇔ FXFE502上段) / 1=地上系(ロゴ ⇔ FXFE502下段) /
+    # 0=500hPa系(AXFE578上段 ⇔ FXFE502上段) / 1=地上系(グレー塗り ⇔ FXFE502下段) /
     # 2=500hPa気温系(AUPQ35下段 ⇔ FXFE5782上段) / 3=850hPa系(AXFE578下段 ⇔ FXFE5782下段)。
     # col3_rows(自然な高さ、切り取っていない)の高さに合わせてfill_cellで詰めることで、
-    # 種類の合う段同士が横方向にぴったり並ぶ(ロゴのセルは既にlogo_row_hちょうどの
+    # 種類の合う段同士が横方向にぴったり並ぶ(グレーのセルは既にgray_row_hちょうどの
     # 高さで作っているのでfill_cellは実質そのまま通す)。
-    col2_items = [axfe578_upper, logo_cell_for_col2, aupq35_lower, axfe578_lower]
+    col2_items = [axfe578_upper, gray_cell_for_col2, aupq35_lower, axfe578_lower]
     col2_cells = []
     for i, im in enumerate(col2_items):
         if im is None:
