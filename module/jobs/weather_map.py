@@ -2182,30 +2182,44 @@ def build_layout5_monthly(errors: List[str]) -> Optional[Attachment]:
     """
     1か月予報資料の気象庁直接取得版。WCN（Weathercaster.jp）には一切アクセスしない。
     FCVX11〜15（実況解析図/北半球予想図/スプレッド・高偏差確率/各種時系列/
-    熱帯・中緯度予想図）を週間4列結合と同じ要領で5枚横結合する。
+    熱帯・中緯度予想図）を5枚横一列にすると極端に横長になるため、
+    左列(11・12・13)/右列(14・15)の2列に縦結合してから横に並べる。
     """
     print("-> Building Monthly Forecast Layout (1か月予報資料)")
 
-    cols: List[Image.Image] = []
+    fetched: dict = {}
     for label, url in JMA_FCVX_MONTHLY:
         img = fetch_jma_direct_png(url, label)
         if img is None:
             errors.append(f"Monthly: {label} failed")
         else:
-            cols.append(img)
+            fetched[label] = img.convert("RGB")
 
-    if not cols:
+    if not fetched:
         return None
 
-    # FCVX11等は右側に大きな白余白を内蔵しており、単純に画像の幅で結合すると
-    # 絵柄同士の間隔が不揃いになる。絵柄(非白領域)同士の間隔が常にLAYOUT_GAPに
-    # なるよう、各画像の余白量を測って貼り付け位置をずらす(画像自体は切らない)。
-    positions = visual_gap_positions(cols, visual_gap=LAYOUT_GAP)
-    canvas_w = max(x + c.width for x, c in zip(positions, cols))
-    canvas_h = max(c.height for c in cols)
-    canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
-    for x, c in zip(positions, cols):
-        canvas.paste(c.convert("RGB"), (x, 0))
+    # FCVX11(実況解析図)はFCVX12/13より図の列数が少なく、右側に大きな余白が
+    # 残る。余白はそのまま(位置・大きさは変えない)、パネルの右端に縦線を
+    # 一本入れて区切りを分かりやすくする。
+    if "FCVX11" in fetched:
+        img = fetched["FCVX11"].copy()
+        draw = ImageDraw.Draw(img)
+        x = img.width - 2
+        draw.line([(x, 0), (x, img.height - 1)], fill=(0, 0, 0), width=3)
+        fetched["FCVX11"] = img
+
+    LEFT_LABELS = ["FCVX11", "FCVX12", "FCVX13"]
+    RIGHT_LABELS = ["FCVX14", "FCVX15"]
+
+    def build_stack(labels: List[str]) -> Optional[Image.Image]:
+        imgs = [fetched[label] for label in labels if label in fetched]
+        return combine_vertical(imgs, gap=LAYOUT_GAP, halign="left") if imgs else None
+
+    left_stack = build_stack(LEFT_LABELS)
+    right_stack = build_stack(RIGHT_LABELS)
+    canvas = combine_horizontal([left_stack, right_stack], gap=LAYOUT_GAP, valign="top")
+    if canvas is None:
+        return None
 
     caption = jma_source_caption()
     canvas = append_caption_bar(canvas, caption)
@@ -2262,9 +2276,14 @@ def main_monthly() -> None:
 
         filename = "09_MONTHLY_FORECAST"
         url = all_urls[0] if all_urls else ""
-        # 気象庁側の正式な初期値時刻は画像自体に焼き込まれているため、
-        # ここでのラベルは配信日(週)を示すだけのシンプルな表記にする。
-        init_label = f"{issue_dt_jst.strftime('%Y/%m/%d')}　長期予報資料"
+        # 気象庁の1か月アンサンブル予報(FCVX11〜15)は毎週水曜00Z(09:00JST)に
+        # 初期化され、木曜に公開される(本ジョブも木曜実行想定)。5枚とも同じ
+        # 初期値時刻で揃っているため、実行日の前日00Zをその初期値として
+        # numeric_fresh_issue_label()と同じ形式で表示する。
+        monthly_init_dt_jst = (issue_dt_jst - timedelta(days=1)).replace(
+            hour=9, minute=0, second=0, microsecond=0
+        )
+        init_label = numeric_fresh_issue_label(monthly_init_dt_jst)
 
         notion_items = [(filename, "1ヶ月予報 結合図", "MONTHLY_FORECAST", url)]
         page_id = notion_write_db(
