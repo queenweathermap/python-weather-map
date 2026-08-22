@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import functools
 import io
 import json
 import os
@@ -56,6 +57,7 @@ JMA_SKAISETU_URL = "https://www.data.jma.go.jp/yoho/data/jishin/kaisetsu_shukan_
 JMA_FEFE19_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fefe19.png"
 JMA_FXXN519_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fxxn519.png"
 JMA_FZCX50_URL = "https://www.jma.go.jp/bosai/numericmap/data/nwpmap/fzcx50.png"
+WXCHART_LOGO_LIGHT_URL = "https://177chart.com/wp-content/uploads/2026/08/logo-light.png"
 
 # 2週間気温予報資料（週間4列結合の下段に追加）。気象庁が固定URL(cycleごとに上書き)で
 # 公開しているPNG。実際の初期値時刻は画像内にJMA自身が焼き込んでいる。
@@ -597,6 +599,27 @@ def get_first_page_or_none(pages: List[Image.Image]) -> Optional[Image.Image]:
     return pages[0] if pages else None
 
 
+@functools.lru_cache(maxsize=1)
+def _fetch_wxchart_logo_bytes() -> Optional[bytes]:
+    try:
+        r = requests.get(WXCHART_LOGO_LIGHT_URL, timeout=30)
+        r.raise_for_status()
+        return r.content
+    except Exception as e:
+        print(f"[WARN] logo fetch failed ({WXCHART_LOGO_LIGHT_URL}): {e}")
+        return None
+
+
+def fetch_wxchart_logo() -> Optional[Image.Image]:
+    """クレジット表記(「作成：177chart」)に添えるロゴマークを取得する。
+    プロセス内で最初の1回だけ取得しキャッシュする(呼び出し元ごとに使い回す)。
+    失敗してもロゴ無し(テキストのみ)で処理を続けられるようNoneを返す。"""
+    data = _fetch_wxchart_logo_bytes()
+    if data is None:
+        return None
+    return Image.open(io.BytesIO(data)).convert("RGBA")
+
+
 def combine_vertical(images: List[Image.Image], *, gap: int = 0, halign: str = "center") -> Optional[Image.Image]:
     valid = [im.convert("RGB") for im in images if im is not None]
     if not valid:
@@ -957,6 +980,61 @@ def _wrap_caption_lines(text: str, font, available_w: int, tmp_draw) -> List[str
     return lines
 
 
+CAPTION_LOGO_MARKER = "作成：177chart"
+_LOGO_AUTO = object()  # append_caption_bar()のlogo_img省略時、自動取得させる目印
+
+
+def _draw_caption_line(
+    draw: ImageDraw.ImageDraw,
+    bar: Image.Image,
+    line: str,
+    font: ImageFont.ImageFont,
+    x_right: int,
+    y: int,
+    bbox: tuple,
+    logo_img: Optional[Image.Image],
+    fill=(90, 90, 90),
+) -> None:
+    """1行分のキャプションを右(または左)端x_rightに合わせて描く。
+    logo_img指定時、行内の"作成：177chart"の位置だけロゴマークを挟んで描く
+    (大きさは行の文字の上端・下端に合わせる)。"""
+    idx = line.find(CAPTION_LOGO_MARKER) if logo_img is not None else -1
+    if idx < 0:
+        w = draw.textbbox((0, 0), line, font=font)[2]
+        draw.text((x_right - w, y - bbox[1]), line, fill=fill, font=font)
+        return
+
+    before = line[:idx]
+    after = line[idx + len(CAPTION_LOGO_MARKER):]
+    prefix, suffix = "作成：", "177chart"
+
+    before_w = draw.textbbox((0, 0), before, font=font)[2] if before else 0
+    prefix_w = draw.textbbox((0, 0), prefix, font=font)[2]
+    suffix_w = draw.textbbox((0, 0), suffix, font=font)[2]
+    after_w = draw.textbbox((0, 0), after, font=font)[2] if after else 0
+
+    text_top = y - bbox[1]
+    logo_h = max(1, bbox[3] - bbox[1])
+    logo_w = max(1, round(logo_img.width * logo_h / logo_img.height))
+    gap = max(2, logo_h // 8)
+
+    total_w = before_w + prefix_w + gap + logo_w + gap + suffix_w + after_w
+    x = x_right - total_w
+
+    if before:
+        draw.text((x, text_top), before, fill=fill, font=font)
+    x += before_w
+    draw.text((x, text_top), prefix, fill=fill, font=font)
+    x += prefix_w + gap
+    logo_resized = logo_img.resize((logo_w, logo_h), Image.LANCZOS)
+    bar.paste(logo_resized, (x, text_top), logo_resized)
+    x += logo_w + gap
+    draw.text((x, text_top), suffix, fill=fill, font=font)
+    x += suffix_w
+    if after:
+        draw.text((x, text_top), after, fill=fill, font=font)
+
+
 def append_caption_bar(
     img: Image.Image,
     text: str,
@@ -965,6 +1043,7 @@ def append_caption_bar(
     pad: int = 24,
     align: str = "right",
     min_font_size: int = 16,
+    logo_img: Optional[Image.Image] = _LOGO_AUTO,
 ) -> Image.Image:
     """
     画像の下に、出典・作成日時を記した余白バーを追加する(既定で右寄せ)。
@@ -972,7 +1051,13 @@ def append_caption_bar(
     折り返す。それでも収まらない極端に狭い場合だけ、可読性を保てる
     min_font_size を下限にフォントを縮小する(文字が潰れて読めなくなる
     ほどには縮めない)。
+    テキスト中の"作成：177chart"の部分にロゴマークをインラインで挟んで描く
+    (文字の上端・下端に高さを合わせる)。logo_imgを省略すると自動取得
+    (プロセス内キャッシュ済み)し、明示的にNoneを渡せばロゴ無し(テキストのみ)
+    にできる。
     """
+    if logo_img is _LOGO_AUTO:
+        logo_img = fetch_wxchart_logo()
     img = img.convert("RGB")
     tmp = Image.new("RGB", (10, 10), "white")
     draw_tmp = ImageDraw.Draw(tmp)
@@ -1001,8 +1086,8 @@ def append_caption_bar(
     y = pad
     for ln, bbox in zip(lines, line_bboxes):
         w = bbox[2] - bbox[0]
-        x = (img.width - pad - w) if align == "right" else pad
-        draw.text((x, y - bbox[1]), ln, fill=(90, 90, 90), font=font)
+        x_right = (img.width - pad) if align == "right" else (pad + w)
+        _draw_caption_line(draw, bar, ln, font, x_right, y, bbox, logo_img)
         y += line_h + line_gap
 
     canvas = Image.new("RGB", (img.width, img.height + bar_h), "white")

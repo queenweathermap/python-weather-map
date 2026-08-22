@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sys
@@ -154,6 +155,155 @@ def load_font(candidates: list, size: int):
         except Exception:
             continue
     return ImageFont.load_default()
+
+
+WXCHART_LOGO_LIGHT_URL = "https://177chart.com/wp-content/uploads/2026/08/logo-light.png"
+
+
+@functools.lru_cache(maxsize=1)
+def _fetch_wxchart_logo_bytes():
+    try:
+        r = requests.get(WXCHART_LOGO_LIGHT_URL, timeout=30)
+        r.raise_for_status()
+        return r.content
+    except Exception as e:
+        print(f"[WARN] logo fetch failed ({WXCHART_LOGO_LIGHT_URL}): {e}")
+        return None
+
+
+def fetch_wxchart_logo():
+    """クレジット表記(「作成：177chart」)に添えるロゴマークを取得する。
+    プロセス内で最初の1回だけ取得しキャッシュする。失敗時はNone(テキストのみ)。"""
+    data = _fetch_wxchart_logo_bytes()
+    if data is None:
+        return None
+    return Image.open(BytesIO(data)).convert("RGBA")
+
+
+CAPTION_LOGO_MARKER = "作成：177chart"
+_LOGO_AUTO = object()  # append_caption_bar()のlogo_img省略時、自動取得させる目印
+
+
+def caption_text_for() -> str:
+    # 地点コードはURL構成上必須のため、代表として稚内(47406)を指定した状態の
+    # ポータルURLを出典として示す(実際の各段は33地点それぞれのデータ)。
+    return (
+        "出典：気象庁　https://www.jma.go.jp/bosai/windprofiler/#code=47406&type=chart"
+        "　提供資料を合成編集　作成：177chart"
+    )
+
+
+def _wrap_caption_lines(text: str, font, available_w: int, tmp_draw) -> list:
+    """"　"区切りの単位で、収まる範囲まで貪欲に行を詰める。"""
+    segments = text.split("　")
+    lines: list = []
+    current = ""
+    for seg in segments:
+        candidate = seg if not current else current + "　" + seg
+        w = tmp_draw.textbbox((0, 0), candidate, font=font)[2]
+        if w <= available_w or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = seg
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _draw_caption_line(draw, bar, line, font, x_right, y, bbox, logo_img, fill=(90, 90, 90)):
+    """1行分のキャプションをx_right(右端)に合わせて描く。logo_img指定時、
+    行内の"作成：177chart"の位置だけロゴマークを挟んで描く
+    (大きさは行の文字の上端・下端に合わせる)。"""
+    idx = line.find(CAPTION_LOGO_MARKER) if logo_img is not None else -1
+    if idx < 0:
+        w = draw.textbbox((0, 0), line, font=font)[2]
+        draw.text((x_right - w, y - bbox[1]), line, fill=fill, font=font)
+        return
+
+    before = line[:idx]
+    after = line[idx + len(CAPTION_LOGO_MARKER):]
+    prefix, suffix = "作成：", "177chart"
+
+    before_w = draw.textbbox((0, 0), before, font=font)[2] if before else 0
+    prefix_w = draw.textbbox((0, 0), prefix, font=font)[2]
+    suffix_w = draw.textbbox((0, 0), suffix, font=font)[2]
+    after_w = draw.textbbox((0, 0), after, font=font)[2] if after else 0
+
+    text_top = y - bbox[1]
+    logo_h = max(1, bbox[3] - bbox[1])
+    logo_w = max(1, round(logo_img.width * logo_h / logo_img.height))
+    gap = max(2, logo_h // 8)
+
+    total_w = before_w + prefix_w + gap + logo_w + gap + suffix_w + after_w
+    x = x_right - total_w
+
+    if before:
+        draw.text((x, text_top), before, fill=fill, font=font)
+    x += before_w
+    draw.text((x, text_top), prefix, fill=fill, font=font)
+    x += prefix_w + gap
+    logo_resized = logo_img.resize((logo_w, logo_h), Image.LANCZOS)
+    bar.paste(logo_resized, (x, text_top), logo_resized)
+    x += logo_w + gap
+    draw.text((x, text_top), suffix, fill=fill, font=font)
+    x += suffix_w
+    if after:
+        draw.text((x, text_top), after, fill=fill, font=font)
+
+
+def append_caption_bar(
+    img: Image.Image,
+    text: str,
+    *,
+    font_size: int = 48,
+    pad: int = 24,
+    align: str = "right",
+    min_font_size: int = 16,
+    logo_img=_LOGO_AUTO,
+) -> Image.Image:
+    """画像の下に、出典を記した余白バー(右寄せ)を追加する。横幅が足りない
+    場合はまず複数行に折り返し、それでも収まらなければmin_font_sizeを下限に
+    フォントを縮小する。logo_img省略時は「作成：177chart」部分にロゴマーク
+    をインラインで自動挿入する(明示的にNoneを渡せばロゴ無し)。"""
+    if logo_img is _LOGO_AUTO:
+        logo_img = fetch_wxchart_logo()
+    img = img.convert("RGB")
+    tmp = Image.new("RGB", (10, 10), "white")
+    draw_tmp = ImageDraw.Draw(tmp)
+    available_w = max(1, img.width - pad * 2)
+
+    size = font_size
+    while True:
+        font = load_font(CJK_REGULAR_CANDIDATES, size)
+        single_bbox = draw_tmp.textbbox((0, 0), text, font=font)
+        if (single_bbox[2] - single_bbox[0]) <= available_w:
+            lines = [text]
+            break
+        lines = _wrap_caption_lines(text, font, available_w, draw_tmp)
+        widest = max(draw_tmp.textbbox((0, 0), ln, font=font)[2] for ln in lines)
+        if widest <= available_w or size <= min_font_size:
+            break
+        size -= 2
+
+    line_bboxes = [draw_tmp.textbbox((0, 0), ln, font=font) for ln in lines]
+    line_h = max(b[3] - b[1] for b in line_bboxes)
+    line_gap = max(2, line_h // 6)
+    bar_h = line_h * len(lines) + line_gap * (len(lines) - 1) + pad * 2
+
+    bar = Image.new("RGB", (img.width, bar_h), "white")
+    draw = ImageDraw.Draw(bar)
+    y = pad
+    for ln, bbox in zip(lines, line_bboxes):
+        w = bbox[2] - bbox[0]
+        x_right = (img.width - pad) if align == "right" else (pad + w)
+        _draw_caption_line(draw, bar, ln, font, x_right, y, bbox, logo_img)
+        y += line_h + line_gap
+
+    canvas = Image.new("RGB", (img.width, img.height + bar_h), "white")
+    canvas.paste(img, (0, 0))
+    canvas.paste(bar, (0, img.height))
+    return canvas
 
 
 def placeholder_image(name: str) -> bytes:
@@ -317,6 +467,8 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
         x = col * (row_w + STATION_GAP)
         y = grid_row * (CELL_H + STATION_GAP)
         canvas.paste(row, (x, y))
+
+    canvas = append_caption_bar(canvas, caption_text_for())
 
     buf = BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
