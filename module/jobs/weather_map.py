@@ -340,10 +340,11 @@ def tkaisetu_only_refresh_time(now: Optional[datetime] = None) -> Optional[str]:
 
 
 def numeric_fresh_issue_label(issue_dt_jst: datetime) -> str:
-    """数値予報サイクルの初期時刻表示。例: "2026/08/19　00Z(09:00JST)"
-    「Z」自体がUTCを表すため、"Z UTC"のような重複表記はしない。"""
+    """数値予報サイクルの初期時刻表示。例: "2026/08/19 00Z (09:00JST)"
+    「Z」自体がUTCを表すため、"Z UTC"のような重複表記はしない。
+    日付とUTC、UTCとJSTの間はそれぞれ半角スペース区切りで統一する。"""
     cyc = jma_cycle_suffix(issue_dt_jst)
-    return f"{issue_dt_jst.strftime('%Y/%m/%d')}　{cyc}Z({issue_dt_jst.strftime('%H:%M')}JST)"
+    return f"{issue_dt_jst.strftime('%Y/%m/%d')} {cyc}Z ({issue_dt_jst.strftime('%H:%M')}JST)"
 
 
 def weekly_forecast_issue_label(issue_dt_jst: datetime) -> str:
@@ -362,17 +363,20 @@ def issue_time_overlay_text(issue_dt_jst: datetime, now: Optional[datetime] = No
     """
     ダッシュボード画像の左上に焼き込む、イニシャル時刻ラベルの文字列
     （PWAギャラリーの発行時刻表示にも同じ文字列を使う）。
-      ・数値予報が新しくなる回 → 例: "2026/08/19　00Z(09:00JST)"
+      ・数値予報が新しくなる回 → 例: "2026/08/19 00Z (09:00JST)"
       ・TKAISETU更新だけを拾う回(天気図は直前の00Z/12Zのまま)
-        → 例: "短期予報解説資料 15:40更新版"
+        → 例: "2026/08/19 00Z (09:00JST) 短期予報解説資料 15:40更新版"
+        (天気図自体の初期値も併記し、どのサイクルの数値予報を使っているか
+        分かるようにする)
     週間4列結合(main_layout4)は1日1回のみでTKAISETU更新のみの回が
     存在しないため、こちらではなくnumeric_fresh_issue_label()を直接使う。
     """
+    base = numeric_fresh_issue_label(issue_dt_jst)
     tkaisetu_time = tkaisetu_only_refresh_time(now)
     if tkaisetu_time is not None:
-        return f"{issue_dt_jst.strftime('%Y/%m/%d')}　短期予報解説資料 {tkaisetu_time}更新版"
+        return f"{base} 短期予報解説資料 {tkaisetu_time}更新版"
 
-    return numeric_fresh_issue_label(issue_dt_jst)
+    return base
 
 
 def notion_page_url(page_id: str) -> str:
