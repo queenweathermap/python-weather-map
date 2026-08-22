@@ -7,8 +7,10 @@
 # ワイオミング大学 (weather.arcc.uwyo.edu) の高層観測アーカイブから取得し、
 # 1枚に結合してDiscordへ配信する。
 #
-# 観測は 00Z(09時JST) / 12Z(21時JST) の1日2回。
-# データ反映まで余裕を見て、観測から7時間後（16時/翌04時JST）に実行する想定。
+# 観測は 00Z(09時JST) / 12Z(21時JST) の1日2回だが、配信は12Z回
+# （観測から7時間後、UTC 19:00 = 翌04:00JST）に一本化した「前日まとめ」。
+# この時点では同日00Z(19時間経過)・12Z(7時間経過)ともに十分収録済みのため、
+# 1回の実行で両方を1地点=1組(00Z/12Z横並び)としてまとめて配信する。
 #
 # 画像は静的URL（/upperair/imgs/{YYYYMMDDHH}.{地点番号}.stuve.png）に
 # 直接は存在せず、/wsgi/sounding?...type=PNG:STUVE... への初回アクセス時に
@@ -30,7 +32,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -68,8 +70,6 @@ BASE = "https://weather.arcc.uwyo.edu"
 SOUNDING_URL = BASE + "/wsgi/sounding"
 IMG_SRC_RE = re.compile(r'<img src="(/upperair/imgs/[^"]+\.png)">')
 
-GRID_COLS = 5
-GRID_ROWS = 3
 CELL_W = 800
 CELL_H = 640
 LABEL_H = 60
@@ -89,11 +89,13 @@ DISCORD_DM_ENABLE = os.environ.get("DISCORD_DM_ENABLE", "0").strip().lower() in 
 # 必ずこのPWA会員ページ(自前のモーダルビューアで画像を表示する)を開かせる。
 PWA_MEMBER_URL = os.environ.get("PWA_MEMBER_URL", "https://177chart.com/member/").strip()
 
-# 地点ごとの連続欠測回数を数え、一定回数を超えたらプレースホルダー画像内で
-# 目立たせる。観測は1日2回(00Z/12Z)なので、14回=7日間連続欠測が既定の閾値。
+# 地点・サイクル(00Z/12Zそれぞれ)ごとの連続欠測回数を数え、一定回数を超えたら
+# プレースホルダー画像内で目立たせる。配信は12Z回に一本化され1日1回だが、
+# 00Z・12Zそれぞれ独立にカウントする(キーは"{地点コード}_00"/"_12")ため、
+# 1回=1日として7回=7日間連続欠測が既定の閾値になる。
 # カウンタはR2に小さなJSONとして保存し、実行(GitHub Actions)をまたいで引き継ぐ。
 NO_DATA_STATE_KEY = "state/no_data_streak.json"
-NO_DATA_ALERT_STREAK = int(os.environ.get("EMAGRAM_NO_DATA_ALERT_STREAK", "14"))
+NO_DATA_ALERT_STREAK = int(os.environ.get("EMAGRAM_NO_DATA_ALERT_STREAK", "7"))
 
 REQUEST_TIMEOUT_SECONDS = 60
 DISCORD_TIMEOUT_SECONDS = 30
@@ -112,11 +114,15 @@ CJK_REGULAR_CANDIDATES = [
 ]
 
 
-def target_sounding_time() -> datetime:
-    """直近の観測時刻（00Z or 12Z）を返す。"""
+def target_sounding_times() -> tuple[datetime, datetime]:
+    """配信対象の00Z・12Z観測時刻(どちらも実行時点のUTC暦日)を返す。
+    12Z配信(UTC 19:00 = 翌04:00JST)に一本化したため、実行時点では
+    00Z(19時間経過)・12Z(7時間経過)とも収録済みになっている。
+    UTC暦日は00Z(09:00JST)・12Z(21:00JST)ともJST側でも同じ日付になるが、
+    配信自体は翌日未明(JST)に行うため、JST視点では「前日まとめ」になる。"""
     now = datetime.now(timezone.utc)
-    hour = 0 if now.hour < 12 else 12
-    return now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return today, today.replace(hour=12)
 
 
 def fetch_image(stnm: str, dt: datetime) -> bytes | None:
@@ -196,8 +202,8 @@ def save_no_data_streaks(streaks: dict[str, int]) -> None:
 
 def placeholder_image(name: str, dt: datetime, streak: int = 0) -> bytes:
     """データが取得できなかった地点用のプレースホルダー画像。
-    連続欠測がNO_DATA_ALERT_STREAK回(既定14回=観測1日2回×7日分)以上続いている
-    場合は「欠測継続 要調査」を表示して目立たせる。"""
+    連続欠測がNO_DATA_ALERT_STREAK回(既定7回=00Z/12Zそれぞれ1日1回換算で7日分)
+    以上続いている場合は「欠測継続 要調査」を表示して目立たせる。"""
     img = Image.new("RGB", (CELL_W, CELL_H), "white")
     draw = ImageDraw.Draw(img)
 
@@ -205,7 +211,7 @@ def placeholder_image(name: str, dt: datetime, streak: int = 0) -> bytes:
     font_small = load_font(CJK_REGULAR_CANDIDATES, 24)
 
     if streak >= NO_DATA_ALERT_STREAK:
-        days = streak // 2
+        days = streak
         lines = [
             ("⚠ 欠測継続 要調査", font_large),
             (f"約{days}日間データなし", font_small),
@@ -259,29 +265,41 @@ def fetch_image_with_fallback(stnm: str, name: str, dt: datetime, streak: int) -
     return placeholder_image(name, dt, new_streak), False
 
 
-def build_grid_image(stations_with_images: list) -> bytes:
-    """15地点分を1枚のグリッド画像に結合する（地点名ラベル付き）。"""
-    canvas_w = GRID_COLS * CELL_W
-    canvas_h = GRID_ROWS * (CELL_H + LABEL_H)
+PAIR_COLS = 3
+PAIR_ROWS = 5
+PAIR_INNER_GAP = 6    # 同じ地点の00Z/12Zペア内の余白(小さめ、さらに半分に)
+PAIR_GROUP_GAP = 96   # 隣の地点(ペア)との余白(多め、さらに2倍に)
+
+
+def build_grid_image(stations_with_pairs: list) -> bytes:
+    """15地点分を、各地点00Z/12Zの2枚組×3列5段のグリッド画像に結合する。
+    地点名ラベルはペアにつき1つだけ(00Z側の上、左上寄せ)。
+    stations_with_pairs: [(name, img00_bytes, img12_bytes), ...]"""
+    pair_w = CELL_W * 2 + PAIR_INNER_GAP
+    pair_h = LABEL_H + CELL_H
+    canvas_w = PAIR_COLS * pair_w + (PAIR_COLS - 1) * PAIR_GROUP_GAP
+    canvas_h = PAIR_ROWS * pair_h + (PAIR_ROWS - 1) * PAIR_GROUP_GAP
     canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
     draw = ImageDraw.Draw(canvas)
     font = load_font(CJK_BOLD_CANDIDATES, 32)
 
-    for idx, (name, img_bytes) in enumerate(stations_with_images):
-        col = idx % GRID_COLS
-        row = idx // GRID_COLS
-        x = col * CELL_W
-        y = row * (CELL_H + LABEL_H)
+    for idx, (name, img00_bytes, img12_bytes) in enumerate(stations_with_pairs):
+        col = idx % PAIR_COLS
+        row = idx // PAIR_COLS
+        x0 = col * (pair_w + PAIR_GROUP_GAP)
+        y0 = row * (pair_h + PAIR_GROUP_GAP)
 
         bbox = draw.textbbox((0, 0), name, font=font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        draw.text((x + (CELL_W - tw) // 2, y + (LABEL_H - th) // 2), name, fill="black", font=font)
+        th = bbox[3] - bbox[1]
+        draw.text((x0, y0 + (LABEL_H - th) // 2), name, fill="black", font=font)
 
-        with Image.open(BytesIO(img_bytes)) as im:
-            rgb = im.convert("RGB")
-            if rgb.size != (CELL_W, CELL_H):
-                rgb = rgb.resize((CELL_W, CELL_H), Image.Resampling.LANCZOS)
-            canvas.paste(rgb, (x, y + LABEL_H))
+        for i, img_bytes in enumerate((img00_bytes, img12_bytes)):
+            with Image.open(BytesIO(img_bytes)) as im:
+                rgb = im.convert("RGB")
+                if rgb.size != (CELL_W, CELL_H):
+                    rgb = rgb.resize((CELL_W, CELL_H), Image.Resampling.LANCZOS)
+                px = x0 + i * (CELL_W + PAIR_INNER_GAP)
+                canvas.paste(rgb, (px, y0 + LABEL_H))
 
     buf = BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
@@ -437,8 +455,7 @@ def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str, dt
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
-    jst = dt.astimezone(timezone(timedelta(hours=9)))
-    issue_time_label = f"高層観測データ　{dt.strftime('%Y-%m-%d %H')}Z({jst.strftime('%H:%M')}JST)"
+    issue_time_label = f"高層観測データ　{dt.strftime('%Y/%m/%d')}まとめ"
     record_recent_item(f"エマグラム（{len(STATIONS)}地点）", highres_url, "エマグラム", issue_time_label)
 
 
@@ -473,32 +490,35 @@ def main() -> int:
         print("ERROR: DISCORD_EMAGRAM_WEBHOOK_URL未設定", file=sys.stderr)
         return 1
 
-    dt = target_sounding_time()
+    dt00, dt12 = target_sounding_times()
 
     streaks = load_no_data_streaks()
-    stations_with_images = []
+    stations_with_pairs = []
     for stnm, name in STATIONS:
-        img_bytes, ok = fetch_image_with_fallback(stnm, name, dt, streaks.get(stnm, 0))
-        streaks[stnm] = 0 if ok else streaks.get(stnm, 0) + 1
-        stations_with_images.append((name, img_bytes))
+        img00, ok00 = fetch_image_with_fallback(stnm, name, dt00, streaks.get(f"{stnm}_00", 0))
+        streaks[f"{stnm}_00"] = 0 if ok00 else streaks.get(f"{stnm}_00", 0) + 1
+        img12, ok12 = fetch_image_with_fallback(stnm, name, dt12, streaks.get(f"{stnm}_12", 0))
+        streaks[f"{stnm}_12"] = 0 if ok12 else streaks.get(f"{stnm}_12", 0) + 1
+        stations_with_pairs.append((name, img00, img12))
     save_no_data_streaks(streaks)
 
-    combined = build_grid_image(stations_with_images)
-    combined = append_caption_bar(combined, dt)
+    combined = build_grid_image(stations_with_pairs)
+    # キャプション・投稿本文・PWA履歴はいずれも12Z(配信を一本化した基準サイクル)を代表値にする。
+    combined = append_caption_bar(combined, dt12)
 
-    # dtは00Z/12Zの固定枠に丸められるため、同じ枠内で複数回実行される(手動再実行等)と
-    # 同じR2キーになってしまう。実際の実行時刻(分秒, UTC)を付けてキーを一意にする。
+    # 同じUTC暦日に複数回実行される(手動再実行等)と同じR2キーになってしまうため、
+    # 実際の実行時刻(HHMMSS, UTC)を付けてキーを一意にする。
     now_utc = datetime.now(timezone.utc)
-    r2_key = f"{dt.strftime('%Y%m%d%H')}_{now_utc.strftime('%M%S')}.png"
+    r2_key = f"{dt00.strftime('%Y%m%d')}_{now_utc.strftime('%H%M%S')}.png"
     put_bytes(r2_key, combined, content_type="image/png")
     highres_url = make_url(r2_key)
     print(f"R2 UPLOADED: {highres_url}")
 
-    thumb = make_thumbnail(combined, dt)
+    thumb = make_thumbnail(combined, dt12)
 
-    if post_combined(webhook_url, dt, thumb, highres_url):
+    if post_combined(webhook_url, dt12, thumb, highres_url):
         print("POSTED")
-        notify_dm_subscribers(build_content(dt, highres_url), thumb, highres_url, dt)
+        notify_dm_subscribers(build_content(dt12, highres_url), thumb, highres_url, dt12)
         return 0
 
     return 1
