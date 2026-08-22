@@ -346,6 +346,18 @@ def numeric_fresh_issue_label(issue_dt_jst: datetime) -> str:
     return f"{issue_dt_jst.strftime('%Y/%m/%d')}　{cyc}Z({issue_dt_jst.strftime('%H:%M')}JST)"
 
 
+def weekly_forecast_issue_label(issue_dt_jst: datetime) -> str:
+    """週間4列結合(main_layout4)専用のラベル。
+    材料(FEFE19/FXXN519/FZCX50/週間予報支援図等)は気象庁配信の都合で
+    初期時刻がバラバラ(多くは前日12UTC、FEFE19だけ00UTCなど)であり、
+    numeric_fresh_issue_label()のように単一の00Z/12Zサイクルとして
+    表示するとミスリードになる。実際の配信基準にしているSKAISETU
+    (週間予報解説資料、JST 10時頃発表)の発表日付・時刻を、TKAISETUの
+    「短期予報解説資料 15:40更新版」と同じ形式で示す。
+    例: "2026/08/21　週間天気予報解説資料 10:00更新版" """
+    return f"{issue_dt_jst.strftime('%Y/%m/%d')}　週間天気予報解説資料 10:00更新版"
+
+
 def issue_time_overlay_text(issue_dt_jst: datetime, now: Optional[datetime] = None) -> str:
     """
     ダッシュボード画像の左上に焼き込む、イニシャル時刻ラベルの文字列
@@ -2110,9 +2122,10 @@ def main_layout4() -> None:
 
         try:
             if discord_jma_enabled() and url:
-                # 週間4列結合は1日1回のみでTKAISETU更新のみの回が存在しないため、
-                # issue_time_overlay_text()ではなくnumeric_fresh_issue_label()を直接使う。
-                init_label = numeric_fresh_issue_label(issue_dt_jst)
+                # 週間4列結合の材料は初期時刻がバラバラでnumeric_fresh_issue_label()の
+                # 00Z/12Z表記はミスリードになるため、weekly_forecast_issue_label()で
+                # SKAISETU(週間予報解説資料)の発表基準のラベルにする。
+                init_label = weekly_forecast_issue_label(issue_dt_jst)
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
@@ -2143,7 +2156,7 @@ def main_layout4() -> None:
                             push_title=DISCORD_TITLES.get(filename, filename),
                             push_url=url,
                             pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
-                            pwa_issue_time=numeric_fresh_issue_label(issue_dt_jst),
+                            pwa_issue_time=weekly_forecast_issue_label(issue_dt_jst),
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
