@@ -329,7 +329,7 @@ def post_daily_station_grid(webhook_url: str, dt_jst: datetime, image_bytes: byt
     content = (
         f"高層観測データ　{dt_jst.strftime('%Y/%m/%d')}まとめ\n"
         f"ウィンドプロファイラ 前日まとめ（{len(STATIONS_ALL)}地点）\n"
-        f"1地点＝1段、その日の実行分（最大4回、約1時間ずつ重なりあり）を横に並べています。\n"
+        f"🔗 [気象庁 ウィンドプロファイラ（地点別）](<{BASE_URL}>)\n"
         f"📥 [高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)"
     )
     payload = {
