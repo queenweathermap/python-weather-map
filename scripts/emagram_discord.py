@@ -291,15 +291,27 @@ def fetch_image_with_fallback(stnm: str, name: str, dt: datetime, streak: int) -
 
 PAIR_COLS = 3
 PAIR_ROWS = 5
-PAIR_INNER_GAP = 6    # 同じ地点の00Z/12Zペア内の余白(小さめ、さらに半分に)
-PAIR_GROUP_GAP = 96   # 隣の地点(ペア)との余白(多め、さらに2倍に)
+PAIR_INNER_GAP = 3     # 同じ地点の00Z/12Zペア内の余白(さらに半分に)
+PAIR_GROUP_GAP = 144   # 隣の地点(ペア)との余白(現在の1.5倍に)
+
+# Wyoming大学自身が図の右下に焼き込んでいる"University of Wyoming
+# Atmospheric Science"のクレジット行の高さ。ペアで2回(00Z/12Z)重複して
+# 出るため、00Z側だけ塗りつぶして消し、12Z側の1回だけ残す。
+WYOMING_CREDIT_BAND_H = 25
+
+# 生画像(800x640)は、地点・時刻によらず絵柄の左右に約20pxの白余白が
+# 一定して付く(軸の範囲が固定のテンプレートのため)。00Z側の右余白・
+# 12Z側の左余白をこの分だけ切り詰め、00Zの絵柄の右端と12Zの
+# タイトル("Station...")の左端がほぼ密着するようにする。
+CELL_SIDE_TRIM = 20
+TRIMMED_CELL_W = CELL_W - CELL_SIDE_TRIM
 
 
 def build_grid_image(stations_with_pairs: list) -> bytes:
     """15地点分を、各地点00Z/12Zの2枚組×3列5段のグリッド画像に結合する。
     地点名ラベルはペアにつき1つだけ(00Z側の上、左上寄せ)。
     stations_with_pairs: [(name, img00_bytes, img12_bytes), ...]"""
-    pair_w = CELL_W * 2 + PAIR_INNER_GAP
+    pair_w = TRIMMED_CELL_W * 2 + PAIR_INNER_GAP
     pair_h = LABEL_H + CELL_H
     canvas_w = PAIR_COLS * pair_w + (PAIR_COLS - 1) * PAIR_GROUP_GAP
     canvas_h = PAIR_ROWS * pair_h + (PAIR_ROWS - 1) * PAIR_GROUP_GAP
@@ -322,7 +334,15 @@ def build_grid_image(stations_with_pairs: list) -> bytes:
                 rgb = im.convert("RGB")
                 if rgb.size != (CELL_W, CELL_H):
                     rgb = rgb.resize((CELL_W, CELL_H), Image.Resampling.LANCZOS)
-                px = x0 + i * (CELL_W + PAIR_INNER_GAP)
+                if i == 0:
+                    rgb = rgb.copy()
+                    ImageDraw.Draw(rgb).rectangle(
+                        [0, CELL_H - WYOMING_CREDIT_BAND_H, CELL_W, CELL_H], fill="white"
+                    )
+                    rgb = rgb.crop((0, 0, TRIMMED_CELL_W, CELL_H))
+                else:
+                    rgb = rgb.crop((CELL_SIDE_TRIM, 0, CELL_W, CELL_H))
+                px = x0 + i * (TRIMMED_CELL_W + PAIR_INNER_GAP)
                 canvas.paste(rgb, (px, y0 + LABEL_H))
 
     buf = BytesIO()
