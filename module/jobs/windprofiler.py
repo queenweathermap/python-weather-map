@@ -507,7 +507,7 @@ def post_daily_station_grid(webhook_url: str, dt_jst: datetime, image_bytes: byt
     return False
 
 
-def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int) -> None:
+def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int, size_bytes: int = 0) -> None:
     """PWA/メールログイン購読者へ、前日分のウィンドプロファイラまとめを通知する。
     Discordへの投稿とは独立しており、失敗しても互いに影響しない
     （購読者取得や送信に失敗しても例外は握りつぶし、ログのみ出す）。"""
@@ -533,6 +533,7 @@ def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int) ->
         url,
         "ウィンドプロファイラ",
         f"高層観測データ {dt_jst.strftime('%Y/%m/%d')}まとめ",
+        size_bytes=size_bytes,
     )
 
 
@@ -565,7 +566,7 @@ def main_daily_stations() -> int:
     if posted:
         print(f"POSTED ({station_count}地点、1枚)")
 
-    notify_pwa_daily_stations(target_jst, url, station_count)
+    notify_pwa_daily_stations(target_jst, url, station_count, size_bytes=len(image_bytes))
     print("NOTIFIED (PWA)")
 
     return 0 if posted else 1

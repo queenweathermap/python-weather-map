@@ -523,7 +523,9 @@ def build_content(dt: datetime, highres_url: str) -> str:
     )
 
 
-def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str, dt: datetime) -> None:
+def notify_dm_subscribers(
+    content: str, thumb_bytes: bytes, highres_url: str, dt: datetime, size_bytes: int = 0
+) -> None:
     """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
     Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
     OneSignal Web Pushを送る。"""
@@ -549,7 +551,9 @@ def notify_dm_subscribers(content: str, thumb_bytes: bytes, highres_url: str, dt
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
     issue_time_label = f"高層観測データ　{dt.strftime('%Y/%m/%d')}まとめ"
-    record_recent_item(f"エマグラム（{len(STATIONS)}地点）", highres_url, "エマグラム", issue_time_label)
+    record_recent_item(
+        f"エマグラム（{len(STATIONS)}地点）", highres_url, "エマグラム", issue_time_label, size_bytes=size_bytes
+    )
 
 
 def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:
@@ -611,7 +615,7 @@ def main() -> int:
 
     if post_combined(webhook_url, dt12, thumb, highres_url):
         print("POSTED")
-        notify_dm_subscribers(build_content(dt12, highres_url), thumb, highres_url, dt12)
+        notify_dm_subscribers(build_content(dt12, highres_url), thumb, highres_url, dt12, size_bytes=len(combined))
         return 0
 
     return 1

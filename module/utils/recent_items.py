@@ -43,12 +43,26 @@ def _headers() -> dict:
     }
 
 
-def record_recent_item(title: str, url: str, category: str, issue_time_label: str = "") -> None:
+def record_recent_item(
+    title: str,
+    url: str,
+    category: str,
+    issue_time_label: str = "",
+    *,
+    size_bytes: int = 0,
+) -> None:
     """PWA配信履歴に1行追加する。失敗しても配信自体は止めたくないので例外は握りつぶす。
 
     issue_time_label: Discordの投稿文と同じ「発行基準時刻」の表示文字列
     （例: "2026-08-18 09:00 JST" や "2026-08-18 00Z"）。ギャラリー表示用で、
     配信日時（このNotion行が作られた時刻・30日保存期限の判定に使う）とは別物。
+
+    size_bytes: 画像のファイルサイズ。会員ページ側がタップした瞬間に（何も
+    フェッチせず同期的に）「iOSで共有シート経由の自動ダウンロードにするか、
+    大きいので別タブで開くだけにするか」を判断するために使う。iOSの
+    navigator.share()はユーザー操作から間を置かずに呼ばないと失敗するため、
+    非同期のサイズ確認（HEADリクエスト等）に頼らずタップ時点で即判定できる
+    必要がある。
     """
     db_id = _env("NOTION_PWA_HISTORY_DATABASE_ID")
     if not db_id:
@@ -63,6 +77,7 @@ def record_recent_item(title: str, url: str, category: str, issue_time_label: st
             "カテゴリ": {"select": {"name": category}},
             "配信日時": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
             "発行時刻表示": {"rich_text": [{"text": {"content": issue_time_label}}]},
+            "サイズ": {"number": size_bytes},
         },
     }
 

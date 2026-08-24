@@ -2003,6 +2003,7 @@ def notify_dm_subscribers(
     push_url: str = "",
     pwa_category: str = "",
     pwa_issue_time: str = "",
+    push_size_bytes: int = 0,
 ) -> None:
     """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
     Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
@@ -2037,7 +2038,7 @@ def notify_dm_subscribers(
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
     if pwa_category and push_title and push_url:
-        record_recent_item(push_title, push_url, pwa_category, pwa_issue_time)
+        record_recent_item(push_title, push_url, pwa_category, pwa_issue_time, size_bytes=push_size_bytes)
 
 
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
@@ -2099,6 +2100,7 @@ def main_dashboard_jma() -> None:
         run_prefix = f"{day}/RJTD_{rjtd}_{now_jst().strftime('%H%M%S')}"
 
         images, errors = build_dashboard_jma_only()
+        image_bytes_by_filename = {fname: data for fname, data, _ in images}
         all_urls, rep_url = upload_to_r2(run_prefix, images)
 
         filename = "07_DASHBOARD_JMA_DIRECT"
@@ -2155,6 +2157,7 @@ def main_dashboard_jma() -> None:
                         push_url=url,
                         pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
                         pwa_issue_time=issue_time_overlay_text(issue_dt_jst),
+                        push_size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
                     )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
@@ -2225,6 +2228,7 @@ def main_layout4() -> None:
         run_prefix = f"{day}/RJTD_{rjtd}_{now_jst().strftime('%H%M%S')}"
 
         images, errors = build_layout4_only()
+        image_bytes_by_filename = {fname: data for fname, data, _ in images}
         all_urls, rep_url = upload_to_r2(run_prefix, images)
 
         filename = "04_LAYOUT_4_WEEKLY"
@@ -2269,6 +2273,7 @@ def main_layout4() -> None:
                             push_url=url,
                             pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
                             pwa_issue_time=weekly_forecast_issue_label(issue_dt_jst),
+                            push_size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
@@ -2384,6 +2389,7 @@ def main_monthly() -> None:
         run_prefix = f"{day}/RJTD_{rjtd}_{issue_dt_jst.strftime('%H%M%S')}"
 
         images, errors = build_monthly_only()
+        image_bytes_by_filename = {fname: data for fname, data, _ in images}
         all_urls, rep_url = upload_to_r2(run_prefix, images)
 
         filename = "09_MONTHLY_FORECAST"
@@ -2446,6 +2452,7 @@ def main_monthly() -> None:
                             push_url=url,
                             pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
                             pwa_issue_time=init_label,
+                            push_size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
