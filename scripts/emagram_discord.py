@@ -291,19 +291,19 @@ def fetch_image_with_fallback(stnm: str, name: str, dt: datetime, streak: int) -
 
 PAIR_COLS = 3
 PAIR_ROWS = 5
-PAIR_INNER_GAP = 3     # 同じ地点の00Z/12Zペア内の余白(さらに半分に)
-PAIR_GROUP_GAP = 144   # 隣の地点(ペア)との余白(現在の1.5倍に)
+PAIR_INNER_GAP = 3    # 同じ地点の00Z/12Zペア内の余白(さらに半分に)
+PAIR_GROUP_GAP = 50   # 隣の地点(ペア)との余白(指定値)
 
 # Wyoming大学自身が図の右下に焼き込んでいる"University of Wyoming
 # Atmospheric Science"のクレジット行の高さ。ペアで2回(00Z/12Z)重複して
 # 出るため、00Z側だけ塗りつぶして消し、12Z側の1回だけ残す。
 WYOMING_CREDIT_BAND_H = 25
 
-# 生画像(800x640)は、地点・時刻によらず絵柄の左右に約20pxの白余白が
-# 一定して付く(軸の範囲が固定のテンプレートのため)。00Z側の右余白・
-# 12Z側の左余白をこの分だけ切り詰め、00Zの絵柄の右端と12Zの
-# タイトル("Station...")の左端がほぼ密着するようにする。
-CELL_SIDE_TRIM = 20
+# 生画像(800x640)は、地点・時刻によらず絵柄の左右に21px前後の白余白が
+# 一定して付く(軸の範囲が固定のテンプレートのため、複数地点で実測)。
+# 00Z側の右余白・12Z側の左余白を完全に切り詰め、00Zの絵柄の右端と
+# 12Zのタイトル("Station...")の左端が密着するようにする。
+CELL_SIDE_TRIM = 21
 TRIMMED_CELL_W = CELL_W - CELL_SIDE_TRIM
 
 
