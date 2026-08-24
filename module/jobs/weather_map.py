@@ -1301,9 +1301,8 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     データだけで、実際のWCN版「全部入り」と同じ構成を再現する。
 
     左端の縦長列: (一段目は空白) / AXJP140 / AXJP130 / 短期予報解説情報(TKAISETU、大きめ・下揃え)
-    2列目: ASAS(一段目、極東アジア切り出し) / AUPA20(200hPa) / AUPQ35上段(300hPa) / AUPQ78(700hPa/850hPa)
-    3列目: ASAS(一段目、日本周辺白黒) / AXFE578上段(500hPa) / 177chartロゴ(控えめ) / AUPQ35下段(500hPa) / AXFE578下段(850hPa)
-      (2列目・3列目の一段目は、ASAS(極東アジア切り出し)とASAS(日本周辺白黒)がT24/T48のように対になって2列分の幅に並ぶ)
+    2列目: (一段目は空白) / AUPA20(200hPa) / AUPQ35上段(300hPa) / AUPQ35下段(500hPa) / AUPQ78(700hPa/850hPa)
+    3列目: ASAS(一段目、日本周辺白黒) / AXFE578上段(500hPa) / ASAS(極東アジア切り出し) / AUPQ78上段(700hPa) / AXFE578下段(850hPa)
     4列目: FSAS24(一段目、24時間後) / FXFE502(12-24h) / FXFE5782(12-24h) / FXJP854上半分(T=12,24)
     5列目: FSAS48(一段目、48時間後) / FXFE504(36-48h) / FXFE5784(36-48h) / FXJP854下半分(T=36,48)
     6列目: (一段目は空白) / FXFE507(72h) / FXFE577(72h)  ※FXJP854はT=48までのためT72列には無し
@@ -1501,39 +1500,42 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     col12_w = standard_w // 2
     col12_h = standard_h // 2
 
-    # ---- 3列目(旧・列2、AXFE578ベース): AXFE578上段(500hPa) / 薄いグレー塗り /
-    # AUPQ35下段 / AXFE578下段(850hPa)。AUPA20はここから2列目(aupq_col)へ移動した。
-    # ASAS(極東アジア広域)は一段目(2列目のASAS(日本周辺白黒)と対になる位置)へ
-    # 移動したので、本体側で空いたこの段は薄いグレーで塗りつぶすだけにする
-    # (ロゴは入れない)。
-    EMPTY_CELL_GRAY = (230, 230, 230)
-
-    gray_row_h = col3_rows[1].height if len(col3_rows) > 1 else col12_h
+    # ---- 3列目(旧・列2、AXFE578ベース): AXFE578上段(500hPa) / ASAS(極東アジア) /
+    # AUPQ78上段(700hPa) / AXFE578下段(850hPa)。AUPA20・AUPQ35(300/500hPa)は
+    # 2列目(aupq_col)へ移動した。
+    # ASAS(極東アジア広域)は一時的に2列目一段目にあったが、この3段目(旧・グレー
+    # 塗りつぶしの位置)に戻す。「グレー塗りつぶしだった時と同じ大きさ」に
+    # 収まるよう縮小して詰める(絵柄本体の高さだけに収め、その下はキャプション分
+    # と同じ余白として白いまま残す)。
+    row1_target_h = col3_rows[1].height if len(col3_rows) > 1 else col12_h
     # col3_rows[1](FXFE502下段)は、split_top_bottom()がキャプション文字を
     # 千切らないよう境界を調整した結果、絵柄本体の下にJMA焼き込みキャプション
-    # 分の余白まで含んだ高さになっている。グレー塗りはキャプションを持たない
-    # ため、セルの高さ(gray_row_h、グリッド位置合わせに必要)はそのままに、
-    # 実際に塗るのは絵柄本体に相当する高さだけにして、その下は隣列の
-    # キャプション分と同じように白いまま残す(=隣の列の余白と合わせる)。
-    gray_content_h = (
-        find_trailing_caption_gap(col3_rows[1]) if len(col3_rows) > 1 else gray_row_h
+    # 分の余白まで含んだ高さになっている。ASASはキャプションを持たないため、
+    # セルの高さ(row1_target_h、グリッド位置合わせに必要)はそのままに、
+    # 実際に絵柄を詰めるのは本体相当の高さだけにして、その下は隣列のキャプション
+    # 分と同じように白いまま残す(=隣の列の余白と合わせる)。
+    row1_content_h = (
+        find_trailing_caption_gap(col3_rows[1]) if len(col3_rows) > 1 else row1_target_h
     )
-    gray_cell_for_col2 = Image.new("RGB", (col12_w, gray_row_h), "white")
-    if gray_content_h > 0:
-        gray_paint = Image.new("RGB", (col12_w, gray_content_h), EMPTY_CELL_GRAY)
-        gray_cell_for_col2.paste(gray_paint, (0, 0))
+    asas_asia_for_col2 = Image.new("RGB", (col12_w, row1_target_h), "white")
+    if asas_wide is not None and row1_content_h > 0:
+        asas_fitted = fill_cell(trim_white_margins(asas_wide), col12_w, row1_content_h, valign="top")
+        asas_asia_for_col2.paste(asas_fitted, (0, 0))
 
-    # aupq35は既に全体を切り詰め済みだが、上下分割した境目には余白が残るので
-    # 下段(500hPa)だけ改めて切り詰める。
-    aupq35_lower = trim_white_margins(split_top_bottom(aupq35)[1]) if aupq35 is not None else None
+    # 三段目: AUPQ78上段(700hPa)を新設。旧・AUPQ35下段(500hPa)がこの段にあった
+    # ときと同じ扱い(trim_white_margins→ループ内のfill_cellのみ、2列目側のような
+    # 緯度合わせはしない)で詰める。
+    aupq78_upper_for_col2 = (
+        trim_white_margins(split_top_bottom(aupq78)[0]) if aupq78 is not None else None
+    )
 
     # 4段それぞれの種類が4列目(col3_rows)と対応するよう並べている:
-    # 0=500hPa系(AXFE578上段 ⇔ FXFE502上段) / 1=地上系(グレー塗り ⇔ FXFE502下段) /
-    # 2=500hPa気温系(AUPQ35下段 ⇔ FXFE5782上段) / 3=850hPa系(AXFE578下段 ⇔ FXFE5782下段)。
+    # 0=500hPa系(AXFE578上段 ⇔ FXFE502上段) / 1=地上系(ASAS極東アジア ⇔ FXFE502下段) /
+    # 2=500hPa気温系(AUPQ78上段/700hPa ⇔ FXFE5782上段) / 3=850hPa系(AXFE578下段 ⇔ FXFE5782下段)。
     # col3_rows(自然な高さ、切り取っていない)の高さに合わせてfill_cellで詰めることで、
-    # 種類の合う段同士が横方向にぴったり並ぶ(グレーのセルは既にgray_row_hちょうどの
+    # 種類の合う段同士が横方向にぴったり並ぶ(ASASのセルは既にrow1_target_hちょうどの
     # 高さで作っているのでfill_cellは実質そのまま通す)。
-    col2_items = [axfe578_upper, gray_cell_for_col2, aupq35_lower, axfe578_lower]
+    col2_items = [axfe578_upper, asas_asia_for_col2, aupq78_upper_for_col2, axfe578_lower]
     col2_cells = []
     for i, im in enumerate(col2_items):
         if im is None:
@@ -1629,12 +1631,14 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     else:
         axjp140_natural = None
 
-    # ---- 2列目(aupq_col): 一段目=ASAS(極東アジア切り出し) / 本体=AUPA20(200hPa)・AUPQ35上段
-    # (300hPa)・AUPQ78(700hPa・850hPa)。500hPa(AUPQ35下段)は3列目に既にあるため省く。
+    # ---- 2列目(aupq_col): AUPA20(200hPa) / AUPQ35上段(300hPa) / AUPQ35下段(500hPa) /
+    # AUPQ78上段(700hPa) / AUPQ78下段(850hPa)。ASAS(極東アジア)は3列目三段目へ戻した
+    # ため一段目に置かない。
     # 「同じ場所が時間経過でどう変わるか」を横に並べて見せるのが目的なので、
-    # 緯度が横一直線に揃うことを優先し、3列目(col3_rows)と同じ段位置に並べ替える:
-    # 段3=AUPQ78下段(850hPa)⇔col3_rows[3](FXFE5782下段、850hPa)。対応する段の無い
-    # AUPA20(200hPa)・AUPQ35上段(300hPa)・AUPQ78上段(700hPa)は段0・段1・段2の位置を
+    # 緯度が横一直線に揃うことを優先し、3列目(col3_rows)と同じ段位置に並べる:
+    # 段0=AUPQ35上段(300hPa)⇔col3_rows[0]、段1=AUPQ35下段(500hPa)⇔col3_rows[1]、
+    # 段3=AUPQ78下段(850hPa)⇔col3_rows[3]。対応する段の無いAUPA20(200hPa)・
+    # AUPQ78上段(700hPa)は、AUPA20はcol12_hを独自に使い、AUPQ78上段は段2の位置を
     # 借りる(意味は異なるが位置だけ揃える)。
     #
     # AXFE578/FXFE502は緯度40度線がそれぞれの絵柄の高さに対しておよそ36.6%の位置に
@@ -1670,10 +1674,12 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         target_w = int(round(natural_w * ENLARGE_FACTOR))
         return fill_cell(img_padded, target_w, target_h, valign="bottom", halign="left")
 
-    aupq35_upper_trim = None
+    aupq35_upper_trim, aupq35_lower_trim, aupq35_lower_native = (None, None, None)
     if aupq35 is not None:
-        u, _l = split_top_bottom(aupq35)
+        u, l = split_top_bottom(aupq35)
         aupq35_upper_trim = trim_white_margins(u)
+        aupq35_lower_native = trim_white_margins(l)
+        aupq35_lower_trim = pad_top_to_match_latitude(aupq35_lower_native)
     aupq78_upper_trim, aupq78_lower_trim, aupq78_lower_native = (None, None, None)
     if aupq78 is not None:
         u, l = split_top_bottom(aupq78)
@@ -1681,55 +1687,40 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         aupq78_lower_native = trim_white_margins(l)
         aupq78_lower_trim = pad_top_to_match_latitude(aupq78_lower_native)
 
-    # 気象庁配信の並び(300hPa→700hPa→850hPa、自然順)。500hPa(AUPQ35下段)は
-    # 3列目(col2、AUPQ35下段として既出)と重複するためここでは削除し、一段目に
-    # ASASを追加した分だけAUPA20・300hPaを一段ずつ繰り下げる(段の高さの割り当て先
-    # を1つずつ後ろにずらすことで実現、位置は元のcol3_rows[1]〜[3]をそのまま流用)。
-    aupq_row_sources = [aupq35_upper_trim, aupq78_upper_trim, aupq78_lower_trim]
-    aupq_row_natives = [None, None, aupq78_lower_native]
-    aupq_row_target_indices = [1, 2, 3]
+    # 気象庁配信の並び(300hPa→500hPa→700hPa→850hPa、自然順)のまま、3列目
+    # (col3_rows)と同じ段位置にそのまま並べる(段の意味と位置が一致)。
+    aupq_row_sources = [aupq35_upper_trim, aupq35_lower_trim, aupq78_upper_trim, aupq78_lower_trim]
+    aupq_row_natives = [None, aupq35_lower_native, None, aupq78_lower_native]
     aupq_bottom_cells = []
-    for im, native, idx in zip(aupq_row_sources, aupq_row_natives, aupq_row_target_indices):
+    for i, im in enumerate(aupq_row_sources):
         if im is None:
             continue
-        target_h = col3_rows[idx].height if idx < len(col3_rows) else col12_h
+        target_h = col3_rows[i].height if i < len(col3_rows) else col12_h
+        native = aupq_row_natives[i]
         if native is not None:
             cell = enlarge_bottom_left(im, native.width, native.height, target_h)
         else:
             cell = resize_to_height(im, target_h)
         aupq_bottom_cells.append(cell)
 
-    # AUPA20はAUPQ35(300hPa)と左右端を揃える。幅を広げる分、縦横比を保ったまま
-    # 拡大すると高さがcol3_rows[0]を超えるため、下端(=AUPQ35との境目)を基準に
-    # 上側を切り詰める(fill_cellのbottom版)。高さもAUPQ35(300hPa)と同じく
-    # 一段繰り下げてcol3_rows[0]を使う(そこは元々AUPQ35(300hPa)が使っていた段)。
-    aupa20_target_w = aupq_bottom_cells[0].width if aupq_bottom_cells else col12_w
-    aupa20_target_h = col3_rows[0].height if col3_rows else col12_h
+    # AUPA20はAUPQ35(300hPa・500hPa)と左右端を揃える。300hPaは自然な幅のまま
+    # (resize_to_height)なので500hPa側より広いことがあり、その場合も足りなく
+    # ならないよう、AUPQ35側2枚(aupq_bottom_cellsの先頭2つ)の最大幅に合わせる。
+    # 幅を広げる分、縦横比を保ったまま拡大すると高さがcol12_hを超えるため、
+    # 下端(=AUPQ35との境目)を基準に上側を切り詰める(fill_cellのbottom版)。
+    aupq35_widths = [c.width for c in aupq_bottom_cells[:2]]
+    aupa20_target_w = max(aupq35_widths) if aupq35_widths else col12_w
     aupa20_cell = (
-        fill_cell(aupa20, aupa20_target_w, aupa20_target_h, valign="bottom", halign="left")
+        fill_cell(aupa20, aupa20_target_w, col12_h, valign="bottom", halign="left")
         if aupa20 is not None
         else None
     )
 
-    # AUPQ35(300hPa)等は縦横比を保ったまま(resize_to_height)なので、AUPA20側の
+    # AUPQ78(700/850hPa)等は縦横比を保ったまま拡大するため、AUPA20/AUPQ35側の
     # 幅より自然と狭くなることがある。halign="left"だと右側だけに余白ができて
     # 目立つため、center揃えにして左右均等に余白を逃がす。
     aupq_cells = ([aupa20_cell] if aupa20_cell is not None else []) + aupq_bottom_cells
     aupq_col = combine_vertical(aupq_cells, gap=LAYOUT_GAP, halign="center") if aupq_cells else None
-
-    # 一段目にASAS(広域、日本周辺のみ機械的に切り出さない)を追加
-    # (旧・3列目本体の段(crop_asia_areaで大きくトリミングしていた版)から移動)。
-    # 3列目一段目のASAS(日本周辺白黒)と対になり、T24/T48のように2列分の幅に
-    # 2つのASASが並ぶ。4列目のT24等と同じく、二段目(AUPA20)の左右端にきっちり
-    # 合わせて表示する(fill_cellで過不足なく詰める。白余白だけを切り詰めた
-    # ほぼ原寸のASASを使うため、3列目にあった頃より切り取りが少なく済む)。
-    asas_header_for_aupq = (
-        fill_cell(trim_white_margins(asas_wide), aupa20_target_w, header_h, valign="top", halign="left")
-        if asas_wide is not None
-        else None
-    )
-    if asas_header_for_aupq is not None and aupq_col is not None:
-        aupq_col = combine_vertical([asas_header_for_aupq, aupq_col], gap=LAYOUT_GAP, halign="center")
 
     # ---- 左端(1列目): 一段目は空白(他列の一段目と同じ高さ)、AXJP140 / AXJP130 / 短期予報解説情報。
     # 3つとも切り取らず自然なサイズのまま並べる(上でAUPQ35/AUPQ78側をこの高さに合わせている)。
