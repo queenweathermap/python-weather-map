@@ -550,7 +550,7 @@ def notify_dm_subscribers(
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
-    issue_time_label = f"高層観測データ　{dt.strftime('%Y/%m/%d')}まとめ"
+    issue_time_label = f"高層観測データ {dt.strftime('%Y/%m/%d')}まとめ"
     record_recent_item(
         f"エマグラム（{len(STATIONS)}地点）", highres_url, "エマグラム", issue_time_label, size_bytes=size_bytes
     )
