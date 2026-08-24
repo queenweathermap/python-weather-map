@@ -292,7 +292,7 @@ def fetch_image_with_fallback(stnm: str, name: str, dt: datetime, streak: int) -
 PAIR_COLS = 3
 PAIR_ROWS = 5
 PAIR_INNER_GAP = 3    # 同じ地点の00Z/12Zペア内の余白(さらに半分に)
-PAIR_GROUP_GAP = 50   # 隣の地点(ペア)との余白(指定値)
+PAIR_GROUP_GAP = 100  # 隣の地点(ペア)との余白(指定値、50から倍に)
 
 # Wyoming大学自身が図の右下に焼き込んでいる"University of Wyoming
 # Atmospheric Science"のクレジット行の高さ。ペアで2回(00Z/12Z)重複して
