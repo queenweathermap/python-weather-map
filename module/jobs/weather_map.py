@@ -599,6 +599,46 @@ def get_first_page_or_none(pages: List[Image.Image]) -> Optional[Image.Image]:
     return pages[0] if pages else None
 
 
+# =============================================================================
+# 日本列島の色付け(ASAS/FSAS24/FSAS48の広域図専用)
+#
+# ASAS_MONO.pdf・FSAS24_MONO_ASIA.pdf・FSAS48_MONO_ASIAはいずれもJMAが
+# 使い回している共通の固定テンプレートで、PDF_DPI=220で変換すると3枚とも
+# 3640x2573・外枠の位置(左上(97,84)〜右下(3541,2486))まで完全に一致する。
+# module/assets/nippon_tint.png(日本列島の形を実際の海岸線に合わせて
+# あらかじめ薄緑・透明度37%で塗った小さな画像)を、外枠基準で求めた縮尺で
+# 拡大し、実際の海岸線に対してクロス相関で求めた固定位置に貼り付けるだけ
+# なので、3枚とも同じ較正結果を使い回せる。
+# =============================================================================
+JAPAN_TINT_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "nippon_tint.png")
+JAPAN_TINT_WIDE_CHART_POS = (1557, 889)
+JAPAN_TINT_WIDE_CHART_SIZE = (389, 401)
+
+
+@functools.lru_cache(maxsize=1)
+def _load_japan_tint_image() -> Optional[Image.Image]:
+    try:
+        img = Image.open(JAPAN_TINT_PATH).convert("RGBA")
+    except Exception as e:
+        print(f"[WARN] nippon_tint.png load failed: {e}")
+        return None
+    return img.resize(JAPAN_TINT_WIDE_CHART_SIZE, Image.LANCZOS)
+
+
+def overlay_japan_tint_wide_chart(img: Optional[Image.Image]) -> Optional[Image.Image]:
+    """ASAS_MONO.pdf/FSAS24_MONO_ASIA.pdf/FSAS48_MONO_ASIA.pdf由来の広域画像
+    (PDF_DPI=220で3640x2573)に、日本列島を薄緑・半透明で色付けする。
+    3枚とも同じ固定テンプレートを使っているため、同じ較正済み位置を使い回せる。"""
+    if img is None:
+        return None
+    tint = _load_japan_tint_image()
+    if tint is None:
+        return img
+    base = img.convert("RGBA")
+    base.paste(tint, JAPAN_TINT_WIDE_CHART_POS, tint)
+    return base.convert("RGB")
+
+
 @functools.lru_cache(maxsize=1)
 def _fetch_wxchart_logo_bytes() -> Optional[bytes]:
     try:
@@ -1338,6 +1378,12 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     for name, im in (("ASAS(wide)", asas_wide), ("FSAS24(wide)", fsas24_wide), ("FSAS48(wide)", fsas48_wide)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
+    # ASAS_MONO/FSAS24_MONO_ASIA/FSAS48_MONO_ASIAはいずれもJMAが使い回している
+    # 共通テンプレート(PDF_DPI=220で3640x2573、枠線位置も同一)なので、同じ
+    # 較正済み位置で日本列島の色付けを3枚とも行える。
+    asas_wide = overlay_japan_tint_wide_chart(asas_wide)
+    fsas24_wide = overlay_japan_tint_wide_chart(fsas24_wide)
+    fsas48_wide = overlay_japan_tint_wide_chart(fsas48_wide)
 
     # AXJP140は1ページにALONG 140E(上)とALONG 130E(下)の2断面図が
     # 縦に並んでいるので、上下分割してAXJP140/AXJP130として別々に使う。
