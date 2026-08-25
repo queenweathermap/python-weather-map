@@ -639,6 +639,80 @@ def overlay_japan_tint_wide_chart(img: Optional[Image.Image]) -> Optional[Image.
     return base.convert("RGB")
 
 
+# =============================================================================
+# 日本列島の色付け(FXFE502/504/5782/5784/507/577共通テンプレート)
+#
+# FXFE502・FXFE504・FXFE5782・FXFE5784(T=12・T=24を横に並べた2パネル)と
+# FXFE507・FXFE577(T=72のみの1パネル)は、PDF_DPI=220で変換するといずれも
+# 外枠の左上・上下端が完全に一致する共通テンプレート(実測して確認済み。
+# 2パネル版は2798x2218・外枠(128,26)-(2753,2088)、1パネル版は1465x2218・
+# 外枠(128,26)-(1419,2088)で、1パネル版はT=12パネルだけを幅半分で
+# 切り出したものと一致する)。上段・下段それぞれをsplit_top_bottom()で
+# 切り出して使っている(build_period_rows)。
+#
+# module/assets/nippon_tint_fxfe502.png(日本列島の形、薄緑・透明度37%)を
+# 回転なしの単純な拡大縮小のみで貼り付ける(PSDでレイヤー配置して確認した
+# 結果、この図法では回転・斜めのゆがみは不要だった)。位置はPDFの生ページ
+# 上の絶対座標として較正してあり、split_top_bottom()で上下に切り出す前の
+# 生の上半分・下半分に対して貼り付けてからtrim_white_margins/
+# resize_to_width するため、キャプション文字の長さの違いなどでトリミング量が
+# 実行のたびに数px変わっても位置ズレが出ない。PSDで上段・下段×T12・T24の
+# 4パネル全部にレイヤー配置してもらった実測値(4パネルとも独立に一致して
+# いることを確認済み)から、生ページ上の座標として算出した。
+# =============================================================================
+JAPAN_TINT_FXFE502_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "assets", "nippon_tint_fxfe502.png"
+)
+JAPAN_TINT_FXFE502_CODES = ("fxfe502", "fxfe504", "fxfe5782", "fxfe5784")
+JAPAN_TINT_FXFE502_SINGLE_PANEL_CODES = ("fxfe507", "fxfe577", "axfe578")
+JAPAN_TINT_FXFE502_RAW_SIZE = (323.35, 343.26)
+# 生ページ(2パネル版なら分割前の1ページ全体)上でのT12パネル位置。上段
+# (500hPa相当)と下段(地上気圧/850hPa相当)とではページ上の絶対Y座標が
+# 異なる(別々のパネルとして描かれているため)ので、別々に持つ。
+JAPAN_TINT_FXFE502_RAW_POS_TOP = (779.79, 323.46)
+JAPAN_TINT_FXFE502_RAW_POS_BOTTOM = (786.39, 1386.25)
+JAPAN_TINT_FXFE502_RAW_PANEL_SHIFT = 1333.01
+
+
+@functools.lru_cache(maxsize=1)
+def _load_japan_tint_fxfe502_image() -> Optional[Image.Image]:
+    try:
+        img = Image.open(JAPAN_TINT_FXFE502_PATH).convert("RGBA")
+    except Exception as e:
+        print(f"[WARN] nippon_tint_fxfe502.png load failed: {e}")
+        return None
+    w, h = JAPAN_TINT_FXFE502_RAW_SIZE
+    return img.resize((round(w), round(h)), Image.LANCZOS)
+
+
+def overlay_japan_tint_fxfe502_half(
+    img: Image.Image,
+    *,
+    raw_pos: Tuple[float, float],
+    y_offset: float,
+    panels: Tuple[int, ...] = (0, 1),
+) -> Image.Image:
+    """FXFE502/504/5782/5784/507/577/AXFE578の生ページから切り出した
+    上半分・下半分(trim_white_margins/resize_to_width する前)に、
+    日本列島を薄緑・半透明で色付けする。raw_pos は
+    JAPAN_TINT_FXFE502_RAW_POS_TOP/BOTTOM のどちらか(上半分/下半分に
+    対応するもの)。y_offset は生ページ座標系からこの半分(上半分なら0、
+    下半分ならsplit_y)を引いた値。panels は貼り付けるパネル
+    (T12=0, T24=1)。1パネルのみのFXFE507/577/AXFE578は panels=(0,) を渡す。"""
+    tint = _load_japan_tint_fxfe502_image()
+    if tint is None:
+        return img
+    ox, oy = raw_pos
+    base = img.convert("RGBA")
+    for panel in panels:
+        base.paste(
+            tint,
+            (round(ox + panel * JAPAN_TINT_FXFE502_RAW_PANEL_SHIFT), round(oy - y_offset)),
+            tint,
+        )
+    return base.convert("RGB")
+
+
 @functools.lru_cache(maxsize=1)
 def _fetch_wxchart_logo_bytes() -> Optional[bytes]:
     try:
@@ -1440,6 +1514,15 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         axfe578_upper, axfe578_lower = None, None
     else:
         axfe578_upper, axfe578_lower = split_top_bottom(axfe578)
+        # AXFE578はFXFE507/577と外枠位置まで完全に一致する共通テンプレートなので、
+        # 同じ日本列島の色付けを、切り詰める前の生の上半分・下半分に対して行う。
+        axfe578_split_y = axfe578_upper.height
+        axfe578_upper = overlay_japan_tint_fxfe502_half(
+            axfe578_upper, raw_pos=JAPAN_TINT_FXFE502_RAW_POS_TOP, y_offset=0, panels=(0,)
+        )
+        axfe578_lower = overlay_japan_tint_fxfe502_half(
+            axfe578_lower, raw_pos=JAPAN_TINT_FXFE502_RAW_POS_BOTTOM, y_offset=axfe578_split_y, panels=(0,)
+        )
         # AXFE578はPDFページ自体に左と上に白余白があり、そのままだと2列目(aupq_col、
         # 既に余白なく詰めてある)と絵柄の位置がずれて見えるため、切り詰めておく。
         axfe578_upper = trim_white_margins(axfe578_upper)
@@ -1504,13 +1587,24 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
             errors.append(f"DashboardJMA: {upper_code} missing")
 
         rows: List[Image.Image] = []
-        for im in (surface, upper):
+        for im, code in ((surface, surface_code), (upper, upper_code)):
             if im is None:
                 continue
             target_w = im.width
             top, bottom = split_top_bottom(im)
-            rows.append(resize_to_width(trim_white_margins(top), target_w))
-            rows.append(resize_to_width(trim_white_margins(bottom), target_w))
+            if code in JAPAN_TINT_FXFE502_CODES or code in JAPAN_TINT_FXFE502_SINGLE_PANEL_CODES:
+                panels = (0,) if code in JAPAN_TINT_FXFE502_SINGLE_PANEL_CODES else (0, 1)
+                split_y = top.height
+                top = overlay_japan_tint_fxfe502_half(
+                    top, raw_pos=JAPAN_TINT_FXFE502_RAW_POS_TOP, y_offset=0, panels=panels
+                )
+                bottom = overlay_japan_tint_fxfe502_half(
+                    bottom, raw_pos=JAPAN_TINT_FXFE502_RAW_POS_BOTTOM, y_offset=split_y, panels=panels
+                )
+            top = resize_to_width(trim_white_margins(top), target_w)
+            bottom = resize_to_width(trim_white_margins(bottom), target_w)
+            rows.append(top)
+            rows.append(bottom)
         return rows
 
     # FXJP854(T12/24/36/48)は列4・列5の直下に、他列(1〜3・6列目)とは無関係な
