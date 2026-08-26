@@ -805,6 +805,45 @@ def overlay_japan_tint_aupq35(img: Image.Image) -> Image.Image:
     return base.convert("RGB")
 
 
+# =============================================================================
+# 日本列島の色付け(気象庁「日本周辺・白黒」天気図専用。ASAS/FSAS24/FSAS48
+# いずれも600x581の共通テンプレート)
+#
+# fetch_jma_near_monochrome_latest()が返す画像は"now"/"ft24"/"ft48"いずれも
+# 600x581で固定(ファイル名の"JCP600x581"表記の通り)。ファイル名は毎回変わる
+# が絵柄の縮尺・位置は共通なので、1回較正すれば3つとも使い回せる。
+# module/assets/nippon_tint_asas_mono.png(日本列島の形、薄緑・透明度37%)を
+# 回転なしの単純な拡大縮小のみで貼り付ける。PSDでレイヤー配置してもらった
+# 実測値から座標を算出した。
+# =============================================================================
+JAPAN_TINT_ASAS_MONO_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "assets", "nippon_tint_asas_mono.png"
+)
+JAPAN_TINT_ASAS_MONO_POS = (240, 161)
+
+
+@functools.lru_cache(maxsize=1)
+def _load_japan_tint_asas_mono_image() -> Optional[Image.Image]:
+    try:
+        return Image.open(JAPAN_TINT_ASAS_MONO_PATH).convert("RGBA")
+    except Exception as e:
+        print(f"[WARN] nippon_tint_asas_mono.png load failed: {e}")
+        return None
+
+
+def overlay_japan_tint_near_mono(img: Optional[Image.Image]) -> Optional[Image.Image]:
+    """気象庁「日本周辺・白黒」天気図(600x581、ASAS/FSAS24/FSAS48共通)に、
+    日本列島を薄緑・半透明で色付けする。"""
+    if img is None:
+        return None
+    tint = _load_japan_tint_asas_mono_image()
+    if tint is None:
+        return img
+    base = img.convert("RGBA")
+    base.paste(tint, JAPAN_TINT_ASAS_MONO_POS, tint)
+    return base.convert("RGB")
+
+
 @functools.lru_cache(maxsize=1)
 def _fetch_wxchart_logo_bytes() -> Optional[bytes]:
     try:
@@ -1529,9 +1568,9 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # 「日本周辺・白黒」天気図(list.jsonの near_monochrome、あらかじめ日本付近に
     # 切り出し済み)から取得する。ASASの広域版は列3の3段目(極東アジア切り出し)に
     # 既に出ているため一段目には出さないが、日本周辺白黒版は別物なので出す。
-    asas_new = fetch_jma_near_monochrome_latest("now", "ASAS")
-    fsas24_new = fetch_jma_near_monochrome_latest("ft24", "FSAS24")
-    fsas48_new = fetch_jma_near_monochrome_latest("ft48", "FSAS48")
+    asas_new = overlay_japan_tint_near_mono(fetch_jma_near_monochrome_latest("now", "ASAS"))
+    fsas24_new = overlay_japan_tint_near_mono(fetch_jma_near_monochrome_latest("ft24", "FSAS24"))
+    fsas48_new = overlay_japan_tint_near_mono(fetch_jma_near_monochrome_latest("ft48", "FSAS48"))
     for name, im in (("ASAS", asas_new), ("FSAS24", fsas24_new), ("FSAS48", fsas48_new)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
