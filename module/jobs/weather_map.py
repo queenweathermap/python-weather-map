@@ -764,15 +764,17 @@ def overlay_japan_tint_fxjp854_half(img: Image.Image, *, raw_pos: Tuple[float, f
 
 
 # =============================================================================
-# 日本列島の色付け(AUPQ35専用)
+# 日本列島の色付け(AUPQ35/AUPQ78共通。外枠位置・split_y・トリミング量まで
+# 完全に一致する共通テンプレートであることを実測して確認済み)
 #
-# AUPQ35は1ページに上段(300hPa)・下段(500hPa)が縦に並んでいる。
-# module/assets/nippon_tint_aupq35.png(日本列島の形、薄緑・透明度37%)を
-# 回転なしの単純な拡大縮小のみで貼り付ける。位置はPDFの生ページ上の絶対
+# AUPQ35/AUPQ78は1ページに上段(300/700hPa)・下段(500/850hPa)が縦に並んで
+# いる。module/assets/nippon_tint_aupq35.png(日本列島の形、薄緑・透明度37%)
+# を回転なしの単純な拡大縮小のみで貼り付ける。位置はPDFの生ページ上の絶対
 # 座標として較正してあり、trim_white_margins/split_top_bottom する前の
 # 生ページ全体に対して(上段・下段2箇所に)貼り付けてから以降の処理に渡すため、
 # トリミング量が実行のたびに変わっても位置ズレが出ない。PSDで上段・下段
-# 両方にレイヤー配置してもらった実測値から、生ページ上の座標として算出した。
+# 両方にレイヤー配置してもらった実測値(AUPQ35)から、生ページ上の座標として
+# 算出した。
 # =============================================================================
 JAPAN_TINT_AUPQ35_PATH = os.path.join(
     os.path.dirname(__file__), "..", "assets", "nippon_tint_aupq35.png"
@@ -1638,6 +1640,9 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     if aupq78 is None:
         errors.append("DashboardJMA: AUPQ78 missing")
     else:
+        # AUPQ78はAUPQ35と外枠位置・split_y・トリミング量まで完全に一致する
+        # 共通テンプレートなので、同じ較正済み位置をそのまま使い回せる。
+        aupq78 = overlay_japan_tint_aupq35(aupq78)
         aupq78 = trim_white_margins(aupq78)
 
     axfe578 = get_first_page_or_none(fetch_jma_numeric_pdf_pages("axfe578", cycle, issue_dt_jst))
