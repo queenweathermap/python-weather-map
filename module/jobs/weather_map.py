@@ -713,6 +713,98 @@ def overlay_japan_tint_fxfe502_half(
     return base.convert("RGB")
 
 
+# =============================================================================
+# 日本列島の色付け(FXJP854専用)
+#
+# FXJP854は1ページにT=12/24(上段)・T=36/48(下段)が2x2で並んでいる。
+# module/assets/nippon_tint_fxjp854.png(日本列島の形、薄緑・透明度37%)を
+# 回転なしの単純な拡大縮小のみで貼り付ける。位置はPDFの生ページ上の絶対
+# 座標として較正してあり、split_top_bottom()で上下に切り出す前の生の
+# 上半分・下半分に対して貼り付けてからtrim_white_margins するため、
+# トリミング量が実行のたびに変わっても位置ズレが出ない。PSDで4パネル全部に
+# レイヤー配置してもらった実測値から、生ページ上の座標として算出した。
+# =============================================================================
+JAPAN_TINT_FXJP854_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "assets", "nippon_tint_fxjp854.png"
+)
+JAPAN_TINT_FXJP854_RAW_SIZE = (399.13, 422.67)
+JAPAN_TINT_FXJP854_RAW_POS_TOP = (533.48, 337.82)
+JAPAN_TINT_FXJP854_RAW_POS_BOTTOM = (533.48, 1517.83)
+JAPAN_TINT_FXJP854_RAW_PANEL_SHIFT = 1091.32
+
+
+@functools.lru_cache(maxsize=1)
+def _load_japan_tint_fxjp854_image() -> Optional[Image.Image]:
+    try:
+        img = Image.open(JAPAN_TINT_FXJP854_PATH).convert("RGBA")
+    except Exception as e:
+        print(f"[WARN] nippon_tint_fxjp854.png load failed: {e}")
+        return None
+    w, h = JAPAN_TINT_FXJP854_RAW_SIZE
+    return img.resize((round(w), round(h)), Image.LANCZOS)
+
+
+def overlay_japan_tint_fxjp854_half(img: Image.Image, *, raw_pos: Tuple[float, float], y_offset: float) -> Image.Image:
+    """FXJP854の生ページから切り出した上半分・下半分(trim_white_margins
+    する前)に、日本列島を薄緑・半透明で色付けする(左右2パネル分とも)。
+    raw_pos は JAPAN_TINT_FXJP854_RAW_POS_TOP/BOTTOM のどちらか。y_offset は
+    生ページ座標系からこの半分(上半分なら0、下半分ならsplit_y)を引いた値。"""
+    tint = _load_japan_tint_fxjp854_image()
+    if tint is None:
+        return img
+    ox, oy = raw_pos
+    base = img.convert("RGBA")
+    for panel in (0, 1):
+        base.paste(
+            tint,
+            (round(ox + panel * JAPAN_TINT_FXJP854_RAW_PANEL_SHIFT), round(oy - y_offset)),
+            tint,
+        )
+    return base.convert("RGB")
+
+
+# =============================================================================
+# 日本列島の色付け(AUPQ35専用)
+#
+# AUPQ35は1ページに上段(300hPa)・下段(500hPa)が縦に並んでいる。
+# module/assets/nippon_tint_aupq35.png(日本列島の形、薄緑・透明度37%)を
+# 回転なしの単純な拡大縮小のみで貼り付ける。位置はPDFの生ページ上の絶対
+# 座標として較正してあり、trim_white_margins/split_top_bottom する前の
+# 生ページ全体に対して(上段・下段2箇所に)貼り付けてから以降の処理に渡すため、
+# トリミング量が実行のたびに変わっても位置ズレが出ない。PSDで上段・下段
+# 両方にレイヤー配置してもらった実測値から、生ページ上の座標として算出した。
+# =============================================================================
+JAPAN_TINT_AUPQ35_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "assets", "nippon_tint_aupq35.png"
+)
+JAPAN_TINT_AUPQ35_RAW_SIZE = (341.2, 355.8)
+JAPAN_TINT_AUPQ35_RAW_POS_UPPER = (1258.5, 589.1)
+JAPAN_TINT_AUPQ35_RAW_POS_LOWER = (1258.5, 2121.4)
+
+
+@functools.lru_cache(maxsize=1)
+def _load_japan_tint_aupq35_image() -> Optional[Image.Image]:
+    try:
+        img = Image.open(JAPAN_TINT_AUPQ35_PATH).convert("RGBA")
+    except Exception as e:
+        print(f"[WARN] nippon_tint_aupq35.png load failed: {e}")
+        return None
+    w, h = JAPAN_TINT_AUPQ35_RAW_SIZE
+    return img.resize((round(w), round(h)), Image.LANCZOS)
+
+
+def overlay_japan_tint_aupq35(img: Image.Image) -> Image.Image:
+    """AUPQ35の生ページ(split_top_bottom/trim_white_marginsする前)に、
+    日本列島を薄緑・半透明で色付けする(上段300hPa・下段500hPaの2箇所とも)。"""
+    tint = _load_japan_tint_aupq35_image()
+    if tint is None:
+        return img
+    base = img.convert("RGBA")
+    base.paste(tint, (round(JAPAN_TINT_AUPQ35_RAW_POS_UPPER[0]), round(JAPAN_TINT_AUPQ35_RAW_POS_UPPER[1])), tint)
+    base.paste(tint, (round(JAPAN_TINT_AUPQ35_RAW_POS_LOWER[0]), round(JAPAN_TINT_AUPQ35_RAW_POS_LOWER[1])), tint)
+    return base.convert("RGB")
+
+
 @functools.lru_cache(maxsize=1)
 def _fetch_wxchart_logo_bytes() -> Optional[bytes]:
     try:
@@ -1499,6 +1591,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     if aupq35 is None:
         errors.append("DashboardJMA: AUPQ35 missing")
     else:
+        aupq35 = overlay_japan_tint_aupq35(aupq35)
         # AXJP140/AXJP130/TKAISETUは既に切り詰め済みなので、AUPQ35/AUPQ78も
         # 同様に切り詰めておかないと、fill_cell後も自身の白余白が残った分だけ
         # 絵柄の開始位置がずれて見える(セルの大きさは揃っていても中の絵柄が揃わない)。
@@ -1544,6 +1637,13 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
         fxjp854_upper, fxjp854_lower = None, None
     else:
         fxjp854_upper, fxjp854_lower = split_top_bottom(fxjp854_page)
+        fxjp854_split_y = fxjp854_upper.height
+        fxjp854_upper = overlay_japan_tint_fxjp854_half(
+            fxjp854_upper, raw_pos=JAPAN_TINT_FXJP854_RAW_POS_TOP, y_offset=0
+        )
+        fxjp854_lower = overlay_japan_tint_fxjp854_half(
+            fxjp854_lower, raw_pos=JAPAN_TINT_FXJP854_RAW_POS_BOTTOM, y_offset=fxjp854_split_y
+        )
         # FXJP854自身の白余白を切り詰めてから、列4(FXFE5782)・列5(FXFE5784)の
         # 幅いっぱいに引き伸ばす。col3/col4の各段(build_period_rows)も同じく
         # 「トリミング→列のネイティブ幅まで引き伸ばす」方式(余白ゼロで絵柄が
