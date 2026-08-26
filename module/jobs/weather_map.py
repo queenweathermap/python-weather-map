@@ -846,6 +846,43 @@ def overlay_japan_tint_near_mono(img: Optional[Image.Image]) -> Optional[Image.I
     return base.convert("RGB")
 
 
+# =============================================================================
+# 日本列島の色付け(AUPA20専用)
+#
+# AUPA20はFUPA252と同一縮尺の共通テンプレート(ユーザー確認済み。外枠位置を
+# 基準にした比率(約1.10倍)で較正した)。module/assets/nippon_tint_fupa252.png
+# (FUPA252のPSDレイヤー配置から作成、日本列島の形・薄緑・透明度37%)を
+# 回転なしの単純な拡大縮小のみで貼り付ける。
+# =============================================================================
+JAPAN_TINT_AUPA20_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "assets", "nippon_tint_fupa252.png"
+)
+JAPAN_TINT_AUPA20_RAW_SIZE = (301.6, 319.0)
+JAPAN_TINT_AUPA20_RAW_POS = (1126.4, 1209.8)
+
+
+@functools.lru_cache(maxsize=1)
+def _load_japan_tint_aupa20_image() -> Optional[Image.Image]:
+    try:
+        img = Image.open(JAPAN_TINT_AUPA20_PATH).convert("RGBA")
+    except Exception as e:
+        print(f"[WARN] nippon_tint_fupa252.png load failed (for AUPA20): {e}")
+        return None
+    w, h = JAPAN_TINT_AUPA20_RAW_SIZE
+    return img.resize((round(w), round(h)), Image.LANCZOS)
+
+
+def overlay_japan_tint_aupa20(img: Image.Image) -> Image.Image:
+    """AUPA20の生ページ(trim_white_marginsする前)に、日本列島を薄緑・
+    半透明で色付けする。"""
+    tint = _load_japan_tint_aupa20_image()
+    if tint is None:
+        return img
+    base = img.convert("RGBA")
+    base.paste(tint, (round(JAPAN_TINT_AUPA20_RAW_POS[0]), round(JAPAN_TINT_AUPA20_RAW_POS[1])), tint)
+    return base.convert("RGB")
+
+
 @functools.lru_cache(maxsize=1)
 def _fetch_wxchart_logo_bytes() -> Optional[bytes]:
     try:
@@ -1622,6 +1659,7 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     if aupa20 is None:
         errors.append("DashboardJMA: AUPA20 missing")
     else:
+        aupa20 = overlay_japan_tint_aupa20(aupa20)
         # AUPA20はPDFページ自体に白余白があり、そのままfill_cellすると
         # 下のAUPQ35(同じくfill_cellで余白なく詰める)より幅が狭く見えるため、
         # あらかじめ切り詰めておく。
