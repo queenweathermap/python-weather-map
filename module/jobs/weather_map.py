@@ -313,12 +313,35 @@ _TKAISETU_ONLY_SLOTS = (
 )
 _NUMERIC_FRESH_SLOTS = (11 * 60 + 30, 23 * 60 + 30)
 
+# TKAISETUの実際の公式発表時刻(JST)。_TKAISETU_ONLY_SLOTSの実行時刻枠(05:30/17:30)
+# とは別物 — こちらはPDFのLast-Modifiedから「実際どちらの版か」を判定するための基準。
+_TKAISETU_ANNOUNCE_SLOTS = (
+    (15 * 60 + 40, "15:40"),
+    (3 * 60 + 40, "03:40"),
+)
+
+# build_layout_dashboard_jma()がTKAISETU PDFを取得した際、実際のLast-Modified(JST)
+# をここに記録する。tkaisetu_only_refresh_time()はラベル文字列('03:40'/'15:40')を
+# 決める際、実行時刻の代わりにこちらを優先する（GitHub Actionsのスケジュール実行が
+# 大きく遅延すると、実行時刻ベースの推定では既に次の発表に切り替わっている中身に
+# 古いラベルを付けて配信してしまうため）。
+_tkaisetu_last_modified_jst: Optional[datetime] = None
+
+
+def set_tkaisetu_last_modified(last_modified_jst: Optional[datetime]) -> None:
+    global _tkaisetu_last_modified_jst
+    _tkaisetu_last_modified_jst = last_modified_jst
+
 
 def tkaisetu_only_refresh_time(now: Optional[datetime] = None) -> Optional[str]:
     """
     現在時刻(JST)が「天気図は前回と同じ・TKAISETUの更新だけを拾う回」に
     最も近い場合、そのTKAISETU公式発表時刻('HH:MM')を返す。
     数値予報が新しくなる回に最も近い場合はNoneを返す。
+
+    どの回か自体の判定は実行時刻(now)のままだが、実際に返すラベル文字列は
+    set_tkaisetu_last_modified()で記録された実際のLast-Modifiedがあれば
+    それを優先して判定する。
     """
     now = now or now_jst()
     minute_of_day = now.hour * 60 + now.minute
@@ -335,9 +358,17 @@ def tkaisetu_only_refresh_time(now: Optional[datetime] = None) -> Optional[str]:
             best_tkaisetu_dist = d
             best_tkaisetu_only = tkaisetu_time
 
-    if best_tkaisetu_dist is not None and best_tkaisetu_dist < best_numeric:
-        return best_tkaisetu_only
-    return None
+    if best_tkaisetu_dist is None or best_tkaisetu_dist >= best_numeric:
+        return None
+
+    if _tkaisetu_last_modified_jst is not None:
+        lm_minute = _tkaisetu_last_modified_jst.hour * 60 + _tkaisetu_last_modified_jst.minute
+        best_tkaisetu_only = min(
+            _TKAISETU_ANNOUNCE_SLOTS,
+            key=lambda s: circular_dist(lm_minute, s[0]),
+        )[1]
+
+    return best_tkaisetu_only
 
 
 def numeric_fresh_issue_label(issue_dt_jst: datetime) -> str:
@@ -395,6 +426,18 @@ def _response_last_modified_date(r: requests.Response):
         return None
     try:
         return parsedate_to_datetime(raw).astimezone(timezone.utc).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _response_last_modified_datetime_jst(r: requests.Response) -> Optional[datetime]:
+    """レスポンスのLast-ModifiedヘッダをJSTのdatetimeとして返す。無ければNone。
+    TKAISETU(短期予報解説資料)の実際の発表時刻(03:40/15:40)判定に使う。"""
+    raw = r.headers.get("Last-Modified")
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw).astimezone(jst_tz())
     except (TypeError, ValueError):
         return None
 
@@ -484,11 +527,7 @@ def fetch_jma_numeric_pdf_pages(
     print(f"[NG] JMA {code}: both cycles failed ({preferred_cycle}, {fallback_cycle})")
     return []
 
-def fetch_jma_direct_pdf_pages(url: str, label: str = "") -> List[Image.Image]:
-    """
-    認証不要の気象庁URLから直接PDFを取得して PIL Image リストを返す。
-    TKAISETU など WCN 経由ではなく JMA 直取得するものに使う。
-    """
+def _fetch_jma_direct_pdf_response(url: str, label: str = "") -> Optional[requests.Response]:
     try:
         r = requests.get(
             url,
@@ -501,13 +540,39 @@ def fetch_jma_direct_pdf_pages(url: str, label: str = "") -> List[Image.Image]:
         )
         ct = (r.headers.get("Content-Type") or "").lower()
         if r.status_code == 200 and (r.content.startswith(b"%PDF") or "pdf" in ct):
-            pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
-            print(f"[OK] JMA direct {label}: pages={len(pages)} URL={url}")
-            return pages
+            return r
         print(f"[NG] JMA direct {label}: HTTP={r.status_code}, Content-Type={ct}, URL={url}")
     except Exception as e:
         print(f"[ERR] JMA direct {label}: {e}")
-    return []
+    return None
+
+
+def fetch_jma_direct_pdf_pages(url: str, label: str = "") -> List[Image.Image]:
+    """
+    認証不要の気象庁URLから直接PDFを取得して PIL Image リストを返す。
+    TKAISETU など WCN 経由ではなく JMA 直取得するものに使う。
+    """
+    r = _fetch_jma_direct_pdf_response(url, label)
+    if r is None:
+        return []
+    pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+    print(f"[OK] JMA direct {label}: pages={len(pages)} URL={url}")
+    return pages
+
+
+def fetch_jma_direct_pdf_pages_with_last_modified(
+    url: str, label: str = ""
+) -> Tuple[List[Image.Image], Optional[datetime]]:
+    """fetch_jma_direct_pdf_pages()と同じだが、レスポンスのLast-Modified(JST)も
+    合わせて返す。TKAISETUの実際の発表時刻(03:40/15:40)をラベルに正しく反映する
+    ために使う（実行時刻ベースの推定だと、スケジュール実行の遅延で実際の中身と
+    ずれることがあるため）。"""
+    r = _fetch_jma_direct_pdf_response(url, label)
+    if r is None:
+        return [], None
+    pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+    print(f"[OK] JMA direct {label}: pages={len(pages)} URL={url}")
+    return pages, _response_last_modified_datetime_jst(r)
 
 
 def fetch_image_content(url: str) -> Optional[bytes]:
@@ -1597,7 +1662,11 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     cycle = jma_cycle_suffix(issue_dt_jst)
 
     # ---- 素材取得 ----
-    tkai = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_TKAISETU_URL, "TKAISETU"))
+    tkai_pages, tkai_last_modified = fetch_jma_direct_pdf_pages_with_last_modified(
+        JMA_TKAISETU_URL, "TKAISETU"
+    )
+    set_tkaisetu_last_modified(tkai_last_modified)
+    tkai = get_first_page_or_none(tkai_pages)
     if tkai is not None:
         # TKAISETUはPDFページ自体の右側に大きな白余白があり、そのままだと
         # 隣列との間に不要な隙間ができるのであらかじめ切り詰める。
