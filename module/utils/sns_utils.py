@@ -5,14 +5,18 @@
 # SNS 自動投稿ユーティリティ（複数画像対応 = 1投稿に複数枚）
 #   ・Bluesky（AT Protocol / 無料）      : embed.images に最大4枚
 #   ・Threads（Meta / 無料）             : 1枚=単一投稿 / 2枚以上=カルーセル
+#   ・Facebook Page（Meta / 無料）       : 1枚=通常投稿 / 2枚以上=まとめてfeedに添付
+#   ・Instagram（Meta / 無料）           : 1枚=単一投稿 / 2枚以上=カルーセル
 #
 # 画像は images=[(png_bytes, alt), ...] の形で渡す。
 #
 # X（旧Twitter）は有料枠を使わないため対応を廃止した。
 #
 # 必要な環境変数（GitHub Actions secrets 推奨）:
-#   Bluesky : BLUESKY_ENABLE / BLUESKY_HANDLE / BLUESKY_APP_PASSWORD
-#   Threads : THREADS_ENABLE / THREADS_USER_ID / THREADS_ACCESS_TOKEN
+#   Bluesky   : BLUESKY_ENABLE / BLUESKY_HANDLE / BLUESKY_APP_PASSWORD
+#   Threads   : THREADS_ENABLE / THREADS_USER_ID / THREADS_ACCESS_TOKEN
+#   Facebook  : FACEBOOK_ENABLE / FACEBOOK_PAGE_ID / FACEBOOK_PAGE_ACCESS_TOKEN
+#   Instagram : INSTAGRAM_ENABLE / INSTAGRAM_USER_ID / INSTAGRAM_ACCESS_TOKEN
 # =============================================================================
 
 from __future__ import annotations
@@ -286,6 +290,70 @@ def post_threads(*, text: str, images: List[Image_], r2_upload) -> bool:
     except Exception as e:
         body = getattr(getattr(e, "response", None), "text", "")
         print(f"[ERR] Threads post failed: {e} {body}")
+        return False
+
+
+# =============================================================================
+# Facebook Page ※無料。画像は直接バイナリでアップロードするため公開URL不要。
+#   1枚=通常の写真投稿 / 2枚以上=未公開アップロード後にfeedへまとめて添付。
+# =============================================================================
+def facebook_enabled() -> bool:
+    return (
+        os.environ.get("FACEBOOK_ENABLE", "0").lower() in ("1", "true", "yes", "on")
+        and bool(os.environ.get("FACEBOOK_PAGE_ID", "").strip())
+        and bool(os.environ.get("FACEBOOK_PAGE_ACCESS_TOKEN", "").strip())
+    )
+
+
+def post_facebook(*, text: str, images: List[Image_]) -> bool:
+    """Facebookページに画像付きで投稿（images=[(png, alt), ...]）。成功で True。"""
+    if not facebook_enabled():
+        print("[INFO] Facebook 無効（FACEBOOK_ENABLE / PAGE_ID / PAGE_ACCESS_TOKEN 未設定）")
+        return False
+    images = list(images)
+    if not images:
+        return False
+
+    page_id = os.environ["FACEBOOK_PAGE_ID"].strip()
+    token = os.environ["FACEBOOK_PAGE_ACCESS_TOKEN"].strip()
+    base = "https://graph.facebook.com/v21.0"
+
+    try:
+        if len(images) == 1:
+            png, _alt = images[0]
+            r = requests.post(
+                f"{base}/{page_id}/photos",
+                data={"caption": text, "access_token": token},
+                files={"source": ("image.png", io.BytesIO(png), "image/png")},
+                timeout=120,
+            )
+            r.raise_for_status()
+            print("[OK] Facebook posted (1 image)")
+            return True
+
+        media_ids = []
+        for png, _alt in images:
+            r = requests.post(
+                f"{base}/{page_id}/photos",
+                data={"published": "false", "access_token": token},
+                files={"source": ("image.png", io.BytesIO(png), "image/png")},
+                timeout=120,
+            )
+            r.raise_for_status()
+            media_ids.append(r.json()["id"])
+
+        attached_media = [{"media_fbid": mid} for mid in media_ids]
+        r2 = requests.post(
+            f"{base}/{page_id}/feed",
+            data={"message": text, "attached_media": json.dumps(attached_media), "access_token": token},
+            timeout=60,
+        )
+        r2.raise_for_status()
+        print(f"[OK] Facebook posted ({len(images)} images)")
+        return True
+    except Exception as e:
+        body = getattr(getattr(e, "response", None), "text", "")
+        print(f"[ERR] Facebook post failed: {e} {body}")
         return False
 
 

@@ -5,7 +5,7 @@
 # 札幌(北海道)・東京・福岡・仙台(宮城)・大阪・沖縄 個別投稿ジョブ
 #   ・各都市ごとに「昼の長さ(日の出/日の入り)」と「過去3年の気温比較(代表3地点)」の
 #     2枚を生成し、WordPress(177chart.com)に本文記事として投稿する（6都市とも）。
-#   ・SNS(Bluesky/Threads/Instagram)投稿は東京のみ1本にまとめる。
+#   ・SNS(Bluesky/Threads/Facebook/Instagram)投稿は東京のみ1本にまとめる。
 #     昼の長さ＋気温グラフの2枚＋固定のブログ紹介ページ(https://177chart.com/note-tokyo)への
 #     リンクを投稿し、他5都市（札幌・福岡・仙台・大阪・沖縄）はブログで公開した旨だけを
 #     文中で紹介する（個別のSNS投稿はしない）。
@@ -28,7 +28,7 @@ from module.jobs.climate_3yr import (
     elements_for_month,
 )
 from module.jobs.daylength import build_figure as build_daylength_figure
-from module.utils.sns_utils import post_bluesky, post_threads, post_instagram
+from module.utils.sns_utils import post_bluesky, post_threads, post_facebook, post_instagram
 from module.utils.wordpress_utils import post_climate_article
 
 CITY_CONFIGS = {
@@ -185,6 +185,7 @@ def main(city_key: str) -> None:
 
     post_bluesky(text=caption, images=images)
     post_threads(text=caption, images=images, r2_upload=upload_r2)
+    post_facebook(text=caption, images=images)
     post_instagram(text=caption, images=images, r2_upload=upload_r2)
 
     print("=== Done ===")

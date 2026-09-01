@@ -1,24 +1,10 @@
-name: Run Climate Tokyo
+name: Monthly Promo (全部入り天気図)
 
 on:
   schedule:
-    # GitHub Actions の cron は UTC。JST 01:10 に投稿したい（climate-akita の10分後）。
-    #   16日 01:10 JST = 15日 16:10 UTC
-    #   1日  01:10 JST = 前月末日 16:10 UTC（末日は月で変わるため 28-31 を広めに指定し、
-    #                    実際に JST 1日/16日でない起動は本体スクリプト側でゲートして即終了）
-    - cron: "10 16 15 * *"
-    - cron: "10 16 28,29,30,31 * *"
-
+    # 毎月10日 10:00 JST（01:00 UTC）
+    - cron: "0 1 10 * *"
   workflow_dispatch:
-    inputs:
-      target_month:
-        description: "対象月 (1-12) 空なら自動"
-        required: false
-        default: ""
-      target_half:
-        description: "first(前半1-15) / second(後半16-末) 空なら自動"
-        required: false
-        default: ""
 
 jobs:
   run:
@@ -27,20 +13,11 @@ jobs:
     env:
       TZ: Asia/Tokyo
 
-      # 手動実行(workflow_dispatch)のときは投稿日ゲートを無視して必ず実行する
-      CLIMATE_FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
-      CLIMATE_POST_DAYS: "1,16"
-      CLIMATE_TARGET_MONTH: ${{ github.event.inputs.target_month }}
-      CLIMATE_TARGET_HALF: ${{ github.event.inputs.target_half }}
-
-      # Discordには投稿しない（秋田専用チャンネルのため）
-
       # ------------------------------------------------------------
-      # WordPress（wx-chart.com。アプリケーションパスワード認証）
+      # Notion（PWA配信履歴DBから「1日 00Z」の全部入り天気図URLを検索）
       # ------------------------------------------------------------
-      WP_ENABLE: "1"
-      WP_USERNAME: ${{ secrets.WP_USERNAME }}
-      WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_PWA_HISTORY_DATABASE_ID: ${{ secrets.NOTION_PWA_HISTORY_DATABASE_ID }}
 
       # ------------------------------------------------------------
       # Bluesky（climate-akita と同じアカウント）
@@ -48,7 +25,6 @@ jobs:
       BLUESKY_ENABLE: "1"
       BLUESKY_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
       BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
-
 
       # ------------------------------------------------------------
       # Threads（climate-akita と同じアカウント）: 画像は公開URL(R2)から取得される
@@ -65,14 +41,14 @@ jobs:
       INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
 
       # ------------------------------------------------------------
-      # Facebook Page（177chart）: Instagramと同じページ・同じトークンを使う
+      # Facebook Page（177chart。Instagramと同じページ・同じトークンを使う）
       # ------------------------------------------------------------
       FACEBOOK_ENABLE: "1"
       FACEBOOK_PAGE_ID: "1265931083278703"
       FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
 
       # ------------------------------------------------------------
-      # R2（Threads公開URL用。climate-akita とは別prefixで分離）
+      # R2（Threads/Instagram公開URL用の再アップロードに必要）
       # ------------------------------------------------------------
       R2_ENABLE: "1"
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -80,9 +56,8 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
-      R2_PREFIX: "climate-tokyo"
+      R2_PREFIX: "monthly-promo"
       R2_RETENTION_DAYS: "30"
-      R2_CLEANUP_DRY_RUN: "0"
 
     steps:
       - name: Checkout
@@ -93,22 +68,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Japanese fonts (matplotlib 日本語化)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
-          fc-cache -f
-
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas lxml matplotlib boto3 astral tzdata pillow
+          pip install requests pillow
 
-      - name: Run Climate Tokyo (2枚まとめ投稿)
+      - name: Post monthly dashboard promo (Bluesky/Threads/Facebook/Instagram)
         run: |
-          python scripts/climate_tokyo.py
+          python scripts/monthly_promo.py
 
       - name: Cleanup old R2 objects
         if: always()
         run: |
+          pip install boto3
           python scripts/r2_cleanup.py
