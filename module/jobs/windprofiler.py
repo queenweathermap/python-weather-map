@@ -409,10 +409,26 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
     """
     rows: List[Image.Image] = []
 
+    # 撮影は当日00:15/06:15/12:15/18:15の4回だが、各コマは撮影時刻を終端とする
+    # 約7時間のローリングウィンドウなので、当日00:15のコマは実際にはほぼ前日
+    # 17:15〜24:00のデータしか写っていない。dt_jst(対象日)のJST 00:00-24:00を
+    # 素直にカバーするには、対象日00:15の代わりに「翌日00:15」(＝対象日
+    # 17:15〜24:15をカバーするコマ)を使う必要がある。よって対象日06/12/18時台と
+    # 翌日00時台の4コマを選ぶ(実行間隔6時間はここでも変わらないため、
+    # 下のx_positions計算はそのまま使える)。
+    target_str = dt_jst.strftime("%Y%m%d")
+    next_str = (dt_jst + timedelta(days=1)).strftime("%Y%m%d")
+    wanted_hours = {target_str: {"06", "12", "18"}, next_str: {"00"}}
+
     for code, name in STATIONS_ALL:
+        candidates = list(list_keys_with_prefix(f"stations/{code}/{target_str}")) + list(
+            list_keys_with_prefix(f"stations/{code}/{next_str}")
+        )
         keys = sorted(
-            k for k in list_keys_with_prefix(f"stations/{code}/{dt_jst.strftime('%Y%m%d')}")
+            k for k in candidates
             if k.endswith(".png")
+            and (hours := wanted_hours.get(k.rsplit("/", 1)[-1][:8])) is not None
+            and k.rsplit("/", 1)[-1][8:10] in hours
         )
         if not keys:
             continue
