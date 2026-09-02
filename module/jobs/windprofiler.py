@@ -118,12 +118,13 @@ STATION_AXIS_WIDTH = 49
 # はっきり区別できるよう、その2倍の余白を空ける。
 STATION_GAP = STATION_HEADER_HEIGHT * 2
 
-# 同じ地点の2枚目以降は、単純に横へ並べるのではなく実行間隔(6時間)分だけ
+# 同じ地点の2枚目以降は、単純に横へ並べるのではなく実際の撮影時刻の差分だけ
 # ずらして重ねて貼る（2枚目を上に）。ローリングウィンドウの重複部分
 # （約1時間強）が2枚目側の絵柄でそのまま上書きされるため、時間軸が
 # 継ぎ目なく連続して見える。ずらし幅は実測のPX_PER_HOUR(x軸の目盛り間隔)
-# から算出する。
-RUN_INTERVAL_HOURS = 6
+# から算出する。撮影間隔は通常6時間おきだが、フォールバックで前日撮影分を
+# そのまま使う場合など必ずしも6時間おきとは限らないため、ファイル名の
+# 撮影時刻から実際の差分(時間)を計算して使う(build_daily_station_grid内)。
 PX_PER_HOUR = 82.5
 
 R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "30")
@@ -437,6 +438,7 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
             continue
 
         panels = []
+        panel_times: List[datetime] = []
         for key in keys:
             data = get_bytes(key)
             if data is None:
@@ -446,6 +448,8 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
                 if rgb.size != (CELL_W, CELL_H):
                     rgb = rgb.resize((CELL_W, CELL_H), Image.Resampling.LANCZOS)
                 panels.append(rgb)
+            ts = key.rsplit("/", 1)[-1].removesuffix(".png")
+            panel_times.append(datetime.strptime(ts, "%Y%m%d%H%M").replace(tzinfo=JST))
         if not panels:
             continue
 
@@ -454,12 +458,14 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
             panels[i] = panels[i].crop((STATION_AXIS_WIDTH, STATION_HEADER_HEIGHT, CELL_W, CELL_H))
 
         # 各パネルのx位置: 1枚目は0起点。2枚目以降は「1枚目のプロット開始位置
-        # (STATION_AXIS_WIDTH)」を基準に、実行間隔(6時間)分だけ右にずらした
-        # 位置に貼る。ローリングウィンドウが約1時間強重なっているため、
-        # この位置に貼ると自然に絵柄が重なり、後から貼る（＝上になる）
+        # (STATION_AXIS_WIDTH)」を基準に、実際の撮影時刻の差(前日撮影分の
+        # フォールバック使用時など、必ずしも6時間おきとは限らない)分だけ
+        # 右にずらした位置に貼る。ローリングウィンドウが約1時間強重なっている
+        # ため、この位置に貼ると自然に絵柄が重なり、後から貼る（＝上になる）
         # 2枚目以降の絵柄が優先されて継ぎ目なく見える。
         x_positions = [0] + [
-            STATION_AXIS_WIDTH + round(i * RUN_INTERVAL_HOURS * PX_PER_HOUR)
+            STATION_AXIS_WIDTH
+            + round((panel_times[i] - panel_times[0]).total_seconds() / 3600 * PX_PER_HOUR)
             for i in range(1, len(panels))
         ]
 
