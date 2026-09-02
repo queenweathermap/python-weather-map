@@ -12,9 +12,7 @@
 #   WP_USERNAME       : WordPressユーザー名
 #   WP_APP_PASSWORD   : アプリケーションパスワード（半角スペース入り可）
 #   WP_API_BASE       : 既定 "https://177chart.com/wp-json/wp/v2"
-#                        （旧ドメイン wx-chart.com は177chart.comへ301リダイレクトされる
-#                          設定になっているが、POSTがGETに化けるリスクがあるため
-#                          新ドメインを直接指定する）
+#                        （旧ドメイン wx-chart.com は廃止済み。177chart.comを直接指定する）
 #
 # 呼び出し側の方針:
 #   WordPress側のAPIエラーはここで吸収し、失敗時は "" を返すだけにする
