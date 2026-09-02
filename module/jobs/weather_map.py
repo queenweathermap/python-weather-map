@@ -14,6 +14,7 @@ import functools
 import io
 import json
 import os
+import re
 import shutil
 import time
 from datetime import datetime, timezone, timedelta
@@ -547,17 +548,50 @@ def _fetch_jma_direct_pdf_response(url: str, label: str = "") -> Optional[reques
     return None
 
 
-def fetch_jma_direct_pdf_pages(url: str, label: str = "") -> List[Image.Image]:
+def fetch_jma_direct_pdf_pages(
+    url: str, label: str = "", issue_dt_jst: Optional[datetime] = None
+) -> List[Image.Image]:
     """
     認証不要の気象庁URLから直接PDFを取得して PIL Image リストを返す。
     TKAISETU など WCN 経由ではなく JMA 直取得するものに使う。
+
+    issue_dt_jst: この配信が想定しているJST初期時刻。渡された場合、fetch_jma_numeric_pdf_pages()
+      と同じ方針で、レスポンスのLast-Modified日付を期待するUTC日付と照合し、食い違っていれば
+      少し待って再取得する(ASAS_MONO/FSAS24_MONO_ASIA/FSAS48_MONO_ASIAのような、日付を含まない
+      固定URLに上書き配信されるPDF向け)。
     """
-    r = _fetch_jma_direct_pdf_response(url, label)
-    if r is None:
-        return []
-    pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
-    print(f"[OK] JMA direct {label}: pages={len(pages)} URL={url}")
-    return pages
+    expected_date = (
+        issue_dt_jst.astimezone(timezone.utc).date() if issue_dt_jst is not None else None
+    )
+    attempts_left = JMA_STALE_RETRY_MAX + 1 if expected_date is not None else 1
+
+    while attempts_left > 0:
+        attempts_left -= 1
+        r = _fetch_jma_direct_pdf_response(url, label)
+        if r is None:
+            return []
+
+        if expected_date is not None:
+            actual_date = _response_last_modified_date(r)
+            if actual_date is not None and actual_date != expected_date:
+                print(
+                    f"[WARN] JMA direct {label}: Last-Modified不一致 "
+                    f"(期待={expected_date}, 実際={actual_date}) URL={url}"
+                )
+                if attempts_left > 0:
+                    print(
+                        f"[INFO] JMA direct {label}: {JMA_STALE_RETRY_WAIT_SEC:.0f}秒待って再取得します"
+                        f"（残り{attempts_left}回）"
+                    )
+                    time.sleep(JMA_STALE_RETRY_WAIT_SEC)
+                    continue
+                print(f"[WARN] JMA direct {label}: 再取得しても古いままのため、このデータを使用します")
+
+        pages = [p.convert("RGB") for p in convert_from_bytes(r.content, dpi=PDF_DPI)]
+        print(f"[OK] JMA direct {label}: pages={len(pages)} URL={url}")
+        return pages
+
+    return []
 
 
 def fetch_jma_direct_pdf_pages_with_last_modified(
@@ -606,24 +640,74 @@ JMA_WEATHER_MAP_LIST_URL = "https://www.jma.go.jp/bosai/weather_map/data/list.js
 JMA_WEATHER_MAP_PNG_BASE = "https://www.jma.go.jp/bosai/weather_map/data/png"
 
 
-def fetch_jma_near_monochrome_latest(key: str, label: str = "") -> Optional[Image.Image]:
+# near_monochromeのファイル名は "{発表時刻UTC14桁}_0_Z__C_010000_{基準時刻UTC14桁}_..." の
+# 形式で、2つ目の14桁が天気図自体の基準時刻(UTC)。issue_base_jst()が期待する
+# サイクルと照合するのに使う。
+_NEAR_MONOCHROME_BASE_TIME_RE = re.compile(r"^\d{14}_0_Z__C_010000_(\d{14})_")
+
+
+def _near_monochrome_base_time_utc(filename: str) -> Optional[datetime]:
+    m = _NEAR_MONOCHROME_BASE_TIME_RE.match(filename)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def fetch_jma_near_monochrome_latest(
+    key: str, label: str = "", issue_dt_jst: Optional[datetime] = None
+) -> Optional[Image.Image]:
     """
     気象庁の「日本周辺・白黒」天気図(list.json の near_monochrome)から最新のPNGを取得する。
       key: 'now'(実況=ASAS相当) / 'ft24'(24時間予想=FSAS24相当) / 'ft48'(48時間予想=FSAS48相当)
     ファイル名はタイムスタンプ入りで毎回変わるため、list.jsonで最新ファイル名を都度確認する。
+
+    issue_dt_jst: この配信が想定しているJST初期時刻。渡された場合、最新ファイル名に
+      埋め込まれた基準時刻(UTC)と照合する。JMA側の更新がAUPQ35等の数値予報天気図PDFより
+      遅れることがあり、その間はlist.jsonの最新エントリがまだ前サイクルのままになるため、
+      食い違っていれば少し待ってlist.jsonを再取得する(fetch_jma_numeric_pdf_pages()と同じ方針)。
     """
-    try:
-        r = requests.get(JMA_WEATHER_MAP_LIST_URL, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        filenames = data.get("near_monochrome", {}).get(key, [])
-        if not filenames:
-            print(f"[NG] JMA weather_map list: no entries for near_monochrome.{key}")
+    expected_dt_utc = issue_dt_jst.astimezone(timezone.utc) if issue_dt_jst is not None else None
+    attempts_left = JMA_STALE_RETRY_MAX + 1 if expected_dt_utc is not None else 1
+
+    filename = None
+    while attempts_left > 0:
+        attempts_left -= 1
+        try:
+            r = requests.get(JMA_WEATHER_MAP_LIST_URL, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            filenames = data.get("near_monochrome", {}).get(key, [])
+            if not filenames:
+                print(f"[NG] JMA weather_map list: no entries for near_monochrome.{key}")
+                return None
+            filename = filenames[-1]
+        except Exception as e:
+            print(f"[ERR] JMA weather_map list.json: {e}")
             return None
-        filename = filenames[-1]
-    except Exception as e:
-        print(f"[ERR] JMA weather_map list.json: {e}")
-        return None
+
+        if expected_dt_utc is not None:
+            base_dt = _near_monochrome_base_time_utc(filename)
+            if base_dt is not None and (base_dt.date(), base_dt.hour) != (
+                expected_dt_utc.date(),
+                expected_dt_utc.hour,
+            ):
+                print(
+                    f"[WARN] JMA near_monochrome.{key}: 基準時刻不一致 "
+                    f"(期待={expected_dt_utc.isoformat()}, 実際={base_dt.isoformat()}) filename={filename}"
+                )
+                if attempts_left > 0:
+                    print(
+                        f"[INFO] JMA near_monochrome.{key}: {JMA_STALE_RETRY_WAIT_SEC:.0f}秒待って再取得します"
+                        f"（残り{attempts_left}回）"
+                    )
+                    time.sleep(JMA_STALE_RETRY_WAIT_SEC)
+                    continue
+                print(f"[WARN] JMA near_monochrome.{key}: 再取得しても古いままのため、このデータを使用します")
+
+        break
 
     url = f"{JMA_WEATHER_MAP_PNG_BASE}/{filename}"
     return fetch_jma_direct_png(url, label or key)
@@ -1676,18 +1760,31 @@ def build_layout_dashboard_jma(errors: List[str]) -> Optional[Attachment]:
     # 「日本周辺・白黒」天気図(list.jsonの near_monochrome、あらかじめ日本付近に
     # 切り出し済み)から取得する。ASASの広域版は列3の3段目(極東アジア切り出し)に
     # 既に出ているため一段目には出さないが、日本周辺白黒版は別物なので出す。
+    # ASAS(実況)は3時間毎の観測解析であり00Z/12Zの数値予報サイクルとは無関係のため、
+    # issue_dt_jstとの照合はしない(常に最新の観測を出すのが正しい)。FSAS24/FSAS48は
+    # 00Z/12Zの数値予報結果そのものなので、ダッシュボードのイニシャル時刻ラベルと
+    # 食い違わないよう照合・リトライする。
     asas_new = overlay_japan_tint_near_mono(fetch_jma_near_monochrome_latest("now", "ASAS"))
-    fsas24_new = overlay_japan_tint_near_mono(fetch_jma_near_monochrome_latest("ft24", "FSAS24"))
-    fsas48_new = overlay_japan_tint_near_mono(fetch_jma_near_monochrome_latest("ft48", "FSAS48"))
+    fsas24_new = overlay_japan_tint_near_mono(
+        fetch_jma_near_monochrome_latest("ft24", "FSAS24", issue_dt_jst)
+    )
+    fsas48_new = overlay_japan_tint_near_mono(
+        fetch_jma_near_monochrome_latest("ft48", "FSAS48", issue_dt_jst)
+    )
     for name, im in (("ASAS", asas_new), ("FSAS24", fsas24_new), ("FSAS48", fsas48_new)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
 
     # 一段目にはさらに、広域版のASAS/FSAS24/FSAS48も並べる(日本周辺白黒版とは別の
     # 材料として両方使う)。3列目のASAS切り出し(極東アジア広域)にもASAS広域版を使う。
+    # ASAS広域版も実況(observation)なので同様にissue_dt_jstとは照合しない。
     asas_wide = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_ASAS_MONO_URL, "ASAS_WIDE"))
-    fsas24_wide = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_FSAS24_MONO_URL, "FSAS24_WIDE"))
-    fsas48_wide = get_first_page_or_none(fetch_jma_direct_pdf_pages(JMA_FSAS48_MONO_URL, "FSAS48_WIDE"))
+    fsas24_wide = get_first_page_or_none(
+        fetch_jma_direct_pdf_pages(JMA_FSAS24_MONO_URL, "FSAS24_WIDE", issue_dt_jst)
+    )
+    fsas48_wide = get_first_page_or_none(
+        fetch_jma_direct_pdf_pages(JMA_FSAS48_MONO_URL, "FSAS48_WIDE", issue_dt_jst)
+    )
     for name, im in (("ASAS(wide)", asas_wide), ("FSAS24(wide)", fsas24_wide), ("FSAS48(wide)", fsas48_wide)):
         if im is None:
             errors.append(f"DashboardJMA: {name} missing")
