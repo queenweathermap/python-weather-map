@@ -1,18 +1,13 @@
 name: Run JMA Dashboard (Direct / 全部入り気象庁版)
 
 on:
-  schedule:
-    # TKAISETU(短期予報解説資料 03:40/15:40 JST発表)対応の回のみ、
-    # GitHub Actions自体のscheduleに任せる。
-    # 08:00 UTC → 17:00 JST（TKAISETU 15:40発表に対応。数値は00Zサイクルのまま）
-    # 20:00 UTC → 05:00 JST（TKAISETU 03:40発表に対応。数値は12Zサイクルのまま）
-    - cron: "0 8,20 * * *"
-    # 数値予報天気図(UTC 00/12時サイクル、00Z→11:30 JST/12Z→23:30 JST)の回は、
-    # GitHub Actionsのscheduleが混雑時に遅延・スキップすることがあり、実際に
-    # 有料配信の中核となるこの回が複数日欠落する障害が起きた。そのため
-    # こちらはGitHub側のscheduleに任せず、Cloudflare Workers「weathermap-scheduler」
-    # のcronトリガー(UTC 02:30, 14:30)からworkflow_dispatchで直接起動する。
-
+  # GitHub Actions自体のscheduleはGitHub側の負荷状況で遅延・スキップされる
+  # ことがある(公式にbest-effortと明記)。実際に有料配信の中核となる00Z/12Z
+  # 更新の回が複数日欠落する障害が起きたため、on.scheduleは持たず、1日4回
+  # (00Z/12Zの数値予報更新2回、TKAISETU短期予報解説資料更新のみの回2回)とも
+  # Cloudflare Workers「weathermap-scheduler」のcronトリガー
+  # (UTC 02:30/14:30/08:00/20:00)からworkflow_dispatchで起動する。
+  # どの回かはissue_base_jst()等が実行時刻から判定する。
   workflow_dispatch: {}
 
 jobs:
