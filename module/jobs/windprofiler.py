@@ -127,14 +127,6 @@ STATION_GAP = STATION_HEADER_HEIGHT * 2
 # 撮影時刻から実際の差分(時間)を計算して使う(build_daily_station_grid内)。
 PX_PER_HOUR = 82.5
 
-# チャート本体(プロット領域)のy範囲。各コマは右端まで観測データが埋まって
-# いるとは限らず(直近1時間強はまだ未観測で右端が白紙のまま撮影される)、
-# この空白部分をそのまま次のコマに繋げると、実データが無いのに目盛り線だけ
-# 残った隙間ができてしまう。そのため貼り合わせ時は各コマの「実データの
-# 右端」を検出し、そこまでしか貼らないようにする(_panel_data_right_edge)。
-PLOT_TOP = STATION_HEADER_HEIGHT
-PLOT_BOTTOM = 452
-
 R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "30")
 
 DISCORD_TIMEOUT_SECONDS = 30
@@ -396,23 +388,6 @@ def upload_station_images(all_images: List[Tuple[str, bytes]], dt_jst: datetime)
             print(f"[WARN] {name} ({code}) の個別画像アップロードに失敗: {e}", file=sys.stderr)
 
 
-def _panel_data_right_edge(img: Image.Image, *, left: int) -> int:
-    """チャート画像(1コマ)のプロット領域(PLOT_TOP〜PLOT_BOTTOM、x=left以降)を
-    右から走査し、観測データ(矢羽根の色つきセル・矢印)がある最も右の列+1を
-    返す。全く見つからなければ left を返す(実データ無し)。
-    背景の白、および目盛りのうすいグレーの罫線は「データ無し」とみなす。"""
-    px = img.convert("RGB").load()
-    w = img.width
-    for x in range(w - 1, left - 1, -1):
-        for y in range(PLOT_TOP, min(PLOT_BOTTOM, img.height)):
-            r, g, b = px[x, y]
-            # 白背景・グレー罫線(R=G=B に近い明るい色)は無視し、彩度のある色
-            # (黄・水色・青)か、黒に近い矢印線だけを「データ」とみなす。
-            if (r < 80 and g < 80 and b < 80) or (max(r, g, b) - min(r, g, b) > 15 and max(r, g, b) > 120):
-                return x + 1
-    return left
-
-
 def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes, int]:
     """
     dt_jstと同じJST日付に撮影された、地点ごとの生画像を集めて
@@ -464,7 +439,6 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
 
         panels = []
         panel_times: List[datetime] = []
-        data_right_edges: List[int] = []
         for key in keys:
             data = get_bytes(key)
             if data is None:
@@ -474,18 +448,14 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
                 if rgb.size != (CELL_W, CELL_H):
                     rgb = rgb.resize((CELL_W, CELL_H), Image.Resampling.LANCZOS)
                 panels.append(rgb)
-                # クロップ(ヘッダー/軸切り詰め)前に、生画像上での実データ右端を測る
-                data_right_edges.append(_panel_data_right_edge(rgb, left=STATION_AXIS_WIDTH))
             ts = key.rsplit("/", 1)[-1].removesuffix(".png")
             panel_times.append(datetime.strptime(ts, "%Y%m%d%H%M").replace(tzinfo=JST))
         if not panels:
             continue
 
-        # 2枚目以降はヘッダー(上)と目盛りラベル(左)を切り詰める(実データ右端も
-        # 同じ分だけ左にずれるので合わせて調整する)
+        # 2枚目以降はヘッダー(上)と目盛りラベル(左)を切り詰める
         for i in range(1, len(panels)):
             panels[i] = panels[i].crop((STATION_AXIS_WIDTH, STATION_HEADER_HEIGHT, CELL_W, CELL_H))
-            data_right_edges[i] -= STATION_AXIS_WIDTH
 
         # 各パネルのx位置: 1枚目は0起点。2枚目以降は「1枚目のプロット開始位置
         # (STATION_AXIS_WIDTH)」を基準に、実際の撮影時刻の差(前日撮影分の
@@ -499,17 +469,10 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
             for i in range(1, len(panels))
         ]
 
-        # 実データの無い右端の空白部分は貼らない(目盛り線だけの隙間ができるのを防ぐ)。
-        # 検出に失敗した(0以下や幅超過の)場合は安全側でパネル全体を使う。
-        trimmed_panels = []
-        for panel, edge in zip(panels, data_right_edges):
-            right = edge if 0 < edge <= panel.width else panel.width
-            trimmed_panels.append(panel.crop((0, 0, right, panel.height)) if right < panel.width else panel)
-
         row_h = CELL_H  # 1枚目がヘッダー込みでCELL_Hのため、段の高さはCELL_Hのまま
-        row_w = max(x + p.width for x, p in zip(x_positions, trimmed_panels))
+        row_w = max(x + p.width for x, p in zip(x_positions, panels))
         row = Image.new("RGB", (row_w, row_h), "white")
-        for x, panel in zip(x_positions, trimmed_panels):
+        for x, panel in zip(x_positions, panels):
             # 2枚目以降はヘッダー分だけ短いので、下端(チャート本体・矢印行)が
             # 1枚目と揃うよう、その分だけ下に寄せて貼る
             row.paste(panel, (x, row_h - panel.height))
