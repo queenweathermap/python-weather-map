@@ -1,11 +1,9 @@
 name: Run JMA Weekly Forecast (週間4列結合＋2週間気温予報)
 
 on:
-  schedule:
-    # SKAISETU（週間予報解説資料）はJST 10時頃更新・1日1回のため、
-    # 余裕を持って正午JST(UTC 03:00)に1日1回だけ実行する。
-    - cron: "0 3 * * *"
-
+  # GitHub Actions自体のscheduleはbest-effortで遅延・欠落しうるため、
+  # Cloudflare Workers「weathermap-scheduler」のcronトリガー(UTC 03:00、
+  # SKAISETU週間予報解説資料 JST 10時頃更新に対応)からworkflow_dispatchで起動する。
   workflow_dispatch: {}
 
 jobs:

@@ -1,14 +1,14 @@
 name: Run JMA Windprofiler (Capture Only)
 
 on:
-  schedule:
-    # JST 00:15 / 06:15 / 12:15 / 18:15（6時間おき。サイト表示は約7時間分の
-    # ローリングウィンドウのため、約1時間の重なりで1日を切れ目なくカバーする）
-    # UTC 15:15(前日) / 21:15(前日) / 03:15 / 09:15
-    # ここではDiscordへ投稿せず、地点ごとのraw画像をR2へ保存するだけ。
-    # 前日分のまとめ配信は windprofiler-daily-stations.yml（3時JST）が行う。
-    - cron: "15 3,9,15,21 * * *"
-
+  # JST 00:15 / 06:15 / 12:15 / 18:15（6時間おき。サイト表示は約7時間分の
+  # ローリングウィンドウのため、約1時間の重なりで1日を切れ目なくカバーする）
+  # UTC 15:15(前日) / 21:15(前日) / 03:15 / 09:15
+  # ここではDiscordへ投稿せず、地点ごとのraw画像をR2へ保存するだけ。
+  # 前日分のまとめ配信は windprofiler-daily-stations.yml（3時JST）が行う。
+  # GitHub Actions自体のscheduleはbest-effortで遅延・欠落しうる(4回のうち
+  # 1回でも欠けるとdaily-stations側のまとめが穴あきになる)ため、Cloudflare
+  # Workers「weathermap-scheduler」のcronトリガーからworkflow_dispatchで起動する。
   workflow_dispatch:
 
 jobs:

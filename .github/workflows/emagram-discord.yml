@@ -1,14 +1,13 @@
 name: Emagram (University of Wyoming)
 
 on:
-  schedule:
-    # 12Z配信に一本化した「前日まとめ」。JST 翌04:00（21時JST=12Z観測の7時間後）。
-    # この時点で同日00Z(19時間経過)・12Z(7時間経過)ともに収録済みのため、
-    # 1回の実行で両方を1地点=1組(00Z/12Z横並び)としてまとめて配信する。
-    # データ反映が遅い地点(例: 南大東島)を拾えるよう、5時間後から2時間後ろ倒し。
-    # UTC 19:00
-    - cron: "0 19 * * *"
-
+  # 12Z配信に一本化した「前日まとめ」。JST 翌04:00（21時JST=12Z観測の7時間後）。
+  # この時点で同日00Z(19時間経過)・12Z(7時間経過)ともに収録済みのため、
+  # 1回の実行で両方を1地点=1組(00Z/12Z横並び)としてまとめて配信する。
+  # データ反映が遅い地点(例: 南大東島)を拾えるよう、5時間後から2時間後ろ倒し。
+  # GitHub Actions自体のscheduleはbest-effortで遅延・欠落しうるため、
+  # Cloudflare Workers「weathermap-scheduler」のcronトリガー(UTC 19:00)から
+  # workflow_dispatchで起動する。
   workflow_dispatch:
 
 jobs:

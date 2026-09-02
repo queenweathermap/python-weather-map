@@ -1,11 +1,9 @@
 name: Run JMA Monthly Forecast (1か月予報資料)
 
 on:
-  schedule:
-    # 気象庁の1か月予報資料(FCVX11〜15)は毎週木曜更新のため週1回だけ実行する。
-    # JST 09:00（UTC 00:00）。他のワークフローと重複しない時刻。
-    - cron: "0 0 * * 4"
-
+  # GitHub Actions自体のscheduleはbest-effortで遅延・欠落しうるため、
+  # Cloudflare Workers「weathermap-scheduler」のcronトリガー(UTC 00:00・木曜、
+  # JST 09:00木曜)からworkflow_dispatchで起動する。
   workflow_dispatch: {}
 
 jobs:
