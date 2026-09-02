@@ -127,7 +127,7 @@ STATION_GAP = STATION_HEADER_HEIGHT * 2
 # 撮影時刻から実際の差分(時間)を計算して使う(build_daily_station_grid内)。
 PX_PER_HOUR = 82.5
 
-R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "30")
+R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "21")
 
 DISCORD_TIMEOUT_SECONDS = 30
 

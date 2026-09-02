@@ -98,8 +98,8 @@ def _resolve_data_source_id(db_id: str) -> str:
     return data_sources[0]["id"]
 
 
-def cleanup_old_recent_items(retention_days: int = 30) -> None:
-    """R2オブジェクトの保存期間（既定30日）に合わせて、それより古いPWA配信履歴を削除する。
+def cleanup_old_recent_items(retention_days: int = 21) -> None:
+    """R2オブジェクトの保存期間（既定21日）に合わせて、それより古いPWA配信履歴を削除する。
     これをしないと、R2側で画像が消えた後もギャラリーにリンク切れの項目が残ってしまう。
     NOTION_PWA_HISTORY_DATABASE_ID未設定の場合（このDBを使わないワークフロー）は何もしない。"""
     db_id = _env("NOTION_PWA_HISTORY_DATABASE_ID")

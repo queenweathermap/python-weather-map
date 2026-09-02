@@ -108,6 +108,9 @@ LAYOUT5_TRIM_PAD = int(os.environ.get("LAYOUT5_TRIM_PAD", "0"))
 R2_ENABLE = os.environ.get("R2_ENABLE", "1").lower() in ("1", "true", "yes", "on")
 # R2キー先頭の prefix（weathermap 等）は r2_utils.normalize_key() が R2_PREFIX env から
 # 自動付与する。ここで付けると weathermap/weathermap/... のように二重になるため付けない。
+# Discord本文の「高解像度PNGをダウンロード」案内に使う。実際の保持期間(r2_cleanup.py
+# のR2_RETENTION_DAYS)と表記がズレないよう、同じenvを直接参照する。
+R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "21")
 
 NOTION_IMPORT_IMAGES = os.environ.get("NOTION_IMPORT_IMAGES", "0").lower() in ("1", "true", "yes", "on")
 NOTION_IMPORT_TIMEOUT_SECONDS = int(os.environ.get("NOTION_IMPORT_TIMEOUT_SECONDS", "180"))
@@ -2611,7 +2614,7 @@ def main_dashboard_jma() -> None:
                     title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
                     f"{init_label} / {title}\n"
-                    f"📥 [高解像度PNGをダウンロード（30日間有効）](<{url}>)"
+                    f"📥 [高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)"
                 )
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
@@ -2727,7 +2730,7 @@ def main_layout4() -> None:
                     title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
                     f"{init_label} / {title}\n"
-                    f"📥 [高解像度PNGをダウンロード（30日間有効）](<{url}>)"
+                    f"📥 [高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)"
                 )
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
@@ -2906,7 +2909,7 @@ def main_monthly() -> None:
                     title += "\n" + "\n".join(f"🔗 [{t}](<{u}>)" for t, u in extra_links)
                 content = (
                     f"{init_label} / {title}\n"
-                    f"📥 [高解像度PNGをダウンロード（30日間有効）](<{url}>)"
+                    f"📥 [高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)"
                 )
 
                 src_path = os.path.join(OUTPUT_DIR, f"{filename}.png")

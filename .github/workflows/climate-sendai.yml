@@ -74,7 +74,7 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
       R2_PREFIX: "climate-sendai"
-      R2_RETENTION_DAYS: "30"
+      R2_RETENTION_DAYS: "21"
       R2_CLEANUP_DRY_RUN: "0"
 
     steps:

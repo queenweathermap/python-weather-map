@@ -10,7 +10,7 @@ Required env:
 
 Optional env:
   R2_PREFIX=weathercaster
-  R2_RETENTION_DAYS=30
+  R2_RETENTION_DAYS=21
   R2_CLEANUP_DRY_RUN=0
 """
 
@@ -40,7 +40,7 @@ def main() -> None:
     secret_key = env("R2_SECRET_ACCESS_KEY")
     bucket = env("R2_BUCKET")
     prefix = env("R2_PREFIX", "weathercaster").strip("/")
-    retention_days = int(env("R2_RETENTION_DAYS", "30"))
+    retention_days = int(env("R2_RETENTION_DAYS", "21"))
     dry_run = env("R2_CLEANUP_DRY_RUN", "0").lower() in ("1", "true", "yes", "on")
 
     if not all([account_id, access_key, secret_key, bucket]):

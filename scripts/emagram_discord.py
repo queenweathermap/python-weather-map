@@ -77,7 +77,7 @@ LABEL_H = 60
 
 THUMB_MAX_WIDTH = int(os.environ.get("DISCORD_THUMB_MAX_WIDTH", "1400"))
 THUMB_JPEG_QUALITY = int(os.environ.get("DISCORD_THUMB_JPEG_QUALITY", "85"))
-R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "30")
+R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "21")
 
 # 有料購読はPWA配信(OneSignal Push)のみに一本化したため、Discord DMは既定で停止する。
 # 既存のDiscord購読者向けに再開したくなった場合は、workflowのenvに
