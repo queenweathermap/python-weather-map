@@ -421,15 +421,18 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
     wanted_hours = {target_str: {"06", "12", "18"}, next_str: {"00"}}
 
     for code, name in STATIONS_ALL:
-        candidates = list(list_keys_with_prefix(f"stations/{code}/{target_str}")) + list(
-            list_keys_with_prefix(f"stations/{code}/{next_str}")
-        )
+        target_keys = list(list_keys_with_prefix(f"stations/{code}/{target_str}"))
+        candidates = target_keys + list(list_keys_with_prefix(f"stations/{code}/{next_str}"))
         keys = sorted(
             k for k in candidates
             if k.endswith(".png")
             and (hours := wanted_hours.get(k.rsplit("/", 1)[-1][:8])) is not None
             and k.rsplit("/", 1)[-1][8:10] in hours
         )
+        if not keys:
+            # 翌日00時台のコマがまだ無い等で理想の4コマが揃わない場合、対象日に
+            # 撮影できている分だけでも使う(配信自体を落とさないためのフォールバック)。
+            keys = sorted(k for k in target_keys if k.endswith(".png"))
         if not keys:
             continue
 
