@@ -1,10 +1,15 @@
 name: Run JMA Windprofiler (Daily Station Summary)
 
 on:
-  # JST 03:00（前日分の4回が出そろった翌日に、前日分をまとめて配信する）
-  # GitHub Actions自体のscheduleはbest-effortで遅延・欠落しうるため、
-  # Cloudflare Workers「weathermap-scheduler」のcronトリガー(UTC 18:00)から
-  # workflow_dispatchで起動する。
+  schedule:
+    # JST 03:00（前日分の4回が出そろった翌日に、前日分をまとめて配信する）
+    # UTC 18:00（前日）。他のワークフローと重複しない時刻。
+    # 観測データは多少遅れても実害が小さいため、GitHub Actions自体のscheduleに
+    # 戻す(Cloudflare Worker側でcronを後から追加編集した際、その追加分だけ
+    # 丸一日発火しない不具合が実際に起きたため、予測図系だけWorker側に残し、
+    # 観測データ系はこちらに戻した)。
+    - cron: "0 18 * * *"
+
   workflow_dispatch:
 
 jobs:
