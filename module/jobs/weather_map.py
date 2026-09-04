@@ -1035,6 +1035,318 @@ def overlay_japan_tint_aupa20(img: Image.Image) -> Image.Image:
     return base.convert("RGB")
 
 
+# =============================================================================
+# 日本列島の色付け(週間4列結合 main_layout4 専用。FEFE19/FXXN519(週間予報
+# 支援図)/FZCX50(週間予報支援図アンサンブル)/FCVX21〜24(2週間気温予報資料)は
+# いずれも気象庁が固定サイズで配信するPNGで、fetch_jma_direct_png()は
+# トリミング等を一切行わず生の画像をそのまま返す。そのため他のPDF由来の図
+# と違い「生ページ座標→trim後座標」の変換を気にする必要がなく、PSDで
+# レイヤー配置してもらった実測値(x, y, w, h)をそのままpasteに使える。
+#
+# 1枚のPDF/PNGに複数(最大20個)の小さな日本列島パネルが並ぶため、専用の
+# 較正済み定数を1個ずつ書く代わりに、(グループ名ごとの元画像パス, その
+# グループに属するパネルの(x, y, w, h)一覧)のデータを持ち、汎用の
+# overlay_japan_tint_panels()で一括して貼り付ける。パネルごとにw/hが
+# 1〜2px前後することがある(PSD側で微妙に縮尺が異なる)が、それぞれの
+# パネルの実測サイズにリサイズしてから貼るので問題にならない。
+# 同一形状が複数パネルにまたがって使われている場合(例: FXXN519の
+# 「アセット13」と「アセット13のコピー」はPSD上で画素まで完全一致する
+# ことを確認済み)は1つの画像ファイルにまとめてある。
+#
+# FCVX24(2週間気温予報資料4列目)はPSDレイヤー配置がまだ届いていないため
+# 未較正(色付けなし)。
+# =============================================================================
+JAPAN_TINT_PANELS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets")
+
+JAPAN_TINT_FEFE19_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fefe19.png",
+        [
+            (340, 614, 173, 184),
+            (977, 614, 173, 184),
+            (1629, 614, 173, 184),
+            (340, 1411, 173, 184),
+            (977, 1411, 173, 184),
+            (1629, 1411, 173, 184),
+        ],
+    ),
+]
+
+JAPAN_TINT_FZCX50_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fzcx50.png",
+        [
+            (259, 419, 108, 109),
+            (259, 837, 108, 109),
+            (259, 1259, 108, 109),
+            (728, 1259, 108, 109),
+            (728, 419, 108, 109),
+            (728, 837, 108, 109),
+            (1215, 427, 114, 115),
+            (1215, 857, 114, 115),
+            (1215, 1287, 114, 115),
+            (1722, 427, 114, 115),
+            (1722, 857, 114, 115),
+            (1722, 1287, 114, 115),
+            (259, 1681, 108, 109),
+            (728, 1681, 108, 109),
+            (259, 2099, 108, 109),
+            (728, 2099, 108, 109),
+            (259, 2521, 108, 109),
+            (728, 2521, 108, 109),
+        ],
+    ),
+]
+
+JAPAN_TINT_FXXN519_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fxxn519_a.png",
+        [
+            (324, 1358, 99, 97),
+            (326, 1714, 99, 97),
+            (326, 2070, 99, 97),
+            (783, 2042, 99, 97),
+            (783, 1686, 99, 97),
+            (783, 1330, 99, 97),
+            (1286, 1358, 99, 97),
+            (1286, 1714, 99, 97),
+            (1743, 1686, 99, 97),
+            (1286, 2070, 99, 97),
+            (1745, 2042, 99, 97),
+            (1745, 1330, 99, 97),
+        ],
+    ),
+    (
+        "nippon_tint_fxxn519_b.png",
+        [
+            (753, 821, 47, 120),
+            (1708, 821, 47, 120),
+        ],
+    ),
+]
+
+JAPAN_TINT_FCVX21_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    ("nippon_tint_fcvx21_a.png", [(346, 784, 59, 61)]),
+    (
+        "nippon_tint_fcvx21_b.png",
+        [
+            (933, 547, 124, 128),
+            (1568, 547, 124, 128),
+        ],
+    ),
+    (
+        "nippon_tint_fcvx21_c.png",
+        [
+            (428, 1659, 46, 66),
+            (428, 2213, 46, 66),
+        ],
+    ),
+]
+
+JAPAN_TINT_FCVX22_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fcvx22_a.png",
+        [
+            (248, 626, 45, 48),
+            (248, 1138, 45, 48),
+            (248, 1651, 45, 49),
+            (248, 2164, 45, 49),
+            (248, 2677, 45, 48),
+            (745, 626, 45, 48),
+            (745, 1138, 45, 48),
+            (745, 1651, 45, 48),
+            (745, 2165, 45, 48),
+            (745, 2677, 45, 48),
+        ],
+    ),
+    (
+        "nippon_tint_fcvx22_b.png",
+        [
+            (1204, 439, 98, 100),
+            (1701, 439, 98, 100),
+            (1204, 953, 98, 100),
+            (1701, 949, 98, 104),
+            (1204, 1463, 98, 104),
+            (1701, 1463, 98, 104),
+            (1204, 1975, 98, 104),
+            (1701, 1975, 98, 104),
+            (1204, 2487, 98, 104),
+            (1701, 2487, 98, 104),
+        ],
+    ),
+]
+
+JAPAN_TINT_FCVX23_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fcvx23_a.png",
+        [
+            (237, 345, 21, 29),
+            (237, 857, 21, 29),
+            (237, 1370, 21, 29),
+            (237, 1883, 21, 29),
+            (237, 2396, 21, 29),
+        ],
+    ),
+    (
+        "nippon_tint_fcvx23_b.png",
+        [
+            (828, 368, 39, 54),
+            (1324, 368, 39, 54),
+            (1822, 368, 39, 54),
+            (1822, 880, 39, 54),
+            (1324, 880, 39, 54),
+            (828, 880, 39, 54),
+            (828, 1392, 39, 54),
+            (1324, 1392, 39, 54),
+            (1822, 1392, 39, 54),
+            (1822, 1907, 39, 53),
+            (1324, 1906, 39, 54),
+            (828, 1907, 39, 54),
+            (828, 2419, 39, 54),
+            (1324, 2420, 39, 54),
+            (1822, 2418, 39, 54),
+        ],
+    ),
+]
+
+# 1か月予報資料(build_layout5_monthly)専用。FCVX11(実況解析図)/FCVX12/13
+# (北半球予想図等)/FCVX15はFCVX21〜24と同じくfetch_jma_direct_png()で
+# トリミングなしの生画像がそのまま返るため、生座標をそのまま使える。
+# FCVX14はPSDレイヤー配置がまだ届いていないため未較正(色付けなし)。
+JAPAN_TINT_FCVX11_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fcvx11_a.png",
+        [
+            (404, 839, 62, 67),
+            (1063, 839, 62, 67),
+        ],
+    ),
+    (
+        "nippon_tint_fcvx11_b.png",
+        [
+            (375, 1272, 101, 112),
+            (1034, 1272, 101, 112),
+            (375, 1796, 101, 112),
+            (1034, 1796, 101, 112),
+        ],
+    ),
+    (
+        "nippon_tint_fcvx11_c.png",
+        [
+            (1934, 405, 56, 59),
+            (1934, 865, 56, 59),
+        ],
+    ),
+    (
+        "nippon_tint_fcvx11_d.png",
+        [
+            (1764, 1316, 32, 39),
+            (1764, 1739, 32, 39),
+        ],
+    ),
+]
+
+JAPAN_TINT_FCVX12_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fcvx12_a.png",
+        [
+            (404, 839, 62, 67),
+            (1062, 839, 62, 67),
+            (1721, 839, 62, 67),
+            (2380, 839, 62, 67),
+        ],
+    ),
+    (
+        "nippon_tint_fcvx12_b.png",
+        [
+            (375, 1272, 102, 112),
+            (1034, 1272, 102, 112),
+            (1693, 1272, 102, 112),
+            (2352, 1272, 102, 112),
+            (373, 1797, 104, 112),
+            (1034, 1797, 102, 112),
+            (1693, 1797, 102, 112),
+            (2352, 1797, 102, 112),
+        ],
+    ),
+]
+
+JAPAN_TINT_FCVX13_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fcvx13_a.png",
+        [
+            (404, 839, 62, 68),
+            (1063, 839, 62, 68),
+            (1722, 839, 62, 68),
+            (2381, 839, 62, 68),
+            (404, 1771, 62, 68),
+            (1063, 1771, 62, 68),
+            (1722, 1771, 62, 68),
+            (2381, 1771, 62, 68),
+        ],
+    ),
+]
+
+JAPAN_TINT_FCVX15_GROUPS: List[Tuple[str, List[Tuple[float, float, float, float]]]] = [
+    (
+        "nippon_tint_fcvx15_a.png",
+        [
+            (557, 405, 52, 59),
+            (1188, 405, 52, 59),
+            (1816, 405, 55, 59),
+            (2449, 405, 52, 59),
+            (2449, 871, 52, 59),
+            (1818, 871, 52, 59),
+            (1188, 871, 52, 59),
+            (558, 871, 52, 59),
+            (558, 1337, 52, 59),
+            (1188, 1337, 52, 59),
+            (1819, 1337, 52, 59),
+            (2449, 1337, 52, 59),
+        ],
+    ),
+    (
+        "nippon_tint_fcvx15_b.png",
+        [
+            (402, 1774, 25, 31),
+            (1033, 1774, 25, 31),
+            (1664, 1774, 25, 31),
+            (2294, 1774, 25, 31),
+        ],
+    ),
+]
+
+
+@functools.lru_cache(maxsize=None)
+def _load_japan_tint_panel_asset(filename: str, w: int, h: int) -> Optional[Image.Image]:
+    path = os.path.join(JAPAN_TINT_PANELS_DIR, filename)
+    try:
+        img = Image.open(path).convert("RGBA")
+    except Exception as e:
+        print(f"[WARN] {filename} load failed: {e}")
+        return None
+    return img.resize((w, h), Image.LANCZOS) if img.size != (w, h) else img
+
+
+def overlay_japan_tint_panels(
+    img: Optional[Image.Image],
+    groups: List[Tuple[str, List[Tuple[float, float, float, float]]]],
+) -> Optional[Image.Image]:
+    """groups: [(素材ファイル名, [(x, y, w, h), ...]), ...]。
+    気象庁が固定サイズで配信するPNG(トリミングなし)の生座標に、日本列島を
+    薄緑・半透明で色付けする。"""
+    if img is None:
+        return None
+    base = img.convert("RGBA")
+    for filename, panels in groups:
+        for x, y, w, h in panels:
+            tint = _load_japan_tint_panel_asset(filename, round(w), round(h))
+            if tint is None:
+                continue
+            base.paste(tint, (round(x), round(y)), tint)
+    return base.convert("RGB")
+
+
 @functools.lru_cache(maxsize=1)
 def _fetch_wxchart_logo_bytes() -> Optional[bytes]:
     try:
@@ -1608,6 +1920,10 @@ def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
     col3_img = fetch_jma_direct_png(JMA_FXXN519_URL, "FXXN519")
     col4_img = fetch_jma_direct_png(JMA_FZCX50_URL, "FZCX50")
 
+    col2_img = overlay_japan_tint_panels(col2_img, JAPAN_TINT_FEFE19_GROUPS)
+    col3_img = overlay_japan_tint_panels(col3_img, JAPAN_TINT_FXXN519_GROUPS)
+    col4_img = overlay_japan_tint_panels(col4_img, JAPAN_TINT_FZCX50_GROUPS)
+
     if col2_img is None:
         errors.append("Layout4JMA: FEFE19 failed")
     if col3_img is None:
@@ -1624,6 +1940,12 @@ def build_layout4_jma_direct(errors: List[str]) -> Optional[Attachment]:
     twoweek_col2 = fetch_jma_direct_png(JMA_FCVX22_URL, "FCVX22")
     twoweek_col3 = fetch_jma_direct_png(JMA_FCVX23_URL, "FCVX23")
     twoweek_col4 = fetch_jma_direct_png(JMA_FCVX24_URL, "FCVX24")
+
+    # FCVX24はまだPSDレイヤー配置の実測値が届いていないため未較正(色付けなし)。
+    twoweek_col1 = overlay_japan_tint_panels(twoweek_col1, JAPAN_TINT_FCVX21_GROUPS)
+    twoweek_col2 = overlay_japan_tint_panels(twoweek_col2, JAPAN_TINT_FCVX22_GROUPS)
+    twoweek_col3 = overlay_japan_tint_panels(twoweek_col3, JAPAN_TINT_FCVX23_GROUPS)
+
     if twoweek_col1 is None:
         errors.append("Layout4JMA: FCVX21 failed")
     if twoweek_col2 is None:
@@ -2796,6 +3118,17 @@ def build_layout5_monthly(errors: List[str]) -> Optional[Attachment]:
 
     if not fetched:
         return None
+
+    # 日本列島を薄緑・半透明で色付けする(FCVX14はPSDレイヤー配置が未着のため未較正)。
+    TINT_GROUPS_BY_LABEL = {
+        "FCVX11": JAPAN_TINT_FCVX11_GROUPS,
+        "FCVX12": JAPAN_TINT_FCVX12_GROUPS,
+        "FCVX13": JAPAN_TINT_FCVX13_GROUPS,
+        "FCVX15": JAPAN_TINT_FCVX15_GROUPS,
+    }
+    for label, groups in TINT_GROUPS_BY_LABEL.items():
+        if label in fetched:
+            fetched[label] = overlay_japan_tint_panels(fetched[label], groups)
 
     # FCVX11(実況解析図)はFCVX12/13より図の列数が少なく、右側に大きな余白が
     # 残る。余白はそのまま(位置・大きさは変えない)、パネルの右端に縦線を
