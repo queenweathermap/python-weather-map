@@ -410,29 +410,62 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
     """
     rows: List[Image.Image] = []
 
-    # 撮影は当日00:15/06:15/12:15/18:15の4回だが、各コマは撮影時刻を終端とする
-    # 約7時間のローリングウィンドウなので、当日00:15のコマは実際にはほぼ前日
-    # 17:15〜24:00のデータしか写っていない。dt_jst(対象日)のJST 00:00-24:00を
-    # 素直にカバーするには、対象日00:15の代わりに「翌日00:15」(＝対象日
-    # 17:15〜24:15をカバーするコマ)を使う必要がある。よって対象日06/12/18時台と
-    # 翌日00時台の4コマを選ぶ(実行間隔6時間はここでも変わらないため、
-    # 下のx_positions計算はそのまま使える)。
+    # 各コマは撮影時刻を終端とする約7〜8.5時間のローリングウィンドウなので、
+    # dt_jst(対象日)のJST 00:00-24:00を隙間なくカバーするには、対象日の前後
+    # にまたがる複数コマを組み合わせる必要がある。
+    #
+    # 以前は「対象日06:15/12:15/18:15・翌日00:15に狙いを定めた4コマ」を、
+    # ファイル名の時刻(2桁)が06/12/18/00と厳密一致するものだけを探して
+    # 選んでいた。しかしGitHub Actionsのscheduleは公式にbest-effortであり、
+    # 実際の実行時刻が数十分〜2時間以上ずれる(このファイル冒頭のコメント、
+    # および jma-dashboard-direct.yml のコメントにある通り)だけでなく、
+    # 実行間隔自体が6時間ちょうどにならないこともある(実測で5〜9時間程度の
+    # 幅があった)。厳密一致だと例えば狙いの00:15が実際には02:36に実行された
+    # 場合ファイル名の時が"02"になり一致せず丸ごと欠落し、翌日00時台のコマが
+    # 無いまま「対象日撮影分のみ」フォールバックに落ちて前日まとめが18時台
+    # 以降(悪くすると22時頃)で途切れる不具合になっていた
+    # (2026-09-07にユーザー報告で発覚)。
+    #
+    # 「狙いのスロット」という考え方自体をやめ、対象日の前後に余裕を持たせた
+    # 時間範囲に実際に存在するコマを全部(何時に何回撮れていたかに関係なく)
+    # 時系列順に使う方式にする。各コマのローリングウィンドウが約7〜8.5時間と
+    # 広いため、実行間隔が多少ずれても・多少空いても、実在するコマ同士の
+    # ウィンドウの重なりだけで自然に24時間を継ぎ目なくカバーできる
+    # (重なった部分は後から貼るコマの絵柄で上書きされる)。
     target_str = dt_jst.strftime("%Y%m%d")
+    prev_str = (dt_jst - timedelta(days=1)).strftime("%Y%m%d")
     next_str = (dt_jst + timedelta(days=1)).strftime("%Y%m%d")
-    wanted_hours = {target_str: {"06", "12", "18"}, next_str: {"00"}}
+    day_start = dt_jst.replace(hour=0, minute=0, second=0, microsecond=0)
+    # 前日側は「前日撮影分のローリングウィンドウが対象日0時に届く」余裕を見て
+    # 12時間前まで、翌日側は「翌日の遅延撮影が対象日24時のテールを埋める」
+    # 余裕を見て12時間後までを対象にする。
+    window_start = day_start - timedelta(hours=12)
+    window_end = day_start + timedelta(days=1, hours=12)
 
     for code, name in STATIONS_ALL:
         target_keys = list(list_keys_with_prefix(f"stations/{code}/{target_str}"))
-        candidates = target_keys + list(list_keys_with_prefix(f"stations/{code}/{next_str}"))
-        keys = sorted(
-            k for k in candidates
-            if k.endswith(".png")
-            and (hours := wanted_hours.get(k.rsplit("/", 1)[-1][:8])) is not None
-            and k.rsplit("/", 1)[-1][8:10] in hours
+        all_keys = (
+            list(list_keys_with_prefix(f"stations/{code}/{prev_str}"))
+            + target_keys
+            + list(list_keys_with_prefix(f"stations/{code}/{next_str}"))
         )
+        parsed: List[Tuple[datetime, str]] = []
+        for k in all_keys:
+            if not k.endswith(".png"):
+                continue
+            ts = k.rsplit("/", 1)[-1].removesuffix(".png")
+            try:
+                shot_dt = datetime.strptime(ts, "%Y%m%d%H%M").replace(tzinfo=JST)
+            except ValueError:
+                continue
+            if window_start <= shot_dt <= window_end:
+                parsed.append((shot_dt, k))
+        parsed.sort()
+        keys = [k for _, k in parsed]
+
         if not keys:
-            # 翌日00時台のコマがまだ無い等で理想の4コマが揃わない場合、対象日に
-            # 撮影できている分だけでも使う(配信自体を落とさないためのフォールバック)。
+            # 対象日前後の範囲に1コマも無い極端なケース向けフォールバック。
+            # 配信自体を落とさないための保険。
             keys = sorted(k for k in target_keys if k.endswith(".png"))
         if not keys:
             continue
