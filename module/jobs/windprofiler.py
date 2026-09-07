@@ -436,11 +436,13 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
     prev_str = (dt_jst - timedelta(days=1)).strftime("%Y%m%d")
     next_str = (dt_jst + timedelta(days=1)).strftime("%Y%m%d")
     day_start = dt_jst.replace(hour=0, minute=0, second=0, microsecond=0)
-    # 前日側は「前日撮影分のローリングウィンドウが対象日0時に届く」余裕を見て
-    # 12時間前まで、翌日側は「翌日の遅延撮影が対象日24時のテールを埋める」
-    # 余裕を見て12時間後までを対象にする。
-    window_start = day_start - timedelta(hours=12)
-    window_end = day_start + timedelta(days=1, hours=12)
+    # 前日側は前日21時以降(前日18:15の回が多少遅れても拾える程度)、翌日側は
+    # 翌日未明6時まで(翌日00:15の回が未明にずれ込んでも拾える程度)に限定する。
+    # 前日の朝・昼の絵柄まで混ざるのはユーザーが望まないため、余裕は必要最小限
+    # に留める(2026-09-07にユーザーが「9/5 21:00以降ならいい」「9/7は未明の
+    # 実行のはみ出しは構わない」と指定)。
+    window_start = day_start - timedelta(hours=3)
+    window_end = day_start + timedelta(days=1, hours=6)
 
     for code, name in STATIONS_ALL:
         target_keys = list(list_keys_with_prefix(f"stations/{code}/{target_str}"))
