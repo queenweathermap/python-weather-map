@@ -71,7 +71,7 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow pandas matplotlib
+          pip install requests pillow pandas matplotlib boto3
 
       - name: Post monthly dashboard promo (Bluesky/Threads/Facebook/Instagram)
         run: |
