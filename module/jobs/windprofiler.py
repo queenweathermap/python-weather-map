@@ -47,7 +47,7 @@ from PIL import Image, ImageDraw, ImageFont
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from module.utils.r2_utils import put_bytes, get_bytes, list_keys_with_prefix, make_url
+from module.utils.r2_utils import put_bytes, get_bytes, list_keys_with_prefix, delete_keys, make_url
 from module.utils.notion_subscribers import get_active_emails
 from module.utils.onesignal_push import send_push_to_all
 from module.utils.recent_items import record_recent_item
@@ -602,6 +602,29 @@ def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int, si
     )
 
 
+def cleanup_composited_station_images(target_jst: datetime) -> None:
+    """合成済みの地点別raw画像（クリップ）を、R2-CLEANUPの21日保持を待たず
+    即時削除する。ただしbuild_daily_station_grid()のウィンドウ参照
+    （前日21時以降〜翌日未明6時まで）により、ある日付Kのraw画像は
+    「K-1分の合成(K当日3時実行、翌未明分として)」「K分の合成(K+1日3時実行)」
+    「K+1分の合成(K+2日3時実行、前日夜分として)」の最大3回で読まれうる。
+    target_jst分の合成(このK+1にあたる)が終わった時点で全ての利用が
+    済んでいるのはtarget_jstの前日分(target_jst-1日)までなので、その日付
+    分だけを削除する（1日ずらすことで安全に「実質2日で消える」運用にする）。
+    失敗しても配信の成否には影響させたくないため例外は握りつぶす。"""
+    delete_date_str = (target_jst - timedelta(days=1)).strftime("%Y%m%d")
+    total = 0
+    for code, name in STATIONS_ALL:
+        try:
+            keys = [k for k in list_keys_with_prefix(f"stations/{code}/{delete_date_str}") if k.endswith(".png")]
+            if keys:
+                total += delete_keys(keys)
+        except Exception as e:
+            print(f"[WARN] {name} ({code}) の合成済みクリップ削除に失敗: {e}", file=sys.stderr)
+    if total:
+        print(f"[CLEANUP] 合成済みクリップ削除: {delete_date_str}分 {total}件")
+
+
 def main_daily_stations() -> int:
     """1日1回、翌日3時JSTに実行し、前日分の地点別raw画像を「1地点1段・横並び」の
     1枚のグリッド画像に組み直して、
@@ -626,6 +649,8 @@ def main_daily_stations() -> int:
     put_bytes(r2_key, image_bytes, content_type="image/png")
     url = make_url(r2_key)
     print(f"R2 UPLOADED: {url}")
+
+    cleanup_composited_station_images(target_jst)
 
     posted = post_daily_station_grid(webhook_url, target_jst, image_bytes, url)
     if posted:

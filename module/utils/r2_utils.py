@@ -157,6 +157,27 @@ def list_keys_with_prefix(prefix: str) -> List[str]:
     return keys
 
 
+def delete_keys(keys: List[str]) -> int:
+    """
+    指定したキー一覧をR2から削除する（S3 DeleteObjectsは1リクエスト最大1000件の
+    ため、超える場合は自動でバッチ分割する）。存在しないキーを含んでいても
+    エラーにはならない。
+    戻り値: 削除リクエストを送ったキー数。
+    """
+    if not keys:
+        return 0
+    bucket = _must_env("R2_BUCKET")
+    s3 = _client()
+    normalized = [normalize_key(k) for k in keys]
+
+    deleted = 0
+    for i in range(0, len(normalized), 1000):
+        batch = normalized[i:i + 1000]
+        s3.delete_objects(Bucket=bucket, Delete={"Objects": [{"Key": k} for k in batch]})
+        deleted += len(batch)
+    return deleted
+
+
 def make_url(key: str) -> str:
     """
     公開URLを組み立てる（Notionに貼る用）
