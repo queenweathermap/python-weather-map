@@ -3,8 +3,8 @@
 """
 5時・11時・17時（JST）に秋田県の気象情報3画面をスクリーンショットして Discord に送る。
 同じ時刻に、鷹巣・秋田・横手のJMAアメダス時系列詳細(module.jobs.amedas.main())も
-続けて投稿する(2026-09-16追加。従来#amedasにのみ配信していたJMAアメダスを、
-このjma-warningチャンネルにも同じタイミングで揃える)。
+1つのメッセージにまとめて投稿する(2026-09-16追加。従来#amedasにのみ配信していた
+JMAアメダスを、このjma-warningチャンネルにも同じタイミングで揃える)。
 """
 import json
 import os
@@ -116,18 +116,21 @@ def send_discord_multi(content, images):
         return res.status
 
 
-def post_amedas_detail():
-    """鷹巣・秋田・横手のJMAアメダス時系列詳細も、同じ実行(同じ時刻)でこの
-    チャンネルへ投稿する。R2アップロード・Notion書き込みは
-    scripts/wcn_amedas.py側(朝6時/12時/18時)で別途行っているため、ここでは
-    R2_ENABLE=0で無効化し、Discord投稿のみ行う(2026-09-16追加)。"""
+def fetch_amedas_detail():
+    """鷹巣・秋田・横手のJMAアメダス時系列詳細画像を取得して返す。R2アップ
+    ロード・Notion書き込みはscripts/wcn_amedas.py側(朝6時/12時/18時)で別途
+    行っているため、ここではpost_discord/post_notionとも無効化し、main()側で
+    気象警報スクリーンショットと1つのメッセージにまとめて投稿する
+    (2026-09-16変更)。"""
     try:
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         sys.path.insert(0, repo_root)
-        from module.jobs.amedas import main as amedas_main
-        amedas_main(post_discord=True, post_notion=False, discord_webhook_url=DISCORD_WEBHOOK_URL)
+        from module.jobs.amedas import main as amedas_main, JMA_AMEDAS_URL
+        detail_imgs, _r2_urls = amedas_main(post_discord=False, post_notion=False)
+        return detail_imgs, JMA_AMEDAS_URL
     except Exception as e:
-        print(f"[WARN] JMAアメダス投稿に失敗: {e}", file=sys.stderr)
+        print(f"[WARN] JMAアメダス取得に失敗: {e}", file=sys.stderr)
+        return [], ""
 
 
 def main():
@@ -138,17 +141,23 @@ def main():
     screenshots = take_screenshots()
     if not screenshots:
         print("撮影できたページがありませんでした", file=sys.stderr)
-    else:
-        lines = ["🔗 [秋田地方気象台](<https://www.jma-net.go.jp/akita/>)"]
-        images = []
-        for s in screenshots:
-            lines.append(f"🔗 [{s['title']}](<{s['url']}>)")
-            images.append((s["filename"], s["data"]))
 
+    lines = ["🔗 [秋田地方気象台](<https://www.jma-net.go.jp/akita/>)"]
+    images = []
+    for s in screenshots:
+        lines.append(f"🔗 [{s['title']}](<{s['url']}>)")
+        images.append((s["filename"], s["data"]))
+
+    amedas_imgs, amedas_url = fetch_amedas_detail()
+    if amedas_imgs:
+        lines.append(f"🔗 [アメダス（秋田）](<{amedas_url}>)")
+        images.extend(amedas_imgs)
+
+    if images:
         status = send_discord_multi("\n".join(lines), images)
         print(f"送信: {len(images)}枚まとめて → {status}", flush=True)
-
-    post_amedas_detail()
+    else:
+        print("送信する画像がありませんでした", file=sys.stderr)
 
 
 if __name__ == "__main__":
