@@ -5,7 +5,10 @@
 #
 # 気象庁指定の高層観測15地点のエマグラム（Stuve線図）を
 # ワイオミング大学 (weather.arcc.uwyo.edu) の高層観測アーカイブから取得し、
-# 1枚に結合してDiscordへ配信する。
+# 1枚に結合してPWA/メールログイン購読者へOneSignal Pushで配信する。
+# 無料公開チャンネルへのDiscord投稿は、合成画像が日によってDiscordの
+# ファイルサイズ上限を超えて失敗することがあり配信の主軸ではなくなったため
+# 2026-09-16付けで廃止した（チャンネル自体も削除済み）。
 #
 # 観測は 00Z(09時JST) / 12Z(21時JST) の1日2回だが、配信は12Z回
 # （観測から7時間後、UTC 19:00 = 翌04:00JST）に一本化した「前日まとめ」。
@@ -21,9 +24,7 @@
 # ある。地点間で観測時刻がずれると混乱するため前回観測への遡りはせず、
 # その場合は「データなし」のプレースホルダー画像を出す。
 #
-# 結合した高解像度PNGはR2へアップロードし、Discordにはサムネイル1枚と
-# 「📥高解像度PNGを表示」というテキストリンクだけを投稿する
-# （weather_map.py の LAYOUT_4_WEEKLY / DASHBOARD と同じ形式）。
+# 結合した高解像度PNGはR2へアップロードする。
 
 from __future__ import annotations
 
@@ -84,13 +85,6 @@ R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "21")
 # DISCORD_DM_ENABLE: "1" を追加するだけで良い(コードの削除はまだしていない)。
 DISCORD_DM_ENABLE = os.environ.get("DISCORD_DM_ENABLE", "0").strip().lower() in ("1", "true", "yes", "on")
 
-# 無料公開チャンネルへのDiscord投稿も、合成画像が日によってDiscordの
-# ファイルサイズ上限を超えて失敗することがあり配信の主軸ではなくなったため
-# 既定で停止する（PWA配信のみに一本化）。再開したくなった場合はworkflowの
-# envに DISCORD_POST_ENABLE: "1" を追加するだけで良い(コードの削除はまだ
-# していない)。
-DISCORD_POST_ENABLE = os.environ.get("DISCORD_POST_ENABLE", "0").strip().lower() in ("1", "true", "yes", "on")
-
 # OneSignal pushの遷移先。以前は配信画像のR2直URLを指していたが、iOSの
 # ホーム画面追加(スタンドアロン)アプリでは外部ドメインへの直リンクが
 # ツールバーの無い画面のまま身動きが取れなくなることがあるため、
@@ -106,7 +100,6 @@ NO_DATA_STATE_KEY = "state/no_data_streak.json"
 NO_DATA_ALERT_STREAK = int(os.environ.get("EMAGRAM_NO_DATA_ALERT_STREAK", "7"))
 
 REQUEST_TIMEOUT_SECONDS = 60
-DISCORD_TIMEOUT_SECONDS = 30
 
 CJK_BOLD_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
@@ -563,31 +556,6 @@ def notify_dm_subscribers(
     )
 
 
-def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_url: str) -> bool:
-    content = build_content(dt, highres_url)
-    payload = {
-        "username": "エマグラム",
-        "content": content,
-        "flags": 4,  # SUPPRESS_EMBEDS: URLの自動プレビューを抑制
-    }
-    files = {
-        "payload_json": (None, json.dumps(payload)),
-        "files[0]": ("emagram_thumb.jpg", thumb_bytes, "image/jpeg"),
-    }
-
-    try:
-        r = requests.post(webhook_url, files=files, timeout=DISCORD_TIMEOUT_SECONDS)
-    except requests.RequestException as exc:
-        print(f"ERROR: Discord投稿中に例外が発生しました: {exc}", file=sys.stderr)
-        return False
-
-    if 200 <= r.status_code < 300:
-        return True
-
-    print(f"ERROR: Discord投稿失敗 status={r.status_code} body={r.text[:500]}", file=sys.stderr)
-    return False
-
-
 def main() -> int:
     dt00, dt12 = target_sounding_times()
 
@@ -614,13 +582,6 @@ def main() -> int:
     print(f"R2 UPLOADED: {highres_url}")
 
     thumb = make_thumbnail(combined, dt12)
-
-    if DISCORD_POST_ENABLE:
-        webhook_url = os.environ.get("DISCORD_EMAGRAM_WEBHOOK_URL", "").strip()
-        if not webhook_url:
-            print("ERROR: DISCORD_POST_ENABLE=1だがDISCORD_EMAGRAM_WEBHOOK_URL未設定", file=sys.stderr)
-        elif post_combined(webhook_url, dt12, thumb, highres_url):
-            print("POSTED")
 
     notify_dm_subscribers(build_content(dt12, highres_url), thumb, highres_url, dt12, size_bytes=len(combined))
     return 0

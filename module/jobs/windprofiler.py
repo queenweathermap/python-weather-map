@@ -10,9 +10,9 @@
 # 配信は1日1回、翌日3時JST（前日分の8回が出そろってから）にまとめて行う。
 # その日の分を「1地点＝1段、実行分を横に並べる」形の1枚の画像に組み直し、
 # PWA/メールログイン購読者へOneSignal Pushで配信する（main_daily_stations()）。
-# 既存のjma-windprofilerチャンネルへのDiscord投稿は、合成画像が日によって
-# Discordのファイルサイズ上限を超えて失敗することがあり配信の主軸では
-# なくなったため2026-09-16付けで停止（DISCORD_POST_ENABLE参照）。
+# jma-windprofilerチャンネルへのDiscord投稿は、合成画像が日によってDiscordの
+# ファイルサイズ上限を超えて失敗することがあり配信の主軸ではなくなったため
+# 2026-09-16付けで廃止した（チャンネル自体も削除済み）。
 #
 # チャートはJS(SVG)描画のSPAで、ページ内の #wpr-chart 要素が
 # 「地点名・緯度経度」ラベルとグラフ本体（時間の向き矢印込み）をまとめて含む。
@@ -33,7 +33,6 @@
 from __future__ import annotations
 
 import functools
-import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -142,15 +141,6 @@ STATION_GAP = STATION_HEADER_HEIGHT * 2
 PX_PER_HOUR = 89.75
 
 R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "21")
-
-# 無料公開チャンネルへのDiscord投稿は、合成画像が日によってDiscordの
-# ファイルサイズ上限(413)を超えて失敗することがあり配信の主軸ではなくなった
-# ため2026-09-16付けで停止（PWA配信のみに一本化）。当面はコードを残し、
-# 必要なら workflow の env に DISCORD_POST_ENABLE: "1" を追加するだけで
-# 再開できるようにしてある。
-DISCORD_POST_ENABLE = os.environ.get("DISCORD_POST_ENABLE", "0").strip().lower() in ("1", "true", "yes", "on")
-
-DISCORD_TIMEOUT_SECONDS = 30
 
 CJK_BOLD_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
@@ -556,38 +546,6 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
     return buf.getvalue(), len(rows)
 
 
-def post_daily_station_grid(webhook_url: str, dt_jst: datetime, image_bytes: bytes, url: str) -> bool:
-    """既存の購読者向けjma-windprofilerチャンネルへ、前日分の「1地点1段・全実行分
-    横並び」グリッドを通常投稿する（DMではなく、main()と同じWebhookを使う）。"""
-    content = (
-        f"高層観測データ　{dt_jst.strftime('%Y/%m/%d')}まとめ\n"
-        f"ウィンドプロファイラ 前日まとめ（{len(STATIONS_ALL)}地点）\n"
-        f"🔗 [気象庁 ウィンドプロファイラ（地点別）](<{BASE_URL}>)\n"
-        f"📥 [高解像度PNGをダウンロード（{R2_RETENTION_DAYS}日間有効）](<{url}>)"
-    )
-    payload = {
-        "username": "ウィンドプロファイラ（前日まとめ）",
-        "content": content,
-        "flags": 4,  # SUPPRESS_EMBEDS
-    }
-    files = {
-        "payload_json": (None, json.dumps(payload)),
-        "files[0]": ("windprofiler_daily.png", image_bytes, "image/png"),
-    }
-
-    try:
-        r = requests.post(webhook_url, files=files, timeout=DISCORD_TIMEOUT_SECONDS)
-    except requests.RequestException as exc:
-        print(f"ERROR: Discord投稿中に例外が発生しました: {exc}", file=sys.stderr)
-        return False
-
-    if 200 <= r.status_code < 300:
-        return True
-
-    print(f"ERROR: Discord投稿失敗 status={r.status_code} body={r.text[:500]}", file=sys.stderr)
-    return False
-
-
 def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int, size_bytes: int = 0) -> None:
     """PWA/メールログイン購読者へ、前日分のウィンドプロファイラまとめを通知する。
     Discordへの投稿とは独立しており、失敗しても互いに影響しない
@@ -645,8 +603,7 @@ def main_daily_stations() -> int:
     """1日1回、翌日3時JSTに実行し、前日分の地点別raw画像を「1地点1段・横並び」の
     1枚のグリッド画像に組み直して、PWA/メールログイン購読者へOneSignal Pushで
     配信する。ウィンドプロファイラの配信はこれが唯一（main()は撮影・R2保存の
-    みでDiscordへは投稿しない）。jma-windprofilerチャンネルへのDiscord投稿は
-    既定で停止済み（DISCORD_POST_ENABLE参照）。"""
+    みでDiscordへは投稿しない）。"""
     # 実行時刻(翌日3時JST)から見て「前日」の分をまとめる
     target_jst = _jst_now() - timedelta(days=1)
 
@@ -661,13 +618,6 @@ def main_daily_stations() -> int:
     print(f"R2 UPLOADED: {url}")
 
     cleanup_composited_station_images(target_jst)
-
-    if DISCORD_POST_ENABLE:
-        webhook_url = os.environ.get("DISCORD_WINDPROFILER_WEBHOOK_URL", "").strip()
-        if not webhook_url:
-            print("ERROR: DISCORD_POST_ENABLE=1だがDISCORD_WINDPROFILER_WEBHOOK_URL未設定", file=sys.stderr)
-        elif post_daily_station_grid(webhook_url, target_jst, image_bytes, url):
-            print(f"POSTED ({station_count}地点、1枚)")
 
     notify_pwa_daily_stations(target_jst, url, station_count, size_bytes=len(image_bytes))
     print("NOTIFIED (PWA)")
