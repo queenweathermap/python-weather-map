@@ -616,7 +616,6 @@ def main_daily_stations() -> int:
         category="ウィンドプロファイラ",
         r2_urls=[url],
         jst_now=target_jst,
-        prefix="windprofiler",
         pwa=True,
         size_bytes=len(image_bytes),
         issue_time_label=f"高層観測データ {target_jst.strftime('%Y/%m/%d')}まとめ",

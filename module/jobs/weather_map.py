@@ -2710,8 +2710,6 @@ def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Op
 def notion_write_db(
     *,
     issue_dt_jst: datetime,
-    rjtd: str,
-    run_prefix: str,
     rep_url: Optional[str],
     all_urls: List[str],
     notion_items: List[Tuple[str, str, str, str]],
@@ -2734,8 +2732,6 @@ def notion_write_db(
         category=category,
         init_jst_iso=issue_dt_jst.isoformat(),
         memo=memo,
-        rjtd=rjtd,
-        prefix=run_prefix,
         r2_url=rep_url or "",
         autogen=True,
         pwa=pwa,
@@ -2917,8 +2913,6 @@ def main_dashboard_jma() -> None:
         notion_items = [(filename, "高層天気図・数値予報天気図 結合図", "DASHBOARD_JMA_DIRECT", url)]
         page_id = notion_write_db(
             issue_dt_jst=issue_dt_jst,
-            rjtd=rjtd,
-            run_prefix=run_prefix,
             rep_url=rep_url,
             all_urls=all_urls,
             notion_items=notion_items,
@@ -3049,8 +3043,6 @@ def main_layout4() -> None:
         notion_items = [(filename, DISCORD_TITLES.get(filename, filename), "LAYOUT_4_WEEKLY", url)]
         page_id = notion_write_db(
             issue_dt_jst=issue_dt_jst,
-            rjtd=rjtd,
-            run_prefix=run_prefix,
             rep_url=rep_url,
             all_urls=all_urls,
             notion_items=notion_items,
@@ -3239,8 +3231,6 @@ def main_monthly() -> None:
         notion_items = [(filename, "1ヶ月予報 結合図", "MONTHLY_FORECAST", url)]
         page_id = notion_write_db(
             issue_dt_jst=issue_dt_jst,
-            rjtd=rjtd,
-            run_prefix=run_prefix,
             rep_url=rep_url,
             all_urls=all_urls,
             notion_items=notion_items,

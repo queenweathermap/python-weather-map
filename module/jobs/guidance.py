@@ -715,7 +715,6 @@ def main():
                 category="WCNガイダンス",
                 r2_urls=msm_urls,
                 jst_now=jst_now,
-                prefix=R2_PREFIX,
                 pwa=False,
                 icon_emoji="🧭",
                 links=[("WCN 各種気象資料", WCN_KISHO_URL)],
@@ -726,7 +725,6 @@ def main():
                 category="WCNガイダンス",
                 r2_urls=other_urls,
                 jst_now=jst_now,
-                prefix=R2_PREFIX,
                 pwa=False,
                 icon_emoji="🧭",
             )

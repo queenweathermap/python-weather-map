@@ -347,7 +347,6 @@ def _notion_write(
         category="Amedas",
         r2_urls=r2_urls,
         jst_now=jst_now,
-        prefix=R2_PREFIX,
         pwa=False,
         icon_emoji="🌡️",
         links=[("WCN各種気象情報", WCN_KISHO_URL)],

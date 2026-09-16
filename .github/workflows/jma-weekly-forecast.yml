@@ -40,8 +40,6 @@ jobs:
       NOTION_PROP_CATEGORY: "区分"
       NOTION_PROP_INIT_JST: "配信日時"
       NOTION_PROP_MEMO: "メモ"
-      NOTION_PROP_RJTD: "RJTD"
-      NOTION_PROP_PREFIX: "prefix"
       NOTION_PROP_R2URL: "R2 URL"
       NOTION_PROP_AUTOGEN: "自動生成"
 

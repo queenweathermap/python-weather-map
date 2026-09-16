@@ -94,14 +94,6 @@ def _prop_autogen() -> str:
     return _env("NOTION_PROP_AUTOGEN", "自動生成")
 
 
-def _prop_rjtd() -> str:
-    return _env("NOTION_PROP_RJTD", "RJTD")
-
-
-def _prop_prefix() -> str:
-    return _env("NOTION_PROP_PREFIX", "prefix")
-
-
 def _prop_size() -> str:
     return _env("NOTION_PROP_SIZE", "サイズ")
 
@@ -241,8 +233,6 @@ def create_db_row(
     category: str,
     init_jst_iso: str,
     memo: str = "",
-    rjtd: str = "",
-    prefix: str = "",
     r2_url: str = "",
     autogen: bool = True,
     pwa: Optional[bool] = None,
@@ -271,11 +261,6 @@ def create_db_row(
 
     if memo:
         props[_prop_memo()] = {"rich_text": [{"type": "text", "text": {"content": memo}}]}
-
-    if rjtd:
-        props[_prop_rjtd()] = {"rich_text": [{"type": "text", "text": {"content": rjtd}}]}
-    if prefix:
-        props[_prop_prefix()] = {"rich_text": [{"type": "text", "text": {"content": prefix}}]}
 
     if r2_url:
         props[_prop_r2url()] = {"url": r2_url}
@@ -471,7 +456,6 @@ def archive_to_notion(
     r2_urls: List[str],
     jst_now,
     memo: str = "",
-    prefix: str = "",
     pwa: Optional[bool] = None,
     size_bytes: int = 0,
     issue_time_label: str = "",
@@ -499,7 +483,6 @@ def archive_to_notion(
             category=category,
             init_jst_iso=jst_now.isoformat(),
             memo=memo,
-            prefix=prefix,
             r2_url=valid_urls[0] if valid_urls else "",
             autogen=True,
             pwa=pwa,

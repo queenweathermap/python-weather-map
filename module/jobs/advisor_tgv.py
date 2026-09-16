@@ -791,8 +791,6 @@ def main() -> None:
         category="ADV",
         init_jst_iso=init_jst_iso,
         memo="DiscordはGIFのみ。NotionにはGIFと元画像JPGを保存。R2は30日保持の一時置き場。",
-        rjtd=rjtd_for_title,
-        prefix=run_prefix,
         r2_url="",
         autogen=True,
     )

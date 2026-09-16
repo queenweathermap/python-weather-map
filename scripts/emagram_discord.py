@@ -583,7 +583,6 @@ def main() -> int:
         category="エマグラム",
         r2_urls=[highres_url],
         jst_now=dt12,
-        prefix="emagram",
         pwa=True,
         size_bytes=len(combined),
         issue_time_label=f"高層観測データ {dt12.strftime('%Y/%m/%d')}まとめ",
