@@ -84,6 +84,13 @@ R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "21")
 # DISCORD_DM_ENABLE: "1" を追加するだけで良い(コードの削除はまだしていない)。
 DISCORD_DM_ENABLE = os.environ.get("DISCORD_DM_ENABLE", "0").strip().lower() in ("1", "true", "yes", "on")
 
+# 無料公開チャンネルへのDiscord投稿も、合成画像が日によってDiscordの
+# ファイルサイズ上限を超えて失敗することがあり配信の主軸ではなくなったため
+# 既定で停止する（PWA配信のみに一本化）。再開したくなった場合はworkflowの
+# envに DISCORD_POST_ENABLE: "1" を追加するだけで良い(コードの削除はまだ
+# していない)。
+DISCORD_POST_ENABLE = os.environ.get("DISCORD_POST_ENABLE", "0").strip().lower() in ("1", "true", "yes", "on")
+
 # OneSignal pushの遷移先。以前は配信画像のR2直URLを指していたが、iOSの
 # ホーム画面追加(スタンドアロン)アプリでは外部ドメインへの直リンクが
 # ツールバーの無い画面のまま身動きが取れなくなることがあるため、
@@ -582,11 +589,6 @@ def post_combined(webhook_url: str, dt: datetime, thumb_bytes: bytes, highres_ur
 
 
 def main() -> int:
-    webhook_url = os.environ.get("DISCORD_EMAGRAM_WEBHOOK_URL", "").strip()
-    if not webhook_url:
-        print("ERROR: DISCORD_EMAGRAM_WEBHOOK_URL未設定", file=sys.stderr)
-        return 1
-
     dt00, dt12 = target_sounding_times()
 
     streaks = load_no_data_streaks()
@@ -613,12 +615,15 @@ def main() -> int:
 
     thumb = make_thumbnail(combined, dt12)
 
-    if post_combined(webhook_url, dt12, thumb, highres_url):
-        print("POSTED")
-        notify_dm_subscribers(build_content(dt12, highres_url), thumb, highres_url, dt12, size_bytes=len(combined))
-        return 0
+    if DISCORD_POST_ENABLE:
+        webhook_url = os.environ.get("DISCORD_EMAGRAM_WEBHOOK_URL", "").strip()
+        if not webhook_url:
+            print("ERROR: DISCORD_POST_ENABLE=1だがDISCORD_EMAGRAM_WEBHOOK_URL未設定", file=sys.stderr)
+        elif post_combined(webhook_url, dt12, thumb, highres_url):
+            print("POSTED")
 
-    return 1
+    notify_dm_subscribers(build_content(dt12, highres_url), thumb, highres_url, dt12, size_bytes=len(combined))
+    return 0
 
 
 if __name__ == "__main__":
