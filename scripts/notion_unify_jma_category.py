@@ -7,10 +7,12 @@
 # 「☀️wx 天気図 DB」の区分プロパティが厳密に ["JMA"] だけになっている行を、
 # 全部 ["全部入り天気図"] に統一する（PWAタグは追加しない）。
 #
-# Notion REST APIを直接叩いて、data_sources/{id}/query をカーソルで
-# 完全にページングする（MCP経由のSQLモードは1呼び出しあたり実質100件までしか
+# Notion REST APIを直接叩いて、databases/{id}/query をカーソルで完全に
+# ページングする（MCP経由のSQLモードは1呼び出しあたり実質100件までしか
 # 返らない制限があり、検索ベースの手段は50件キャップかつページングが無いため、
 # どちらも大量件数の完全な列挙には向かない）。
+# notion_utils.py はAPIバージョン2022-06-28を使っており、この版では
+# databases/{id}/query を直接叩く旧形式(data_sourcesの中間解決が不要)。
 #
 # 実行後は不要になるため、ワークフローごと削除してよい。
 # =============================================================================
@@ -26,16 +28,7 @@ import requests
 from module.utils.notion_utils import API_BASE, _headers, _must_env
 
 
-def resolve_data_source_id(database_id: str) -> str:
-    r = requests.get(f"{API_BASE}/databases/{database_id}", headers=_headers(), timeout=30)
-    r.raise_for_status()
-    data_sources = r.json().get("data_sources") or []
-    if not data_sources:
-        raise RuntimeError(f"database {database_id} has no data_sources")
-    return data_sources[0]["id"]
-
-
-def iter_jma_only_pages(data_source_id: str):
+def iter_jma_only_pages(database_id: str):
     """区分が厳密に ["JMA"] だけの行を、カーソルで全件たどって返す。"""
     body = {
         "filter": {"property": "区分", "multi_select": {"contains": "JMA"}},
@@ -43,7 +36,7 @@ def iter_jma_only_pages(data_source_id: str):
     }
     while True:
         r = requests.post(
-            f"{API_BASE}/data_sources/{data_source_id}/query",
+            f"{API_BASE}/databases/{database_id}/query",
             headers=_headers(),
             json=body,
             timeout=60,
@@ -61,9 +54,8 @@ def iter_jma_only_pages(data_source_id: str):
 
 def main() -> None:
     database_id = _must_env("NOTION_DATABASE_ID")
-    data_source_id = resolve_data_source_id(database_id)
 
-    page_ids = list(iter_jma_only_pages(data_source_id))
+    page_ids = list(iter_jma_only_pages(database_id))
     print(f"[INFO] {len(page_ids)} pages with 区分=['JMA'] found")
 
     ok = 0
