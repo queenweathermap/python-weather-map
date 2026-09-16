@@ -579,13 +579,12 @@ def main() -> int:
     thumb = make_thumbnail(combined, dt12)
 
     archive_to_notion(
-        title=f"エマグラム（{len(STATIONS)}地点）",
+        title=f"高層観測データ　エマグラム（{len(STATIONS)}地点） {dt12.strftime('%Y/%m/%d')}まとめ",
         category="エマグラム",
         r2_urls=[highres_url],
         jst_now=dt12,
         pwa=True,
         size_bytes=len(combined),
-        issue_time_label=f"高層観測データ {dt12.strftime('%Y/%m/%d')}まとめ",
         icon_emoji="📈",
         links=[("University of Wyoming 高層観測アーカイブ", WYOMING_PORTAL_URL)],
     )

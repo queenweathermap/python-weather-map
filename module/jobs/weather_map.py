@@ -2723,15 +2723,18 @@ def notion_write_db(
     if not notion_enabled():
         return None
 
-    day = issue_dt_jst.strftime("%Y%m%d")
-    title = f"JMA / {day} {issue_dt_jst.strftime('%H:%M')} JST"
+    # 名前は「{結合図の種類}　{発行時刻表示}」に揃える(2026-09-17)。
+    # notion_items[0][1]はDiscordタイトルと同じ結合図の種類ラベル
+    # (例: "高層天気図・数値予報天気図 結合図")。
+    label = notion_items[0][1] if notion_items else "JMA"
+    title = f"{label}　{issue_time_label}" if issue_time_label else label
     memo = "\n".join(["ERROR:"] + [f"- {e}" for e in errors]) if errors else ""
 
     # 配信日時は実際の投稿時刻(now_jst())を使う。issue_dt_jst は数値予報の
     # 初期値(09:00/21:00 JST)に丸めた値のため、同じ初期値を「本番」「TKAISETU
     # 更新だけの追いかけ」で1日に複数回配信するmain_dashboard_jma()では、
     # issue_dt_jstのままだと配信日時が重複してPWA一覧のソート・重複判定が
-    # 壊れる。初期値自体はissue_time_label(発行時刻表示)側に残る。
+    # 壊れる。初期値自体は名前(title)側に残る。
     page_id = create_db_row(
         title=title,
         category=category,
@@ -2741,7 +2744,6 @@ def notion_write_db(
         autogen=True,
         pwa=pwa,
         size_bytes=size_bytes,
-        issue_time_label=issue_time_label,
         icon_emoji="🗺️",
     )
 
@@ -2819,7 +2821,7 @@ def notify_dm_subscribers(
     既に完了しているため、ここでの例外は握りつぶしてログのみ出す。
     PWAギャラリー用の記録は「PWA配信履歴」専用DB廃止に伴い、ここではなく
     呼び出し元がnotion_write_db()に直接書き込む(archive DBのpwa=Trueと
-    size_bytes/issue_time_labelで代替、2026-09-16)。"""
+    size_bytesと名前(title)で代替、2026-09-16)。"""
     try:
         discord_ids = get_active_discord_ids()
     except Exception as e:
