@@ -703,31 +703,47 @@ def main():
         other_urls = _upload_r2(other_images)
         _post_images_bulk(other_images, content="**WCN ガイダンス（分布予報・週間・気象庁予報）**")
 
-    # Notion資料アーカイブDBへ2件に分けて記録する（Discord/PWAとは独立、
-    # R2の保存期限が切れても内容が残るように）。
+    # Notion資料アーカイブDBへ1件にまとめて記録する（Discord/PWAとは独立、
+    # R2の保存期限が切れても内容が残るように）。見出しで区分し、それぞれの
+    # 画像をその下に貼る(2026-09-16: 2ページ分割から1ページ統合に変更)。
     try:
-        from module.utils.notion_utils import archive_to_notion
+        from module.utils.notion_utils import (
+            create_db_row,
+            append_heading,
+            append_imported_images_from_urls,
+            append_images,
+            append_bookmark,
+        )
 
         jst_now = _jst_now()
-        if msm_urls:
-            archive_to_notion(
-                title="MSM時別ガイダンス（秋田県全地点）",
-                category="WCNガイダンス",
-                r2_urls=msm_urls,
-                jst_now=jst_now,
-                pwa=False,
-                icon_emoji="🧭",
-                links=[("WCN 各種気象資料", WCN_KISHO_URL)],
-            )
-        if other_urls:
-            archive_to_notion(
-                title="WCN ガイダンス（分布予報・週間・気象庁予報）",
-                category="WCNガイダンス",
-                r2_urls=other_urls,
-                jst_now=jst_now,
-                pwa=False,
-                icon_emoji="🧭",
-            )
+        page_id = create_db_row(
+            title="WCNガイダンス",
+            category="WCNガイダンス",
+            init_jst_iso=jst_now.isoformat(),
+            r2_url=(other_urls or msm_urls or [""])[0],
+            autogen=True,
+            pwa=False,
+            icon_emoji="🧭",
+        )
+
+        if page_id:
+            sections = [
+                ("分布予報・週間・気象庁予報", other_urls),
+                ("MSM時別ガイダンス（秋田県全地点）", msm_urls),
+            ]
+            for heading, urls in sections:
+                if not urls:
+                    continue
+                append_heading(page_id, heading, level=2)
+                items = [(f"{i + 1:02d}.png", u, "image/png") for i, u in enumerate(urls)]
+                try:
+                    append_imported_images_from_urls(page_id, items, chunk=10)
+                except Exception as e:
+                    print(f"[WARN] Notion画像インポート失敗、外部リンクにフォールバック: {e}")
+                    append_images(page_id, urls, chunk=30)
+
+            append_heading(page_id, "関連リンク", level=2)
+            append_bookmark(page_id, WCN_KISHO_URL, caption="WCN 各種気象資料")
     except Exception as e:
         print(f"[WARN] Notionアーカイブ失敗: {e}")
 

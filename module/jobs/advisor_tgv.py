@@ -27,7 +27,7 @@
 #
 # 役割分担:
 #   - Notion が正本
-#   - R2 は30日保持の一時公開置き場
+#   - R2 は21日保持の一時公開置き場
 #   - Discord は軽く見るためのビュー
 # =============================================================================
 
@@ -790,7 +790,7 @@ def main() -> None:
         title=title,
         category="ADV",
         init_jst_iso=init_jst_iso,
-        memo="DiscordはGIFのみ。NotionにはGIFと元画像JPGを保存。R2は30日保持の一時置き場。",
+        memo="DiscordはGIFのみ。NotionにはGIFと元画像JPGを保存。R2は21日保持の一時置き場。",
         r2_url="",
         autogen=True,
     )
@@ -869,7 +869,7 @@ def main() -> None:
 
             if first_cover_url is None:
                 first_cover_url = original_urls[0]
-                # NOTION_IMPORT_IMAGES=1 ではR2を30日後に消すため、
+                # NOTION_IMPORT_IMAGES=1 ではR2を21日後に消すため、
                 # R2 URLをページカバーにしない。
                 if not notion_import_images_enabled():
                     set_page_cover(page_id, first_cover_url)
