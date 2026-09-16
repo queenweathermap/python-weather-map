@@ -21,12 +21,10 @@
 # 任意（DBプロパティ名が環境で違う場合の上書き）
 #   NOTION_PROP_TITLE="名前"
 #   NOTION_PROP_CATEGORY="区分"
-#   NOTION_PROP_INIT_JST="初期時刻（JST）"
+#   NOTION_PROP_INIT_JST="配信日時"
 #   NOTION_PROP_MEMO="メモ"
 #   NOTION_PROP_R2URL="R2 URL"
 #   NOTION_PROP_AUTOGEN="自動生成"
-#   NOTION_PROP_RJTD="RJTD"
-#   NOTION_PROP_PREFIX="prefix"
 # =============================================================================
 
 from __future__ import annotations
