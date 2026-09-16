@@ -6,9 +6,10 @@
 # 1枚、177chart.comへの誘導文言つきでBluesky・Threads・Facebook・Instagramに投稿する。
 #
 #   画像は新たに生成しない。07_DASHBOARD_JMA_DIRECTは00Z/12Zサイクルごとに
-#   R2へアップロードされ、同時にPWA配信履歴(Notion)へ
-#   「発行時刻表示」(例: "2026/09/01 00Z (09:00JST)")付きで記録されている
-#   （module/utils/recent_items.py / weather_map.py notify_dm_subscribers）。
+#   R2へアップロードされ、同時にNotion資料アーカイブDB(NOTION_DATABASE_ID)へ
+#   区分「全部入り天気図」・「発行時刻表示」(例: "2026/09/01 00Z (09:00JST)")
+#   付きで記録されている（weather_map.py notion_write_db/notify_dm_subscribers。
+#   旧「PWA配信履歴」専用DBは2026-09-16付けでこちらに統合・廃止した）。
 #   このDBを「1日 00Z」で検索してR2公開URLを取得し、そこから画像バイトを
 #   ダウンロードして各SNSへ投稿する（Blueskyはバイナリのblobアップロードが必須なため）。
 #   R2保存期間は30日のため、10日時点でも問題なく残っている。
@@ -56,10 +57,11 @@ def _resolve_data_source_id(db_id: str) -> str:
 
 
 def find_dashboard_image_url(year: int, month: int) -> str:
-    """その月の1日 00Zサイクルの「全部入り天気図」のR2公開URLをPWA配信履歴から探す。"""
-    db_id = _env("NOTION_PWA_HISTORY_DATABASE_ID")
+    """その月の1日 00Zサイクルの「全部入り天気図」のR2公開URLをNotion資料アーカイブ
+    DBから探す。区分はマルチセレクトなので equals ではなく contains で絞り込む。"""
+    db_id = _env("NOTION_DATABASE_ID")
     if not db_id:
-        print("[ERR] NOTION_PWA_HISTORY_DATABASE_ID 未設定")
+        print("[ERR] NOTION_DATABASE_ID 未設定")
         return ""
 
     try:
@@ -72,7 +74,7 @@ def find_dashboard_image_url(year: int, month: int) -> str:
     body = {
         "filter": {
             "and": [
-                {"property": "カテゴリ", "select": {"equals": DASHBOARD_CATEGORY}},
+                {"property": "区分", "multi_select": {"contains": DASHBOARD_CATEGORY}},
                 {"property": "発行時刻表示", "rich_text": {"starts_with": prefix}},
             ]
         },
@@ -93,7 +95,7 @@ def find_dashboard_image_url(year: int, month: int) -> str:
         print(f"[WARN] 該当する全部入り天気図が見つかりません（{prefix}）")
         return ""
 
-    url = results[0].get("properties", {}).get("URL", {}).get("url", "") or ""
+    url = results[0].get("properties", {}).get("R2 URL", {}).get("url", "") or ""
     if url:
         print(f"[OK] 対象画像: {prefix} → {url}")
     return url

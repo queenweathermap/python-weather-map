@@ -102,6 +102,14 @@ def _prop_prefix() -> str:
     return _env("NOTION_PROP_PREFIX", "prefix")
 
 
+def _prop_size() -> str:
+    return _env("NOTION_PROP_SIZE", "サイズ")
+
+
+def _prop_issue_label() -> str:
+    return _env("NOTION_PROP_ISSUE_LABEL", "発行時刻表示")
+
+
 # -----------------------------------------------------------------------------
 # Internal helpers
 # -----------------------------------------------------------------------------
@@ -238,6 +246,8 @@ def create_db_row(
     r2_url: str = "",
     autogen: bool = True,
     pwa: Optional[bool] = None,
+    size_bytes: int = 0,
+    issue_time_label: str = "",
     icon_emoji: str = "🗺️",
 ) -> Optional[str]:
     if not notion_enabled():
@@ -271,6 +281,10 @@ def create_db_row(
         props[_prop_r2url()] = {"url": r2_url}
     if autogen is not None:
         props[_prop_autogen()] = {"checkbox": bool(autogen)}
+    if size_bytes:
+        props[_prop_size()] = {"number": size_bytes}
+    if issue_time_label:
+        props[_prop_issue_label()] = {"rich_text": [{"type": "text", "text": {"content": issue_time_label}}]}
 
     payload = {
         "parent": {"type": "database_id", "database_id": db_id},
@@ -459,6 +473,8 @@ def archive_to_notion(
     memo: str = "",
     prefix: str = "",
     pwa: Optional[bool] = None,
+    size_bytes: int = 0,
+    issue_time_label: str = "",
     icon_emoji: str = "🗺️",
     links: Optional[List[Tuple[str, str]]] = None,
     chunk: int = 10,
@@ -469,6 +485,8 @@ def archive_to_notion(
     インポートする（R2側の保存期限が切れてもNotion上には残る）。amedas.py以外の
     ジョブ(windprofiler/emagram/guidance等)が個別に create_db_row +
     append_imported_images_from_urls を組み立てずに済むようにした共通版。
+    size_bytes/issue_time_labelは、廃止した「PWA配信履歴」専用DBが持っていた
+    情報(PWA会員ページのギャラリー表示に必要)をこちらに統合するためのもの。
     失敗しても呼び出し元の配信自体は止めたくないので例外は握りつぶす。"""
     if not notion_enabled():
         return None
@@ -485,6 +503,8 @@ def archive_to_notion(
             r2_url=valid_urls[0] if valid_urls else "",
             autogen=True,
             pwa=pwa,
+            size_bytes=size_bytes,
+            issue_time_label=issue_time_label,
             icon_emoji=icon_emoji,
         )
     except Exception as e:

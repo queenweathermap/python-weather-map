@@ -53,7 +53,6 @@ jobs:
       NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
       ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
       ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
-      NOTION_PWA_HISTORY_DATABASE_ID: ${{ secrets.NOTION_PWA_HISTORY_DATABASE_ID }}
 
       # ------------------------------------------------------------
       # Discord（公開チャンネル / 週間天気・全部入りと同じチャンネルに投稿）

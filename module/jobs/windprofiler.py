@@ -50,7 +50,6 @@ sys.path.insert(0, str(REPO_ROOT))
 from module.utils.r2_utils import put_bytes, get_bytes, list_keys_with_prefix, delete_keys, make_url
 from module.utils.notion_subscribers import get_active_emails
 from module.utils.onesignal_push import send_push_to_all
-from module.utils.recent_items import record_recent_item
 from module.utils.notion_utils import archive_to_notion
 
 # プッシュ通知のタップ先。R2の生画像URLに直接飛ばすと、iOSスタンドアロンで
@@ -547,10 +546,12 @@ def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes,
     return buf.getvalue(), len(rows)
 
 
-def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int, size_bytes: int = 0) -> None:
+def notify_pwa_daily_stations(dt_jst: datetime) -> None:
     """PWA/メールログイン購読者へ、前日分のウィンドプロファイラまとめを通知する。
     Discordへの投稿とは独立しており、失敗しても互いに影響しない
-    （購読者取得や送信に失敗しても例外は握りつぶし、ログのみ出す）。"""
+    （購読者取得や送信に失敗しても例外は握りつぶし、ログのみ出す）。
+    PWAギャラリー用の記録は「PWA配信履歴」専用DB廃止に伴い、archive_to_notion()
+    (資料アーカイブDB, pwa=True)側で行う(2026-09-16)。"""
     try:
         emails = get_active_emails()
     except Exception as e:
@@ -567,14 +568,6 @@ def notify_pwa_daily_stations(dt_jst: datetime, url: str, station_count: int, si
             )
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
-
-    record_recent_item(
-        f"ウィンドプロファイラ 前日まとめ（{station_count}地点）",
-        url,
-        "ウィンドプロファイラ",
-        f"高層観測データ {dt_jst.strftime('%Y/%m/%d')}まとめ",
-        size_bytes=size_bytes,
-    )
 
 
 def cleanup_composited_station_images(target_jst: datetime) -> None:
@@ -625,13 +618,15 @@ def main_daily_stations() -> int:
         jst_now=target_jst,
         prefix="windprofiler",
         pwa=True,
+        size_bytes=len(image_bytes),
+        issue_time_label=f"高層観測データ {target_jst.strftime('%Y/%m/%d')}まとめ",
         icon_emoji="🌬️",
         links=[("気象庁 ウィンドプロファイラ（地点別）", BASE_URL)],
     )
 
     cleanup_composited_station_images(target_jst)
 
-    notify_pwa_daily_stations(target_jst, url, station_count, size_bytes=len(image_bytes))
+    notify_pwa_daily_stations(target_jst)
     print("NOTIFIED (PWA)")
 
     return 0

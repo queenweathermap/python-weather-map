@@ -48,7 +48,6 @@ from module.utils.r2_utils import put_bytes, get_bytes, make_url
 from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails
 from module.utils.discord_dm import send_dm_to_all
 from module.utils.onesignal_push import send_push_to_all
-from module.utils.recent_items import record_recent_item
 from module.utils.notion_utils import archive_to_notion
 
 STATIONS = [
@@ -524,12 +523,12 @@ def build_content(dt: datetime, highres_url: str) -> str:
     )
 
 
-def notify_dm_subscribers(
-    content: str, thumb_bytes: bytes, highres_url: str, dt: datetime, size_bytes: int = 0
-) -> None:
+def notify_dm_subscribers(content: str, thumb_bytes: bytes) -> None:
     """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
     Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
-    OneSignal Web Pushを送る。"""
+    OneSignal Web Pushを送る。PWAギャラリー用の記録は「PWA配信履歴」専用DB
+    廃止に伴い、archive_to_notion()(資料アーカイブDB, pwa=True)側で行う
+    (2026-09-16)。"""
     try:
         discord_ids = get_active_discord_ids()
     except Exception as e:
@@ -550,11 +549,6 @@ def notify_dm_subscribers(
             send_push_to_all(emails, "エマグラム", "新しいエマグラムが届きました", url=PWA_MEMBER_URL)
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
-
-    issue_time_label = f"高層観測データ {dt.strftime('%Y/%m/%d')}まとめ"
-    record_recent_item(
-        f"エマグラム（{len(STATIONS)}地点）", highres_url, "エマグラム", issue_time_label, size_bytes=size_bytes
-    )
 
 
 def main() -> int:
@@ -591,11 +585,13 @@ def main() -> int:
         jst_now=dt12,
         prefix="emagram",
         pwa=True,
+        size_bytes=len(combined),
+        issue_time_label=f"高層観測データ {dt12.strftime('%Y/%m/%d')}まとめ",
         icon_emoji="📈",
         links=[("University of Wyoming 高層観測アーカイブ", WYOMING_PORTAL_URL)],
     )
 
-    notify_dm_subscribers(build_content(dt12, highres_url), thumb, highres_url, dt12, size_bytes=len(combined))
+    notify_dm_subscribers(build_content(dt12, highres_url), thumb)
     return 0
 
 

@@ -14,10 +14,11 @@ jobs:
       TZ: Asia/Tokyo
 
       # ------------------------------------------------------------
-      # Notion（PWA配信履歴DBから「1日 00Z」の全部入り天気図URLを検索）
+      # Notion（資料アーカイブDBから「1日 00Z」の全部入り天気図URLを検索。
+      # 旧PWA配信履歴DBは2026-09-16付けでこちらに統合・廃止した）
       # ------------------------------------------------------------
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-      NOTION_PWA_HISTORY_DATABASE_ID: ${{ secrets.NOTION_PWA_HISTORY_DATABASE_ID }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
 
       # ------------------------------------------------------------
       # Bluesky（climate-akita と同じアカウント）

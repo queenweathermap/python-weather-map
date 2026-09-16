@@ -40,7 +40,6 @@ from module.utils.discord_utils import (
 from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails
 from module.utils.discord_dm import send_dm_to_all
 from module.utils.onesignal_push import send_push_to_all
-from module.utils.recent_items import record_recent_item
 
 
 # =============================================================================
@@ -2719,6 +2718,9 @@ def notion_write_db(
     errors: List[str],
     extra_links: Optional[List[Tuple[str, str]]] = None,
     pwa: Optional[bool] = None,
+    size_bytes: int = 0,
+    issue_time_label: str = "",
+    category: str = "JMA",
 ) -> Optional[str]:
     if not notion_enabled():
         return None
@@ -2729,7 +2731,7 @@ def notion_write_db(
 
     page_id = create_db_row(
         title=title,
-        category="JMA",
+        category=category,
         init_jst_iso=issue_dt_jst.isoformat(),
         memo=memo,
         rjtd=rjtd,
@@ -2737,6 +2739,8 @@ def notion_write_db(
         r2_url=rep_url or "",
         autogen=True,
         pwa=pwa,
+        size_bytes=size_bytes,
+        issue_time_label=issue_time_label,
         icon_emoji="🗺️",
     )
 
@@ -2806,16 +2810,15 @@ def notify_dm_subscribers(
     thumb_mime: str,
     *,
     push_title: str = "",
-    push_url: str = "",
-    pwa_category: str = "",
-    pwa_issue_time: str = "",
-    push_size_bytes: int = 0,
 ) -> None:
     """有料購読者（Notion管理）へ、公開チャンネルと同じ内容を配信する。
     Discord経由の購読者にはDM、PWA/メールログイン経由の購読者には
     OneSignal Web Pushを送る（どちらも同じNotion DBのStatus判定を共有）。
     購読者取得や送信に失敗しても、公開チャンネルへの投稿自体は
-    既に完了しているため、ここでの例外は握りつぶしてログのみ出す。"""
+    既に完了しているため、ここでの例外は握りつぶしてログのみ出す。
+    PWAギャラリー用の記録は「PWA配信履歴」専用DB廃止に伴い、ここではなく
+    呼び出し元がnotion_write_db()に直接書き込む(archive DBのpwa=Trueと
+    size_bytes/issue_time_labelで代替、2026-09-16)。"""
     try:
         discord_ids = get_active_discord_ids()
     except Exception as e:
@@ -2842,9 +2845,6 @@ def notify_dm_subscribers(
             send_push_to_all(emails, push_title, "新しい配信が届きました", url=PWA_MEMBER_URL)
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
-
-    if pwa_category and push_title and push_url:
-        record_recent_item(push_title, push_url, pwa_category, pwa_issue_time, size_bytes=push_size_bytes)
 
 
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
@@ -2911,6 +2911,8 @@ def main_dashboard_jma() -> None:
 
         filename = "07_DASHBOARD_JMA_DIRECT"
         url = all_urls[0] if all_urls else ""
+        # Discord本文・PWAギャラリー・画像左上のラベルすべて同じ表記に揃える
+        init_label = issue_time_overlay_text(issue_dt_jst)
 
         notion_items = [(filename, "高層天気図・数値予報天気図 結合図", "DASHBOARD_JMA_DIRECT", url)]
         page_id = notion_write_db(
@@ -2923,6 +2925,9 @@ def main_dashboard_jma() -> None:
             errors=errors,
             extra_links=IMAGE_EXTRA_LINKS.get(filename, []),
             pwa=bool(PWA_CATEGORY_BY_FILENAME.get(filename)),
+            size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
+            issue_time_label=init_label,
+            category=PWA_CATEGORY_BY_FILENAME.get(filename, "JMA"),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""
@@ -2931,8 +2936,6 @@ def main_dashboard_jma() -> None:
 
         try:
             if discord_jma_enabled() and url:
-                # Discord本文・PWAギャラリー・画像左上のラベルすべて同じ表記に揃える
-                init_label = issue_time_overlay_text(issue_dt_jst)
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
@@ -2961,10 +2964,6 @@ def main_dashboard_jma() -> None:
                         thumb_path,
                         thumb_mime,
                         push_title=DISCORD_TITLES.get(filename, filename),
-                        push_url=url,
-                        pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
-                        pwa_issue_time=issue_time_overlay_text(issue_dt_jst),
-                        push_size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
                     )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
@@ -3042,6 +3041,10 @@ def main_layout4() -> None:
 
         filename = "04_LAYOUT_4_WEEKLY"
         url = all_urls[0] if all_urls else ""
+        # 週間4列結合の材料は初期時刻がバラバラでnumeric_fresh_issue_label()の
+        # 00Z/12Z表記はミスリードになるため、weekly_forecast_issue_label()で
+        # SKAISETU(週間予報解説資料)の発表基準のラベルにする。
+        init_label = weekly_forecast_issue_label(issue_dt_jst)
 
         notion_items = [(filename, DISCORD_TITLES.get(filename, filename), "LAYOUT_4_WEEKLY", url)]
         page_id = notion_write_db(
@@ -3054,6 +3057,9 @@ def main_layout4() -> None:
             errors=errors,
             extra_links=IMAGE_EXTRA_LINKS.get(filename, []),
             pwa=bool(PWA_CATEGORY_BY_FILENAME.get(filename)),
+            size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
+            issue_time_label=init_label,
+            category=PWA_CATEGORY_BY_FILENAME.get(filename, "JMA"),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""
@@ -3062,10 +3068,6 @@ def main_layout4() -> None:
 
         try:
             if discord_jma_enabled() and url:
-                # 週間4列結合の材料は初期時刻がバラバラでnumeric_fresh_issue_label()の
-                # 00Z/12Z表記はミスリードになるため、weekly_forecast_issue_label()で
-                # SKAISETU(週間予報解説資料)の発表基準のラベルにする。
-                init_label = weekly_forecast_issue_label(issue_dt_jst)
                 title = DISCORD_TITLES.get(filename, filename)
                 extra_links = IMAGE_EXTRA_LINKS.get(filename, [])
                 if extra_links:
@@ -3094,10 +3096,6 @@ def main_layout4() -> None:
                             thumb_path,
                             thumb_mime,
                             push_title=DISCORD_TITLES.get(filename, filename),
-                            push_url=url,
-                            pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
-                            pwa_issue_time=weekly_forecast_issue_label(issue_dt_jst),
-                            push_size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
@@ -3249,6 +3247,9 @@ def main_monthly() -> None:
             errors=errors,
             extra_links=IMAGE_EXTRA_LINKS.get(filename, []),
             pwa=bool(PWA_CATEGORY_BY_FILENAME.get(filename)),
+            size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
+            issue_time_label=init_label,
+            category=PWA_CATEGORY_BY_FILENAME.get(filename, "JMA"),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""
@@ -3285,10 +3286,6 @@ def main_monthly() -> None:
                             thumb_path,
                             thumb_mime,
                             push_title=DISCORD_TITLES.get(filename, filename),
-                            push_url=url,
-                            pwa_category=PWA_CATEGORY_BY_FILENAME.get(filename, ""),
-                            pwa_issue_time=init_label,
-                            push_size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
                         )
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
