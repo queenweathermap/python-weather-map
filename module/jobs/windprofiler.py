@@ -51,6 +51,7 @@ from module.utils.r2_utils import put_bytes, get_bytes, list_keys_with_prefix, d
 from module.utils.notion_subscribers import get_active_emails
 from module.utils.onesignal_push import send_push_to_all
 from module.utils.recent_items import record_recent_item
+from module.utils.notion_utils import archive_to_notion
 
 # プッシュ通知のタップ先。R2の生画像URLに直接飛ばすと、iOSスタンドアロンで
 # ツールバー無しの画面のまま身動きが取れなくなることがあるため、モーダル
@@ -616,6 +617,17 @@ def main_daily_stations() -> int:
     put_bytes(r2_key, image_bytes, content_type="image/png")
     url = make_url(r2_key)
     print(f"R2 UPLOADED: {url}")
+
+    archive_to_notion(
+        title=f"ウィンドプロファイラ 前日まとめ（{station_count}地点）",
+        category="ウィンドプロファイラ",
+        r2_urls=[url],
+        jst_now=target_jst,
+        prefix="windprofiler",
+        pwa=True,
+        icon_emoji="🌬️",
+        links=[("気象庁 ウィンドプロファイラ（地点別）", BASE_URL)],
+    )
 
     cleanup_composited_station_images(target_jst)
 

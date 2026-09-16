@@ -29,7 +29,7 @@ jobs:
         run: sudo apt-get install -y fonts-noto-cjk
 
       - name: Install Python dependencies
-        run: pip install playwright
+        run: pip install playwright pillow
 
       - name: Install Playwright browsers
         run: playwright install --with-deps chromium
@@ -37,4 +37,9 @@ jobs:
       - name: Send weather screenshots
         env:
           DISCORD_WARNING_WEBHOOK_URL: ${{ secrets.DISCORD_WARNING_WEBHOOK_URL }}
+          # JMAアメダス(鷹巣・秋田・横手)もこのチャンネルへ同じ時刻に投稿する
+          # (module/jobs/weather_warning.py::post_amedas_detail、2026-09-16追加)。
+          # R2/Notionへの保存はscripts/wcn_amedas.py側(朝6/12/18時)で別途行って
+          # いるため、ここではDiscord投稿のみに絞りR2アップロードを無効化する。
+          R2_ENABLE: "0"
         run: python module/jobs/weather_warning.py

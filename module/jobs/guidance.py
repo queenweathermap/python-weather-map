@@ -4,6 +4,10 @@
 #
 # WCN(Weathercaster.jp)会員ページを Playwright でスクリーンショットし、
 # MSM時別ガイダンス・分布予報・週間ガイダンス・気象庁予報を Discord に投稿する。
+# 画像はR2にアップロードした上で、Notion資料アーカイブDB(NOTION_DATABASE_ID)にも
+# 「MSM時別ガイダンス」「WCNガイダンス（分布予報・週間・気象庁予報）」の2件に
+# 分けて記録する(R2の保存期限が切れても内容が残るように永久インポートする。
+# 2026-09-16追加)。
 # =============================================================================
 
 from __future__ import annotations
@@ -545,11 +549,6 @@ def _upload_r2(items: List[Tuple[str, bytes]]) -> List[str]:
 
 
 # =============================================================================
-# Notion 書き込み
-# =============================================================================
-
-
-# =============================================================================
 # Discord 投稿
 # =============================================================================
 
@@ -681,6 +680,7 @@ def main():
     msm_images  = [(fn, data) for fn, data in wcn_images if fn.startswith("wcn_msm_")]
     other_images = [(fn, data) for fn, data in wcn_images if not fn.startswith("wcn_msm_")]
 
+    msm_urls: List[str] = []
     if msm_images:
         msm_urls = _upload_r2(msm_images)
         for (fname, data), url in zip(msm_images, msm_urls):
@@ -697,8 +697,41 @@ def main():
                 _post_images_bulk([(fname, data)], content=f"**MSM 時別ガイダンス {day_label}**")
 
     # 分布予報・週間ガイダンス・JMA予報: 直接 Discord 投稿
+    # (Notionアーカイブ用にR2にもアップしておく。従来Discordのみだった)
+    other_urls: List[str] = []
     if other_images:
+        other_urls = _upload_r2(other_images)
         _post_images_bulk(other_images, content="**WCN ガイダンス（分布予報・週間・気象庁予報）**")
+
+    # Notion資料アーカイブDBへ2件に分けて記録する（Discord/PWAとは独立、
+    # R2の保存期限が切れても内容が残るように）。
+    try:
+        from module.utils.notion_utils import archive_to_notion
+
+        jst_now = _jst_now()
+        if msm_urls:
+            archive_to_notion(
+                title="MSM時別ガイダンス（秋田県全地点）",
+                category="WCNガイダンス",
+                r2_urls=msm_urls,
+                jst_now=jst_now,
+                prefix=R2_PREFIX,
+                pwa=False,
+                icon_emoji="🧭",
+                links=[("WCN 各種気象資料", WCN_KISHO_URL)],
+            )
+        if other_urls:
+            archive_to_notion(
+                title="WCN ガイダンス（分布予報・週間・気象庁予報）",
+                category="WCNガイダンス",
+                r2_urls=other_urls,
+                jst_now=jst_now,
+                prefix=R2_PREFIX,
+                pwa=False,
+                icon_emoji="🧭",
+            )
+    except Exception as e:
+        print(f"[WARN] Notionアーカイブ失敗: {e}")
 
     print("=== Done ===")
 

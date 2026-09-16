@@ -5,10 +5,13 @@
 # JMA AMeDAS データ / WCN画面 → Discord(#amedas) 画像配信
 #
 # main()     : JMA公開API(urllib + Pillow, 認証不要)から鷹巣・秋田・横手
-#              3地点の時系列詳細テーブルPNGを作る。
+#              3地点の時系列詳細テーブルPNGを作る。discord_webhook_url引数で
+#              投稿先を差し替えられる(module/jobs/weather_warning.pyから、
+#              jma-warningチャンネル向けに1日3回・R2/Notion無しで再利用)。
 # main_wcn() : WCN(Weathercaster.jp)会員ページを Playwright でスクリーンショット
 #              （積算降水量/気温ランキング等）。
-# 配信: 朝3時 / 午後3時（JST）
+# 配信: scripts/wcn_amedas.py経由で朝6時/12時/18時（JST）にR2保存+Notion記録
+#      （Discordは#amedasには投稿しない。jma-warningへは上記の通り別枠）。
 # =============================================================================
 
 from __future__ import annotations
@@ -334,64 +337,34 @@ def _notion_write(
     jst_now: datetime,
 ) -> None:
     try:
-        from module.utils.notion_utils import (
-            notion_enabled,
-            create_db_row,
-            append_images,
-            append_heading,
-            append_bookmark,
-        )
+        from module.utils.notion_utils import archive_to_notion
     except ImportError:
         print("[WARN] notion_utils not available")
         return
 
-    if not notion_enabled():
-        print("[SKIP] Notion not enabled")
-        return
-
-    import time
-    page_id = create_db_row(
+    archive_to_notion(
         title=title,
         category="Amedas",
-        init_jst_iso=jst_now.isoformat(),
-        memo="",
-        rjtd="",
+        r2_urls=r2_urls,
+        jst_now=jst_now,
         prefix=R2_PREFIX,
-        r2_url=next((u for u in r2_urls if u), ""),
-        autogen=True,
+        pwa=False,
         icon_emoji="🌡️",
+        links=[("WCN各種気象情報", WCN_KISHO_URL)],
     )
-    if not page_id:
-        print("[WARN] Notion page create failed")
-        return
-
-    time.sleep(1.0)
-
-    try:
-        valid_urls = [u for u in r2_urls if u]
-        if valid_urls:
-            append_images(page_id, valid_urls, chunk=30)
-    except Exception as e:
-        print(f"[WARN] Notion image append failed: {e}")
-
-    try:
-        append_heading(page_id, "関連リンク", level=2)
-        append_bookmark(page_id, WCN_KISHO_URL,
-                        caption="WCN各種気象情報")
-    except Exception as e:
-        print(f"[WARN] Notion bookmarks failed: {e}")
-
-    print(f"[OK] Notion page: {page_id}")
 
 
 # =============================================================================
 # Discord 送信
 # =============================================================================
 
-def _post_image(image_bytes: bytes, filename: str, content: str = ""):
-    """Discord Webhook にファイルを添付して送信する。"""
-    if not DISCORD_AMEDAS_WEBHOOK_URL:
-        print(f"[SKIP] DISCORD_AMEDAS_WEBHOOK_URL not set")
+def _post_image(image_bytes: bytes, filename: str, content: str = "", webhook_url: str = ""):
+    """Discord Webhook にファイルを添付して送信する。webhook_url省略時は
+    DISCORD_AMEDAS_WEBHOOK_URL(#amedas)を使う。jma-warningチャンネルなど
+    別の投稿先に送りたい呼び出し元は明示的に渡す。"""
+    webhook_url = webhook_url or DISCORD_AMEDAS_WEBHOOK_URL
+    if not webhook_url:
+        print(f"[SKIP] webhook url not set")
         return
 
     boundary = "----AmedasBotBoundary7fK2"
@@ -414,7 +387,7 @@ def _post_image(image_bytes: bytes, filename: str, content: str = ""):
             + f"--{boundary}--\r\n".encode())
 
     req = urllib.request.Request(
-        DISCORD_AMEDAS_WEBHOOK_URL,
+        webhook_url,
         data=body,
         headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}",
@@ -433,7 +406,11 @@ def _post_image(image_bytes: bytes, filename: str, content: str = ""):
 # main
 # =============================================================================
 
-def main(post_discord: bool = True, post_notion: bool = True) -> List[Tuple[str, bytes]]:
+def main(
+    post_discord: bool = True,
+    post_notion: bool = True,
+    discord_webhook_url: str = "",
+) -> List[Tuple[str, bytes]]:
     print("=== Start Amedas ===")
 
     jst_now, latest_utc = _parse_latest()
@@ -480,11 +457,12 @@ def main(post_discord: bool = True, post_notion: bool = True) -> List[Tuple[str,
             jst_now,
         )
 
-    # Discord 投稿（呼び出し元が制御する場合は skip）
+    # Discord 投稿（呼び出し元が制御する場合は skip。discord_webhook_url指定時は
+    # #amedasの代わりにそちらへ投稿する）
     if post_discord:
         for i, (fname, img_d) in enumerate(detail_imgs):
             content = f"<{JMA_AMEDAS_URL}>" if i == 0 else ""
-            _post_image(img_d, fname, content=content)
+            _post_image(img_d, fname, content=content, webhook_url=discord_webhook_url)
 
     return detail_imgs, r2_urls
 

@@ -2718,6 +2718,7 @@ def notion_write_db(
     notion_items: List[Tuple[str, str, str, str]],
     errors: List[str],
     extra_links: Optional[List[Tuple[str, str]]] = None,
+    pwa: Optional[bool] = None,
 ) -> Optional[str]:
     if not notion_enabled():
         return None
@@ -2735,6 +2736,7 @@ def notion_write_db(
         prefix=run_prefix,
         r2_url=rep_url or "",
         autogen=True,
+        pwa=pwa,
         icon_emoji="🗺️",
     )
 
@@ -2920,6 +2922,7 @@ def main_dashboard_jma() -> None:
             notion_items=notion_items,
             errors=errors,
             extra_links=IMAGE_EXTRA_LINKS.get(filename, []),
+            pwa=bool(PWA_CATEGORY_BY_FILENAME.get(filename)),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""
@@ -3018,7 +3021,9 @@ def main_layout4() -> None:
     元になるSKAISETU（週間予報解説資料）はJST 10時頃更新・1日1回のため、
     正午JST頃の1日1回だけ実行する(scripts/jma_weekly_forecast.py)。
     気象庁公開データのみで構成しているため、有料DM配信の対象にもなる
-    （DM_SAFE_FILENAMES参照）。
+    （DM_SAFE_FILENAMES参照）。Notion資料アーカイブDBにも他レイアウトと
+    同様に書き込む(2026-09-16以前は対象外だったが、Notionにすべて蓄積する
+    方針に合わせて追加)。
     """
     try:
         print("=== Start Weekly 4-column Layout (週間4列結合) ===")
@@ -3037,8 +3042,23 @@ def main_layout4() -> None:
 
         filename = "04_LAYOUT_4_WEEKLY"
         url = all_urls[0] if all_urls else ""
-        # Notion配信は全部入り・アメダス・ADV・ガイダンスの4種類のみのため、
-        # 週間4列結合はNotionに書き込まない(公開Discord + 有料DMのみ)。
+
+        notion_items = [(filename, DISCORD_TITLES.get(filename, filename), "LAYOUT_4_WEEKLY", url)]
+        page_id = notion_write_db(
+            issue_dt_jst=issue_dt_jst,
+            rjtd=rjtd,
+            run_prefix=run_prefix,
+            rep_url=rep_url,
+            all_urls=all_urls,
+            notion_items=notion_items,
+            errors=errors,
+            extra_links=IMAGE_EXTRA_LINKS.get(filename, []),
+            pwa=bool(PWA_CATEGORY_BY_FILENAME.get(filename)),
+        )
+
+        notion_url = notion_page_url(page_id) if page_id else ""
+        if notion_url:
+            print(f"[OK] Notion URL: {notion_url}")
 
         try:
             if discord_jma_enabled() and url:
@@ -3228,6 +3248,7 @@ def main_monthly() -> None:
             notion_items=notion_items,
             errors=errors,
             extra_links=IMAGE_EXTRA_LINKS.get(filename, []),
+            pwa=bool(PWA_CATEGORY_BY_FILENAME.get(filename)),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""

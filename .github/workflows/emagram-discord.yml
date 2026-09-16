@@ -47,6 +47,25 @@ jobs:
       ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
       NOTION_PWA_HISTORY_DATABASE_ID: ${{ secrets.NOTION_PWA_HISTORY_DATABASE_ID }}
 
+      # ------------------------------------------------------------
+      # Notion資料アーカイブ（R2の保存期限が切れても内容が残るよう、結合画像を
+      # Notion管理ストレージへ永久インポートする。2026-09-16追加）
+      # ------------------------------------------------------------
+      NOTION_ENABLE: "1"
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      NOTION_IMPORT_IMAGES: "1"
+      NOTION_IMPORT_TIMEOUT_SECONDS: "240"
+      NOTION_IMPORT_POLL_SECONDS: "2.0"
+      NOTION_PROP_TITLE: "名前"
+      NOTION_PROP_CATEGORY: "区分"
+      NOTION_PROP_INIT_JST: "発行基準時刻"
+      NOTION_PROP_MEMO: "メモ"
+      NOTION_PROP_RJTD: "RJTD"
+      NOTION_PROP_PREFIX: "prefix"
+      NOTION_PROP_R2URL: "R2 URL"
+      NOTION_PROP_AUTOGEN: "自動生成"
+      NOTION_PROP_PWA: "PWA配信"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4

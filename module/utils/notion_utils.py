@@ -102,6 +102,10 @@ def _prop_prefix() -> str:
     return _env("NOTION_PROP_PREFIX", "prefix")
 
 
+def _prop_pwa() -> str:
+    return _env("NOTION_PROP_PWA", "PWA配信")
+
+
 # -----------------------------------------------------------------------------
 # Internal helpers
 # -----------------------------------------------------------------------------
@@ -237,6 +241,7 @@ def create_db_row(
     prefix: str = "",
     r2_url: str = "",
     autogen: bool = True,
+    pwa: Optional[bool] = None,
     icon_emoji: str = "🗺️",
 ) -> Optional[str]:
     if not notion_enabled():
@@ -262,6 +267,8 @@ def create_db_row(
         props[_prop_r2url()] = {"url": r2_url}
     if autogen is not None:
         props[_prop_autogen()] = {"checkbox": bool(autogen)}
+    if pwa is not None:
+        props[_prop_pwa()] = {"checkbox": bool(pwa)}
 
     payload = {
         "parent": {"type": "database_id", "database_id": db_id},
@@ -270,6 +277,17 @@ def create_db_row(
     }
 
     r = requests.post(f"{API_BASE}/pages", headers=_headers(), json=payload, timeout=60)
+    if not r.ok and pwa is not None:
+        # 「PWA配信」プロパティがDB側にまだ追加されていない環境でも、
+        # アーカイブ自体は失敗させたくないので、そのプロパティだけ外して
+        # 再試行する（追加後は自動的にpwa値も入るようになる）。
+        print(
+            f"[WARN] Notion page create failed with pwa prop "
+            f"status={r.status_code} body={r.text[:300]} — retrying without it"
+        )
+        props.pop(_prop_pwa(), None)
+        payload["properties"] = props
+        r = requests.post(f"{API_BASE}/pages", headers=_headers(), json=payload, timeout=60)
     r.raise_for_status()
     return r.json()["id"]
 
@@ -439,6 +457,80 @@ def append_imported_images_from_urls(
         captions.append(filename)
 
     append_uploaded_images(page_or_block_id, upload_ids, captions=captions, chunk=chunk)
+
+
+def archive_to_notion(
+    *,
+    title: str,
+    category: str,
+    r2_urls: List[str],
+    jst_now,
+    memo: str = "",
+    prefix: str = "",
+    pwa: Optional[bool] = None,
+    icon_emoji: str = "🗺️",
+    links: Optional[List[Tuple[str, str]]] = None,
+    chunk: int = 10,
+    timeout_seconds: int = 180,
+    poll_seconds: float = 2.0,
+) -> Optional[str]:
+    """資料アーカイブDB(NOTION_DATABASE_ID)に1件記録し、画像をNotion管理ストレージへ
+    インポートする（R2側の保存期限が切れてもNotion上には残る）。amedas.py以外の
+    ジョブ(windprofiler/emagram/guidance等)が個別に create_db_row +
+    append_imported_images_from_urls を組み立てずに済むようにした共通版。
+    失敗しても呼び出し元の配信自体は止めたくないので例外は握りつぶす。"""
+    if not notion_enabled():
+        return None
+
+    valid_urls = [u for u in (r2_urls or []) if u]
+
+    try:
+        page_id = create_db_row(
+            title=title,
+            category=category,
+            init_jst_iso=jst_now.isoformat(),
+            memo=memo,
+            prefix=prefix,
+            r2_url=valid_urls[0] if valid_urls else "",
+            autogen=True,
+            pwa=pwa,
+            icon_emoji=icon_emoji,
+        )
+    except Exception as e:
+        print(f"[WARN] Notion archive page create failed: {e}")
+        return None
+    if not page_id:
+        return None
+
+    time.sleep(1.0)
+
+    if valid_urls:
+        try:
+            items = [(f"{i + 1:02d}.png", u, "image/png") for i, u in enumerate(valid_urls)]
+            append_imported_images_from_urls(
+                page_id,
+                items,
+                chunk=chunk,
+                timeout_seconds=timeout_seconds,
+                poll_seconds=poll_seconds,
+            )
+        except Exception as e:
+            print(f"[WARN] Notion archive image import failed, falling back to external link: {e}")
+            try:
+                append_images(page_id, valid_urls, chunk=30)
+            except Exception as e2:
+                print(f"[WARN] Notion archive append_images fallback failed: {e2}")
+
+    if links:
+        try:
+            append_heading(page_id, "関連リンク", level=2)
+            for cap, url in links:
+                append_bookmark(page_id, url, caption=cap)
+        except Exception as e:
+            print(f"[WARN] Notion archive bookmarks failed: {e}")
+
+    print(f"[OK] Notion archive page: {page_id}")
+    return page_id
 
 
 # -----------------------------------------------------------------------------

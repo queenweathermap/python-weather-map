@@ -49,6 +49,7 @@ from module.utils.notion_subscribers import get_active_discord_ids, get_active_e
 from module.utils.discord_dm import send_dm_to_all
 from module.utils.onesignal_push import send_push_to_all
 from module.utils.recent_items import record_recent_item
+from module.utils.notion_utils import archive_to_notion
 
 STATIONS = [
     ("47401", "稚内"),
@@ -582,6 +583,17 @@ def main() -> int:
     print(f"R2 UPLOADED: {highres_url}")
 
     thumb = make_thumbnail(combined, dt12)
+
+    archive_to_notion(
+        title=f"エマグラム（{len(STATIONS)}地点）",
+        category="エマグラム",
+        r2_urls=[highres_url],
+        jst_now=dt12,
+        prefix="emagram",
+        pwa=True,
+        icon_emoji="📈",
+        links=[("University of Wyoming 高層観測アーカイブ", WYOMING_PORTAL_URL)],
+    )
 
     notify_dm_subscribers(build_content(dt12, highres_url), thumb, highres_url, dt12, size_bytes=len(combined))
     return 0
