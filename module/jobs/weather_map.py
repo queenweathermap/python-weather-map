@@ -2727,10 +2727,15 @@ def notion_write_db(
     title = f"JMA / {day} {issue_dt_jst.strftime('%H:%M')} JST"
     memo = "\n".join(["ERROR:"] + [f"- {e}" for e in errors]) if errors else ""
 
+    # 配信日時は実際の投稿時刻(now_jst())を使う。issue_dt_jst は数値予報の
+    # 初期値(09:00/21:00 JST)に丸めた値のため、同じ初期値を「本番」「TKAISETU
+    # 更新だけの追いかけ」で1日に複数回配信するmain_dashboard_jma()では、
+    # issue_dt_jstのままだと配信日時が重複してPWA一覧のソート・重複判定が
+    # 壊れる。初期値自体はissue_time_label(発行時刻表示)側に残る。
     page_id = create_db_row(
         title=title,
         category=category,
-        init_jst_iso=issue_dt_jst.isoformat(),
+        init_jst_iso=now_jst().isoformat(),
         memo=memo,
         r2_url=rep_url or "",
         autogen=True,
