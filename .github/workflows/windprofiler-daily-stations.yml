@@ -50,7 +50,6 @@ jobs:
       NOTION_PROP_PREFIX: "prefix"
       NOTION_PROP_R2URL: "R2 URL"
       NOTION_PROP_AUTOGEN: "自動生成"
-      NOTION_PROP_PWA: "PWA配信"
 
       # ------------------------------------------------------------
       # R2（main()と同じバケット・prefixを共有し、地点別rawの保存/読み出しに使う）

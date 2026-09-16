@@ -102,10 +102,6 @@ def _prop_prefix() -> str:
     return _env("NOTION_PROP_PREFIX", "prefix")
 
 
-def _prop_pwa() -> str:
-    return _env("NOTION_PROP_PWA", "PWA配信")
-
-
 # -----------------------------------------------------------------------------
 # Internal helpers
 # -----------------------------------------------------------------------------
@@ -249,9 +245,17 @@ def create_db_row(
 
     db_id = _must_env("NOTION_DATABASE_ID")
 
+    # 区分はマルチセレクト。通常のカテゴリ名に加えて、PWA配信も行った項目には
+    # "PWA"タグを追加する(値は自動で選択肢に追加されるため、事前にNotion側で
+    # 登録しておく必要はない。区分プロパティ自体はマルチセレクト型である必要
+    # がある)。
+    tags = [category] if category else []
+    if pwa:
+        tags.append("PWA")
+
     props: Dict[str, Any] = {
         _prop_title(): {"title": [{"type": "text", "text": {"content": title}}]},
-        _prop_category(): {"select": {"name": category}},
+        _prop_category(): {"multi_select": [{"name": t} for t in tags]},
         _prop_init_jst(): {"date": {"start": init_jst_iso}},
     }
 
@@ -267,8 +271,6 @@ def create_db_row(
         props[_prop_r2url()] = {"url": r2_url}
     if autogen is not None:
         props[_prop_autogen()] = {"checkbox": bool(autogen)}
-    if pwa is not None:
-        props[_prop_pwa()] = {"checkbox": bool(pwa)}
 
     payload = {
         "parent": {"type": "database_id", "database_id": db_id},
@@ -277,17 +279,6 @@ def create_db_row(
     }
 
     r = requests.post(f"{API_BASE}/pages", headers=_headers(), json=payload, timeout=60)
-    if not r.ok and pwa is not None:
-        # 「PWA配信」プロパティがDB側にまだ追加されていない環境でも、
-        # アーカイブ自体は失敗させたくないので、そのプロパティだけ外して
-        # 再試行する（追加後は自動的にpwa値も入るようになる）。
-        print(
-            f"[WARN] Notion page create failed with pwa prop "
-            f"status={r.status_code} body={r.text[:300]} — retrying without it"
-        )
-        props.pop(_prop_pwa(), None)
-        payload["properties"] = props
-        r = requests.post(f"{API_BASE}/pages", headers=_headers(), json=payload, timeout=60)
     r.raise_for_status()
     return r.json()["id"]
 
