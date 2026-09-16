@@ -79,7 +79,7 @@ def _prop_category() -> str:
 
 
 def _prop_init_jst() -> str:
-    return _env("NOTION_PROP_INIT_JST", "初期時刻（JST）")
+    return _env("NOTION_PROP_INIT_JST", "配信日時")
 
 
 def _prop_memo() -> str:
