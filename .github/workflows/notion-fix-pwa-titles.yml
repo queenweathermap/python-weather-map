@@ -1,0 +1,36 @@
+name: PWA過去21日分のタイトル/ヘッダを揃える(一回限り)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    env:
+      NOTION_ENABLE: "1"
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pillow pdf2image boto3
+
+      - name: Fix PWA titles/headers
+        run: |
+          python scripts/notion_fix_pwa_titles.py
