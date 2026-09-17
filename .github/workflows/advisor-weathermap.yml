@@ -37,6 +37,16 @@ jobs:
       DISCORD_SLEEP_SEC: "1.0"
 
       # ------------------------------------------------------------
+      # Notion
+      # ------------------------------------------------------------
+      NOTION_ENABLE: "1"
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      NOTION_IMPORT_IMAGES: "1"
+      NOTION_IMPORT_TIMEOUT_SECONDS: "240"
+      NOTION_IMPORT_POLL_SECONDS: "2.0"
+
+      # ------------------------------------------------------------
       # JMA 気象防災アドバイザー（Basic認証）
       # ------------------------------------------------------------
       JMA_ADV_USER: ${{ secrets.JMA_ADV_USER }}

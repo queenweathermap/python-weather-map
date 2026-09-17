@@ -143,6 +143,13 @@ def _jst_now() -> datetime:
     return datetime.now(timezone.utc).astimezone(JST)
 
 
+def _nearest_scheduled_slot_jst(now: datetime, hours: List[int]) -> datetime:
+    """実行が数分遅れても、yml上の狙い撃ちスケジュール時刻(例: 04:00/16:00)
+    ぴったりの表示にする。ヘッダ表示用。"""
+    best_h = min(hours, key=lambda h: min(abs(now.hour - h), 24 - abs(now.hour - h)))
+    return now.replace(hour=best_h, minute=0, second=0, microsecond=0)
+
+
 # =============================================================================
 # フォント
 # =============================================================================
@@ -716,9 +723,10 @@ def main():
         )
 
         jst_now = _jst_now()
+        slot_jst = _nearest_scheduled_slot_jst(jst_now, [4, 16])
         page_id = create_db_row(
-            title="WCNガイダンス",
-            category="WCNガイダンス",
+            title=f"Guidance　WCNガイダンス〔{slot_jst.strftime('%Y%m%d %H:%M')}〕",
+            category="Guidance",
             init_jst_iso=jst_now.isoformat(),
             r2_url=(other_urls or msm_urls or [""])[0],
             autogen=True,
@@ -727,6 +735,8 @@ def main():
         )
 
         if page_id:
+            append_bookmark(page_id, WCN_KISHO_URL, caption="WCN 各種気象資料")
+
             sections = [
                 ("分布予報・週間・気象庁予報", other_urls),
                 ("MSM時別ガイダンス（秋田県全地点）", msm_urls),
@@ -741,9 +751,6 @@ def main():
                 except Exception as e:
                     print(f"[WARN] Notion画像インポート失敗、外部リンクにフォールバック: {e}")
                     append_images(page_id, urls, chunk=30)
-
-            append_heading(page_id, "関連リンク", level=2)
-            append_bookmark(page_id, WCN_KISHO_URL, caption="WCN 各種気象資料")
     except Exception as e:
         print(f"[WARN] Notionアーカイブ失敗: {e}")
 

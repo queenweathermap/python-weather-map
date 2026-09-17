@@ -344,7 +344,7 @@ def _notion_write(
 
     archive_to_notion(
         title=title,
-        category="Amedas",
+        category="AMeDAS",
         r2_urls=r2_urls,
         jst_now=jst_now,
         pwa=False,

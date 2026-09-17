@@ -2723,18 +2723,19 @@ def notion_write_db(
     if not notion_enabled():
         return None
 
-    # 名前は「{結合図の種類}　{発行時刻表示}」に揃える(2026-09-17)。
+    # タイトルは「{区分}　{結合図の種類}」の固定文言にする(日時は入れない、
+    # 2026-09-17)。日時はヘッダ(旧・発行時刻表示)側に持つ。
     # notion_items[0][1]はDiscordタイトルと同じ結合図の種類ラベル
     # (例: "高層天気図・数値予報天気図 結合図")。
-    label = notion_items[0][1] if notion_items else "JMA"
-    title = f"{label}　{issue_time_label}" if issue_time_label else label
+    label = notion_items[0][1] if notion_items else category
+    title = f"{category}　{label}" if category else label
     memo = "\n".join(["ERROR:"] + [f"- {e}" for e in errors]) if errors else ""
 
     # 配信日時は実際の投稿時刻(now_jst())を使う。issue_dt_jst は数値予報の
     # 初期値(09:00/21:00 JST)に丸めた値のため、同じ初期値を「本番」「TKAISETU
     # 更新だけの追いかけ」で1日に複数回配信するmain_dashboard_jma()では、
     # issue_dt_jstのままだと配信日時が重複してPWA一覧のソート・重複判定が
-    # 壊れる。初期値自体は名前(title)側に残る。
+    # 壊れる。初期値自体はヘッダ(header)側に残る。
     page_id = create_db_row(
         title=title,
         category=category,
@@ -2744,6 +2745,7 @@ def notion_write_db(
         autogen=True,
         pwa=pwa,
         size_bytes=size_bytes,
+        header=issue_time_label,
         icon_emoji="🗺️",
     )
 
@@ -2752,7 +2754,15 @@ def notion_write_db(
 
     time.sleep(1.0)
 
-    # 画像を先に貼り、関連リンクはその後に表示する。
+    # 関連リンクを先に、画像はその後に表示する(Discordと同じ並び順に揃える、
+    # 2026-09-17)。
+    if extra_links:
+        try:
+            for cap, url in extra_links:
+                append_bookmark(page_id, url, caption=cap)
+        except Exception as e:
+            print(f"[WARN] links failed: {e}")
+
     try:
         ordered_urls = [url for _, _label, _nfname, url in notion_items if url]
         if ordered_urls:
@@ -2779,14 +2789,6 @@ def notion_write_db(
                 append_images(page_id, all_urls, chunk=30)
         except Exception as e2:
             print(f"[WARN] append_images fallback failed: {e2}")
-
-    if extra_links:
-        try:
-            append_heading(page_id, "関連リンク", level=2)
-            for cap, url in extra_links:
-                append_bookmark(page_id, url, caption=cap)
-        except Exception as e:
-            print(f"[WARN] links failed: {e}")
 
     return page_id
 

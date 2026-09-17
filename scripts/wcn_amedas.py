@@ -23,6 +23,13 @@ from module.jobs.amedas import (
 )
 
 
+def _nearest_scheduled_slot_jst(now: datetime, hours):
+    """実行が数分遅れても、yml上の狙い撃ちスケジュール時刻(6/12/18時)
+    ぴったりの表示にする。"""
+    best_h = min(hours, key=lambda h: min(abs(now.hour - h), 24 - abs(now.hour - h)))
+    return now.replace(hour=best_h, minute=0, second=0, microsecond=0)
+
+
 if __name__ == "__main__":
     jst_now = datetime.now(JST)
 
@@ -34,9 +41,9 @@ if __name__ == "__main__":
 
     # 全 R2 URL をまとめて Notion に1件書き込み
     all_r2_urls = wcn_r2_urls + detail_r2_urls
-    ts_str = jst_now.strftime("%m/%d %H:%M")
+    slot_jst = _nearest_scheduled_slot_jst(jst_now, [6, 12, 18])
     _notion_write(
-        title=f"AMeDAS 秋田 / {ts_str}",
+        title=f"AMeDAS　AMeDAS秋田〔{slot_jst.strftime('%Y%m%d %H:%M')}〕",
         r2_urls=all_r2_urls,
         jst_now=jst_now,
     )

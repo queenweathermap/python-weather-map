@@ -782,8 +782,8 @@ def main() -> None:
     run_prefix = f"{r2_prefix}/{day}/RJTD_{rjtd_for_title}"
 
     title = (
-        "ADV TGV GIF / "
-        f"{init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST"
+        "ADV　ADV TGV GIF〔"
+        f"{init_dt_for_title.astimezone(jst).strftime('%Y%m%d %H:%M')} JST〕"
     )
 
     page_id = create_db_row(
@@ -797,6 +797,16 @@ def main() -> None:
 
     print(f"[OK] Notion DB row created: {page_id}")
     print(f"[OK] Notion URL: {notion_page_url(page_id)}")
+
+    # 関連リンクは画像より前(ページ上部)に表示する(Discordと同じ並びに揃える、
+    # 2026-09-17)。
+    if GUIDE_ENABLE:
+        try:
+            append_heading(page_id, "関連リンク", level=2)
+            for caption, url in GUIDE_LINKS:
+                append_bookmark(page_id, url, caption=caption)
+        except Exception as e:
+            print(f"[WARN] Notion bookmarks failed: {e}")
 
     first_cover_url: Optional[str] = None
 
@@ -967,15 +977,6 @@ def main() -> None:
                         "[WARN] Discord GIF send failed: "
                         f"{model_name} {item.label}: {e}"
                     )
-
-    # 画像をすべて貼り終えた後に関連リンクを表示する。
-    if GUIDE_ENABLE:
-        try:
-            append_heading(page_id, "関連リンク", level=2)
-            for caption, url in GUIDE_LINKS:
-                append_bookmark(page_id, url, caption=caption)
-        except Exception as e:
-            print(f"[WARN] Notion bookmarks failed: {e}")
 
     if errors:
         try:

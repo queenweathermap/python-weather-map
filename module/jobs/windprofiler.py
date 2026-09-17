@@ -612,12 +612,13 @@ def main_daily_stations() -> int:
     print(f"R2 UPLOADED: {url}")
 
     archive_to_notion(
-        title=f"高層観測データ　ウィンドプロファイラ （{station_count}地点） {target_jst.strftime('%Y/%m/%d')}まとめ",
-        category="ウィンドプロファイラ",
+        title=f"高層観測データ　ウィンドプロファイラ　前日まとめ（{station_count}地点）",
+        category="高層観測",
         r2_urls=[url],
         jst_now=target_jst,
         pwa=True,
         size_bytes=len(image_bytes),
+        header=f"高層観測データ {target_jst.strftime('%Y/%m/%d')}まとめ",
         icon_emoji="🌬️",
         links=[("気象庁 ウィンドプロファイラ（地点別）", BASE_URL)],
     )

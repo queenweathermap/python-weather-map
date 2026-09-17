@@ -330,6 +330,13 @@ def _post_images_bulk(images: List[Tuple[str, bytes]], content: str = "") -> Non
 # main
 # =============================================================================
 
+def _nearest_scheduled_slot_jst(now: datetime, hours: List[int]) -> datetime:
+    """実行が数分遅れても、yml上の狙い撃ちスケジュール時刻(04:00/16:00)
+    ぴったりの表示にする。"""
+    best_h = min(hours, key=lambda h: min(abs(now.hour - h), 24 - abs(now.hour - h)))
+    return now.replace(hour=best_h, minute=0, second=0, microsecond=0)
+
+
 def main() -> None:
     print("=== Start Advisor Guidance ===")
 
@@ -339,12 +346,28 @@ def main() -> None:
         print("=== Done ===")
         return
 
-    _upload_r2(images)
+    urls = _upload_r2(images)
 
     _post_images_bulk(
         images,
         content="**気象防災アドバイザー ガイダンス帳票**\n🔗 [気象防災アドバイザー向け資料集](<{}>)".format(JMA_ADV_PORTAL),
     )
+
+    try:
+        from module.utils.notion_utils import archive_to_notion
+
+        slot_jst = _nearest_scheduled_slot_jst(_jst_now(), [4, 16])
+        archive_to_notion(
+            title=f"ADV　気象防災アドバイザー ガイダンス帳票〔{slot_jst.strftime('%Y%m%d %H:%M')} JST〕",
+            category="ADV",
+            r2_urls=urls,
+            jst_now=_jst_now(),
+            pwa=False,
+            icon_emoji="📋",
+            links=[("気象防災アドバイザー向け資料集", JMA_ADV_PORTAL)],
+        )
+    except Exception as e:
+        print(f"[WARN] Notionアーカイブ失敗: {e}")
 
     print("=== Done ===")
 

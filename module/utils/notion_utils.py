@@ -69,7 +69,7 @@ def _headers() -> dict:
 # DB property names (overrideable)
 # -----------------------------------------------------------------------------
 def _prop_title() -> str:
-    return _env("NOTION_PROP_TITLE", "名前")
+    return _env("NOTION_PROP_TITLE", "タイトル")
 
 
 def _prop_category() -> str:
@@ -94,6 +94,10 @@ def _prop_autogen() -> str:
 
 def _prop_size() -> str:
     return _env("NOTION_PROP_SIZE", "サイズ")
+
+
+def _prop_header() -> str:
+    return _env("NOTION_PROP_HEADER", "ヘッダ")
 
 
 # -----------------------------------------------------------------------------
@@ -231,6 +235,7 @@ def create_db_row(
     autogen: bool = True,
     pwa: Optional[bool] = None,
     size_bytes: int = 0,
+    header: str = "",
     icon_emoji: str = "🗺️",
 ) -> Optional[str]:
     if not notion_enabled():
@@ -261,6 +266,8 @@ def create_db_row(
         props[_prop_autogen()] = {"checkbox": bool(autogen)}
     if size_bytes:
         props[_prop_size()] = {"number": size_bytes}
+    if header:
+        props[_prop_header()] = {"rich_text": [{"type": "text", "text": {"content": header}}]}
 
     payload = {
         "parent": {"type": "database_id", "database_id": db_id},
@@ -449,6 +456,7 @@ def archive_to_notion(
     memo: str = "",
     pwa: Optional[bool] = None,
     size_bytes: int = 0,
+    header: str = "",
     icon_emoji: str = "🗺️",
     links: Optional[List[Tuple[str, str]]] = None,
     chunk: int = 10,
@@ -461,6 +469,7 @@ def archive_to_notion(
     append_imported_images_from_urls を組み立てずに済むようにした共通版。
     size_bytesは、廃止した「PWA配信履歴」専用DBが持っていた情報(PWA会員ページの
     ギャラリー表示に必要)をこちらに統合するためのもの。
+    リンクはページ上部(画像より前)に置く(2026-09-17、Discordと同じ位置に揃える)。
     失敗しても呼び出し元の配信自体は止めたくないので例外は握りつぶす。"""
     if not notion_enabled():
         return None
@@ -477,6 +486,7 @@ def archive_to_notion(
             autogen=True,
             pwa=pwa,
             size_bytes=size_bytes,
+            header=header,
             icon_emoji=icon_emoji,
         )
     except Exception as e:
@@ -486,6 +496,13 @@ def archive_to_notion(
         return None
 
     time.sleep(1.0)
+
+    if links:
+        try:
+            for cap, url in links:
+                append_bookmark(page_id, url, caption=cap)
+        except Exception as e:
+            print(f"[WARN] Notion archive bookmarks failed: {e}")
 
     if valid_urls:
         try:
@@ -503,14 +520,6 @@ def archive_to_notion(
                 append_images(page_id, valid_urls, chunk=30)
             except Exception as e2:
                 print(f"[WARN] Notion archive append_images fallback failed: {e2}")
-
-    if links:
-        try:
-            append_heading(page_id, "関連リンク", level=2)
-            for cap, url in links:
-                append_bookmark(page_id, url, caption=cap)
-        except Exception as e:
-            print(f"[WARN] Notion archive bookmarks failed: {e}")
 
     print(f"[OK] Notion archive page: {page_id}")
     return page_id
