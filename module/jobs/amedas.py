@@ -41,8 +41,6 @@ JMA_AMEDAS_URL = (
     "#9/39.615/140.218333333333/&elem=temp&contents=amedas&interval=60"
 )
 
-WCN_KISHO_URL = "https://www.weathercaster.jp/member/member_only/kisho_shiryo/"
-
 JST = timezone(timedelta(hours=9))
 
 WIND_DIR_JP = ["北北東","北東","東北東","東","東南東","南東","南南東","南",
@@ -349,7 +347,8 @@ def _notion_write(
         jst_now=jst_now,
         pwa=False,
         icon_emoji="🌡️",
-        links=[("WCN各種気象情報", WCN_KISHO_URL)],
+        # Discordの投稿と同じリンク文言に揃える(2026-09-17)。
+        links=[("アメダス（秋田）", JMA_AMEDAS_URL)],
     )
 
 
