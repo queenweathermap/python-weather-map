@@ -2744,6 +2744,13 @@ def notion_write_db(
     # 更新だけの追いかけ」で1日に複数回配信するmain_dashboard_jma()では、
     # issue_dt_jstのままだと配信日時が重複してPWA一覧のソート・重複判定が
     # 壊れる。初期値自体はヘッダ(header)側に残る。
+    # 区分ごとにアイコンを分ける(全部同じ🗺️だと見分けがつかないため、2026-09-17)。
+    icon_emoji = {
+        "全部入り天気図": "🗾",
+        "中期予報資料": "📅",
+        "長期予報資料": "🌙",
+    }.get(category, "🗺️")
+
     page_id = create_db_row(
         title=title,
         category=category,
@@ -2754,7 +2761,8 @@ def notion_write_db(
         pwa=pwa,
         size_bytes=size_bytes,
         header=issue_time_label,
-        icon_emoji="🗺️",
+        icon_emoji=icon_emoji,
+        cover_url=rep_url or "",
     )
 
     if not page_id:

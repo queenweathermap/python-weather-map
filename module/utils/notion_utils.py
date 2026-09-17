@@ -237,6 +237,7 @@ def create_db_row(
     size_bytes: int = 0,
     header: str = "",
     icon_emoji: str = "🗺️",
+    cover_url: str = "",
 ) -> Optional[str]:
     if not notion_enabled():
         return None
@@ -269,11 +270,13 @@ def create_db_row(
     if header:
         props[_prop_header()] = {"rich_text": [{"type": "text", "text": {"content": header}}]}
 
-    payload = {
+    payload: Dict[str, Any] = {
         "parent": {"type": "database_id", "database_id": db_id},
         "icon": {"type": "emoji", "emoji": icon_emoji},
         "properties": props,
     }
+    if cover_url:
+        payload["cover"] = {"type": "external", "external": {"url": cover_url}}
 
     r = requests.post(f"{API_BASE}/pages", headers=_headers(), json=payload, timeout=60)
     r.raise_for_status()
@@ -458,6 +461,7 @@ def archive_to_notion(
     size_bytes: int = 0,
     header: str = "",
     icon_emoji: str = "🗺️",
+    cover_url: str = "",
     links: Optional[List[Tuple[str, str]]] = None,
     chunk: int = 10,
     timeout_seconds: int = 180,
@@ -470,6 +474,8 @@ def archive_to_notion(
     size_bytesは、廃止した「PWA配信履歴」専用DBが持っていた情報(PWA会員ページの
     ギャラリー表示に必要)をこちらに統合するためのもの。
     リンクはページ上部(画像より前)に置く(2026-09-17、Discordと同じ位置に揃える)。
+    cover_urlを省略した場合、Notionのギャラリービュー表示用にr2_urlsの先頭画像を
+    そのままカバーにする(2026-09-17)。
     失敗しても呼び出し元の配信自体は止めたくないので例外は握りつぶす。"""
     if not notion_enabled():
         return None
@@ -488,6 +494,7 @@ def archive_to_notion(
             size_bytes=size_bytes,
             header=header,
             icon_emoji=icon_emoji,
+            cover_url=cover_url or (valid_urls[0] if valid_urls else ""),
         )
     except Exception as e:
         print(f"[WARN] Notion archive page create failed: {e}")

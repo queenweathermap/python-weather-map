@@ -724,14 +724,16 @@ def main():
 
         jst_now = _jst_now()
         slot_jst = _nearest_scheduled_slot_jst(jst_now, [4, 16])
+        cover_url = (other_urls or msm_urls or [""])[0]
         page_id = create_db_row(
             title=f"Guidance　WCNガイダンス〔{slot_jst.strftime('%Y%m%d %H:%M')}〕",
             category="Guidance",
             init_jst_iso=jst_now.isoformat(),
-            r2_url=(other_urls or msm_urls or [""])[0],
+            r2_url=cover_url,
             autogen=True,
             pwa=False,
             icon_emoji="🧭",
+            cover_url=cover_url,
         )
 
         if page_id:
