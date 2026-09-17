@@ -2732,12 +2732,11 @@ def notion_write_db(
     if not notion_enabled():
         return None
 
-    # タイトルは「{区分}　{結合図の種類}」の固定文言にする(日時は入れない、
-    # 2026-09-17)。日時はヘッダ(旧・発行時刻表示)側に持つ。
+    # タイトルは結合図の種類の固定文言のみにする(区分はバッジで別途表示
+    # されるため冗長、日時もヘッダ側に持つ、2026-09-17)。
     # notion_items[0][1]はDiscordタイトルと同じ結合図の種類ラベル
     # (例: "高層天気図・数値予報天気図 結合図")。
-    label = notion_items[0][1] if notion_items else category
-    title = f"{category}　{label}" if category else label
+    title = notion_items[0][1] if notion_items else category
     memo = "\n".join(["ERROR:"] + [f"- {e}" for e in errors]) if errors else ""
 
     # 配信日時は実際の投稿時刻(now_jst())を使う。issue_dt_jst は数値予報の
