@@ -612,8 +612,8 @@ def main_daily_stations() -> int:
     print(f"R2 UPLOADED: {url}")
 
     archive_to_notion(
-        title=f"高層観測データ　ウィンドプロファイラ　前日まとめ（{station_count}地点）",
-        category="高層観測",
+        title=f"ウィンドプロファイラ　前日まとめ（{station_count}地点）",
+        category="高層観測データ",
         r2_urls=[url],
         jst_now=target_jst,
         pwa=True,

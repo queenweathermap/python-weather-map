@@ -579,8 +579,8 @@ def main() -> int:
     thumb = make_thumbnail(combined, dt12)
 
     archive_to_notion(
-        title=f"高層観測データ　エマグラム　前日まとめ（{len(STATIONS)}地点）",
-        category="高層観測",
+        title=f"エマグラム　前日まとめ（{len(STATIONS)}地点）",
+        category="高層観測データ",
         r2_urls=[highres_url],
         jst_now=dt12,
         pwa=True,
