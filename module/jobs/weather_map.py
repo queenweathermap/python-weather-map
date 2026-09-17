@@ -394,6 +394,15 @@ def weekly_forecast_issue_label(issue_dt_jst: datetime) -> str:
     return f"{issue_dt_jst.strftime('%Y/%m/%d')}　週間天気予報解説資料 10:00更新版"
 
 
+def monthly_forecast_issue_label(issue_dt_jst: datetime) -> str:
+    """1か月予報資料(main_monthly)専用のラベル。FCVX11〜15は毎週水曜
+    00UTC(09:00JST)に更新される(2026-09-17に実資料で確認。報道機関が
+    翌木曜に発表するのは慣習であって、資料自体の更新日ではない)。
+    週間4列結合と同じ「日付＋更新版」の形式で示す。
+    例: "2026/09/16　00UTC (09:00JST) 更新版" """
+    return f"{issue_dt_jst.strftime('%Y/%m/%d')}　00UTC ({issue_dt_jst.strftime('%H:%M')}JST) 更新版"
+
+
 def issue_time_overlay_text(issue_dt_jst: datetime, now: Optional[datetime] = None) -> str:
     """
     ダッシュボード画像の左上に焼き込む、イニシャル時刻ラベルの文字列
@@ -3209,10 +3218,12 @@ def build_monthly_only() -> Tuple[List[Attachment], List[str]]:
 def main_monthly() -> None:
     """
     1か月予報資料専用のエントリポイント。
-    気象庁の1か月予報資料(FCVX11〜15)は毎週木曜に更新されるため、週1回だけ実行する
-    (scripts/jma_monthly_forecast.py)。週間4列結合・全部入りと同じDiscord公開チャンネルに
-    投稿し、Notionカタログ(全部入りと同じDB)にも書き込み、有料PWA配信(OneSignal push +
-    PWAギャラリー)も行う(DM_SAFE_FILENAMES参照)。
+    気象庁の1か月予報資料(FCVX11〜15)は毎週水曜09:00JST(00UTC)に更新されるため、
+    週1回、水曜の空いている時間帯に実行する(scripts/jma_monthly_forecast.py。
+    2026-09-17に実資料で確認: 報道機関が発表する翌木曜ではなく水曜更新)。
+    週間4列結合・全部入りと同じDiscord公開チャンネルに投稿し、Notionカタログ
+    (全部入りと同じDB)にも書き込み、有料PWA配信(OneSignal push + PWAギャラリー)
+    も行う(DM_SAFE_FILENAMES参照)。
     """
     try:
         print("=== Start Monthly Forecast (1か月予報資料) ===")
@@ -3228,14 +3239,14 @@ def main_monthly() -> None:
 
         filename = "09_MONTHLY_FORECAST"
         url = all_urls[0] if all_urls else ""
-        # 気象庁の1か月アンサンブル予報(FCVX11〜15)は毎週水曜00Z(09:00JST)に
-        # 初期化され、木曜に公開される(本ジョブも木曜実行想定)。5枚とも同じ
-        # 初期値時刻で揃っているため、実行日の前日00Zをその初期値として
-        # numeric_fresh_issue_label()と同じ形式で表示する。
-        monthly_init_dt_jst = (issue_dt_jst - timedelta(days=1)).replace(
+        # 気象庁の1か月アンサンブル予報(FCVX11〜15)は毎週水曜00UTC(09:00JST)に
+        # 更新される(本ジョブも水曜実行想定)。実行日=資料更新日のため、前日への
+        # 補正はしない(2026-09-17修正: 以前は木曜実行想定で前日補正していたが、
+        # 実資料は水曜更新であることを確認)。
+        monthly_init_dt_jst = issue_dt_jst.replace(
             hour=9, minute=0, second=0, microsecond=0
         )
-        init_label = numeric_fresh_issue_label(monthly_init_dt_jst)
+        init_label = monthly_forecast_issue_label(monthly_init_dt_jst)
 
         notion_items = [(filename, "1ヶ月予報 結合図", "MONTHLY_FORECAST", url)]
         page_id = notion_write_db(
