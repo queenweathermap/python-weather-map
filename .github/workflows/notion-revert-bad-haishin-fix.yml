@@ -1,4 +1,4 @@
-name: One-off - Fix 配信日時 to actual post time (emagram/windprofiler/ADV TGV)
+name: One-off - Revert bad 配信日時 overwrite
 
 on:
   workflow_dispatch:
@@ -26,6 +26,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Fix 配信日時 to actual post time
+      - name: Revert bad 配信日時 overwrite
         run: |
-          python scripts/notion_fix_haishin_actual_time.py
+          python scripts/notion_revert_bad_haishin_fix.py
