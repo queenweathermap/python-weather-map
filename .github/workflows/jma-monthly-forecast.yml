@@ -3,7 +3,9 @@ name: Run JMA Monthly Forecast (1か月予報資料)
 on:
   # GitHub Actions自体のscheduleはbest-effortで遅延・欠落しうるため、
   # Cloudflare Workers「weathermap-scheduler」のcronトリガー(UTC 03:30・
-  # 曜日4=水曜、JST 12:30水曜)からworkflow_dispatchで起動する(2026-09-17変更。
+  # 曜日3=水曜、JST 12:30水曜)からworkflow_dispatchで起動する(2026-09-18修正。
+  # 標準cronの曜日番号は0=日曜のため4は木曜。2026-09-17に木曜→水曜のつもりで
+  # 曜日を4のままにしてしまい実際は木曜発火のままだったバグを3に修正した。
   # 資料(FCVX11〜15)自体は毎週水曜09:00JST更新で、週間予報とほぼ同じ時間帯に
   # 揃えた)。
   workflow_dispatch: {}

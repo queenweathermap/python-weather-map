@@ -2,16 +2,19 @@
 # =============================================================================
 # module/jobs/amedas.py
 #
-# JMA AMeDAS データ / WCN画面 → Discord(#amedas) 画像配信
+# JMA AMeDAS データ / WCN画面 → Discord 画像配信
 #
 # main()     : JMA公開API(urllib + Pillow, 認証不要)から鷹巣・秋田・横手
 #              3地点の時系列詳細テーブルPNGを作る。discord_webhook_url引数で
-#              投稿先を差し替えられる(module/jobs/weather_warning.pyから、
-#              jma-warningチャンネル向けに1日3回・R2/Notion無しで再利用)。
+#              投稿先を差し替えられる。2026-09-18より呼び出し元は
+#              module/jobs/weather_warning.pyのみ(jma-warningチャンネル
+#              向けに1日3回)。post_discord/post_notionともFalseで呼び出され、
+#              Discord投稿・Notion記録は呼び出し元(weather_warning.py)が
+#              警報スクショと合わせて1件にまとめて行う。
 # main_wcn() : WCN(Weathercaster.jp)会員ページを Playwright でスクリーンショット
 #              （積算降水量/気温ランキング等）。
-# 配信: scripts/wcn_amedas.py経由で朝6時/12時/18時（JST）にR2保存+Notion記録
-#      （Discordは#amedasには投稿しない。jma-warningへは上記の通り別枠）。
+# 配信: scripts/wcn_amedas.py経由で朝6時/12時/18時（JST）にmain_wcn()のみ実行し、
+#      R2保存・Discord(#amedas)投稿・Notion記録まで行う。
 # =============================================================================
 
 from __future__ import annotations

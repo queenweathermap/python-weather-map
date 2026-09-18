@@ -2,10 +2,14 @@
 # =============================================================================
 # scripts/jma_amedas.py
 #
-# 処理順:
-#   1. JMA アメダス 3地点データ取得・R2
-#   2. WCN アメダス観測値・ランキング スクリーンショット → Discord
-#   3. 全画像を Notion に1件書き込み
+# WCN アメダス観測値・ランキング スクリーンショット → R2 → Discord(#amedas)
+# → Notion。
+#
+# 鷹巣・秋田・横手のJMAアメダス3地点詳細(module.jobs.amedas.main())は
+# 2026-09-18よりmodule/jobs/weather_warning.py(秋田 注意報警報等＋アメダス
+# 詳細ジョブ、jma-warningチャンネル)に一本化した。従来はこのジョブと
+# weather_warning.py側の両方で同じ3地点詳細を別々に取得・R2保存しており
+# 二重化していたため。
 # =============================================================================
 
 import os
@@ -13,37 +17,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import datetime
-
-from module.jobs.amedas import (
-    main,
-    main_wcn,
-    _notion_write,
-    JST,
-)
-
-
-def _nearest_scheduled_slot_jst(now: datetime, hours):
-    """実行が数分遅れても、yml上の狙い撃ちスケジュール時刻(6/12/18時)
-    ぴったりの表示にする。"""
-    best_h = min(hours, key=lambda h: min(abs(now.hour - h), 24 - abs(now.hour - h)))
-    return now.replace(hour=best_h, minute=0, second=0, microsecond=0)
+from module.jobs.amedas import main_wcn
 
 
 if __name__ == "__main__":
-    jst_now = datetime.now(JST)
-
-    # JMA データ取得・R2（Notion・Discord は後回し）
-    detail_imgs, detail_r2_urls = main(post_discord=False, post_notion=False)
-
-    # WCN スクリーンショット → Discord（アメダスリンク付き）・R2（Notion は後回し）
-    wcn_imgs, wcn_r2_urls = main_wcn(post_notion=False)
-
-    # 全 R2 URL をまとめて Notion に1件書き込み
-    all_r2_urls = wcn_r2_urls + detail_r2_urls
-    slot_jst = _nearest_scheduled_slot_jst(jst_now, [6, 12, 18])
-    _notion_write(
-        title=f"AMeDAS　AMeDAS秋田〔{slot_jst.strftime('%Y%m%d %H:%M')}〕",
-        r2_urls=all_r2_urls,
-        jst_now=jst_now,
-    )
+    main_wcn(post_notion=True)

@@ -5,6 +5,10 @@
 同じ時刻に、鷹巣・秋田・横手のJMAアメダス時系列詳細(module.jobs.amedas.main())も
 1つのメッセージにまとめて投稿する(2026-09-16追加。従来#amedasにのみ配信していた
 JMAアメダスを、このjma-warningチャンネルにも同じタイミングで揃える)。
+Discordに投稿した画像は全てR2へアップロードし、Notionにも1件アーカイブする
+(2026-09-18変更。Notionには書き込まず、鷹巣・秋田・横手のR2/Notion記録は
+scripts/wcn_amedas.py側で別途行う分担だったが、Discordと記録内容を揃えるため
+こちらに一本化した)。
 """
 import json
 import os
@@ -12,10 +16,13 @@ import sys
 import time
 import urllib.request
 import uuid
+from datetime import datetime, timezone, timedelta
 
 from playwright.sync_api import sync_playwright
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WARNING_WEBHOOK_URL", "")
+
+JST = timezone(timedelta(hours=9))
 
 PAGES = [
     {
@@ -117,20 +124,70 @@ def send_discord_multi(content, images):
 
 
 def fetch_amedas_detail():
-    """鷹巣・秋田・横手のJMAアメダス時系列詳細画像を取得して返す。R2アップ
-    ロード・Notion書き込みはscripts/wcn_amedas.py側(朝6時/12時/18時)で別途
-    行っているため、ここではpost_discord/post_notionとも無効化し、main()側で
-    気象警報スクリーンショットと1つのメッセージにまとめて投稿する
-    (2026-09-16変更)。"""
+    """鷹巣・秋田・横手のJMAアメダス時系列詳細画像を取得して返す。Discordへは
+    main()側で気象警報スクリーンショットと1つのメッセージにまとめて投稿する
+    ため、ここではpost_discord/post_notionとも無効化する(post_notionは
+    main()側個別ではなく、main()呼び出し元がDiscordと同じ内容で1件に
+    まとめてNotionへ書くため)。R2 urlsはmain()側が常にアップロードして返す
+    ものをそのまま受け取り、警報スクショと合わせてNotionアーカイブに使う
+    (2026-09-18変更)。"""
     try:
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         sys.path.insert(0, repo_root)
         from module.jobs.amedas import main as amedas_main, JMA_AMEDAS_URL
-        detail_imgs, _r2_urls = amedas_main(post_discord=False, post_notion=False)
-        return detail_imgs, JMA_AMEDAS_URL
+        detail_imgs, r2_urls = amedas_main(post_discord=False, post_notion=False)
+        return detail_imgs, r2_urls, JMA_AMEDAS_URL
     except Exception as e:
         print(f"[WARN] JMAアメダス取得に失敗: {e}", file=sys.stderr)
-        return [], ""
+        return [], [], ""
+
+
+def _upload_r2(items):
+    """(filename, bytes) リストをR2にアップしてURLリストを返す。R2_ENABLE=0
+    または失敗時は空文字を混ぜて返す。"""
+    if os.environ.get("R2_ENABLE", "1").lower() not in ("1", "true", "yes", "on"):
+        return []
+    try:
+        from module.utils.r2_utils import put_bytes, make_url
+    except ImportError:
+        print("[WARN] r2_utils not available", file=sys.stderr)
+        return []
+
+    prefix = os.environ.get("R2_PREFIX", "jma-warning").strip().strip("/")
+    day_hm = datetime.now(JST).strftime("%Y%m%d/%H%M")
+    urls = []
+    for fname, data in items:
+        key = f"{prefix}/{day_hm}/{fname}"
+        try:
+            put_bytes(key, data, content_type="image/png")
+            urls.append(make_url(key))
+            print(f"[OK] R2 upload: {key}")
+        except Exception as e:
+            print(f"[WARN] R2 upload {key}: {e}", file=sys.stderr)
+    return urls
+
+
+def _archive_to_notion(links, r2_urls):
+    """Discordに投稿したのと同じ画像・リンクをNotionへ1件アーカイブする。"""
+    try:
+        from module.utils.notion_utils import archive_to_notion
+    except ImportError:
+        print("[WARN] notion_utils not available", file=sys.stderr)
+        return
+
+    now = datetime.now(JST)
+    try:
+        archive_to_notion(
+            title=f"秋田 注意報警報等＋アメダス詳細〔{now.strftime('%Y%m%d %H:%M')} JST〕",
+            category="AMeDAS",
+            r2_urls=r2_urls,
+            jst_now=now,
+            pwa=False,
+            icon_emoji="⚠️",
+            links=links,
+        )
+    except Exception as e:
+        print(f"[WARN] Notionアーカイブ失敗: {e}", file=sys.stderr)
 
 
 def main():
@@ -143,19 +200,26 @@ def main():
         print("撮影できたページがありませんでした", file=sys.stderr)
 
     lines = ["🔗 [秋田地方気象台](<https://www.jma-net.go.jp/akita/>)"]
+    links = [("秋田地方気象台", "https://www.jma-net.go.jp/akita/")]
     images = []
     for s in screenshots:
         lines.append(f"🔗 [{s['title']}](<{s['url']}>)")
+        links.append((s["title"], s["url"]))
         images.append((s["filename"], s["data"]))
 
-    amedas_imgs, amedas_url = fetch_amedas_detail()
+    amedas_imgs, amedas_r2_urls, amedas_url = fetch_amedas_detail()
     if amedas_imgs:
         lines.append(f"🔗 [アメダス（秋田）](<{amedas_url}>)")
+        links.append(("アメダス（秋田）", amedas_url))
         images.extend(amedas_imgs)
 
     if images:
         status = send_discord_multi("\n".join(lines), images)
         print(f"送信: {len(images)}枚まとめて → {status}", flush=True)
+
+        screenshot_items = [(s["filename"], s["data"]) for s in screenshots]
+        r2_urls = _upload_r2(screenshot_items) + amedas_r2_urls
+        _archive_to_notion(links, r2_urls)
     else:
         print("送信する画像がありませんでした", file=sys.stderr)
 
