@@ -365,6 +365,7 @@ def main() -> None:
             pwa=False,
             icon_emoji="📋",
             links=[("気象防災アドバイザー向け資料集", JMA_ADV_PORTAL)],
+            yml_jst=slot_jst,
         )
     except Exception as e:
         print(f"[WARN] Notionアーカイブ失敗: {e}")

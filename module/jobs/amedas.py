@@ -332,10 +332,18 @@ def _upload_r2(items: List[Tuple[str, bytes]], jst_now: datetime) -> List[str]:
 # Notion 書き込み
 # =============================================================================
 
+def _nearest_scheduled_slot_jst(now: datetime, hours: List[int]) -> datetime:
+    """実行が数分〜数時間遅れても、YMLプロパティはyml上の狙い撃ちスケジュール
+    時刻ぴったりの表示にする。"""
+    best_h = min(hours, key=lambda h: min(abs(now.hour - h), 24 - abs(now.hour - h)))
+    return now.replace(hour=best_h, minute=0, second=0, microsecond=0)
+
+
 def _notion_write(
     title: str,
     r2_urls: List[str],
     jst_now: datetime,
+    yml_jst: Optional[datetime] = None,
 ) -> None:
     try:
         from module.utils.notion_utils import archive_to_notion
@@ -352,6 +360,7 @@ def _notion_write(
         icon_emoji="🌡️",
         # Discordの投稿と同じリンク文言に揃える(2026-09-17)。
         links=[("アメダス（秋田）", JMA_AMEDAS_URL)],
+        yml_jst=yml_jst,
     )
 
 
@@ -858,6 +867,7 @@ def main_wcn(post_notion: bool = True) -> Tuple[List[Tuple[str, bytes]], List[st
             title=f"WCN アメダス観測値・ランキング / {ts}",
             r2_urls=r2_urls,
             jst_now=jst_now,
+            yml_jst=_nearest_scheduled_slot_jst(jst_now, [6, 12, 18]),
         )
 
     return images, r2_urls

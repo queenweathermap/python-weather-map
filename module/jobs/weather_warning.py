@@ -167,6 +167,17 @@ def _upload_r2(items):
     return urls
 
 
+def _nearest_scheduled_slot_jst(now, slots):
+    """(hour, minute)のリストから、nowに最も近いスケジュール時刻を返す
+    (実行が数分〜数時間遅れても、YMLプロパティは定刻表示にするため)。"""
+    def _circular_diff_seconds(a, b):
+        diff = abs((a - b).total_seconds())
+        return min(diff, 86400 - diff)
+
+    candidates = [now.replace(hour=h, minute=m, second=0, microsecond=0) for h, m in slots]
+    return min(candidates, key=lambda t: _circular_diff_seconds(now, t))
+
+
 def _archive_to_notion(links, r2_urls):
     """Discordに投稿したのと同じ画像・リンクをNotionへ1件アーカイブする。"""
     try:
@@ -176,6 +187,7 @@ def _archive_to_notion(links, r2_urls):
         return
 
     now = datetime.now(JST)
+    yml_jst = _nearest_scheduled_slot_jst(now, [(5, 15), (11, 15), (17, 15)])
     try:
         archive_to_notion(
             title=f"秋田 注意報警報等＋アメダス詳細〔{now.strftime('%Y%m%d %H:%M')} JST〕",
@@ -185,6 +197,7 @@ def _archive_to_notion(links, r2_urls):
             pwa=False,
             icon_emoji="⚠️",
             links=links,
+            yml_jst=yml_jst,
         )
     except Exception as e:
         print(f"[WARN] Notionアーカイブ失敗: {e}", file=sys.stderr)

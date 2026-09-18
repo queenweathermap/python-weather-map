@@ -578,16 +578,21 @@ def main() -> int:
 
     thumb = make_thumbnail(combined, dt12)
 
+    # 配信日時は実際の投稿時刻(now_utc)を使う。dt12は観測サイクル(前日21時JST)
+    # を指すラベル値であり、実行が遅延しても表示上は常に定刻扱いになって
+    # しまうため配信日時には使わない(2026-09-18修正)。YMLにはこのジョブの
+    # cronが本来狙う時刻(UTC 19:00 = 翌日04:00 JST)を入れる。
     archive_to_notion(
         title=f"エマグラム　前日まとめ（{len(STATIONS)}地点）",
         category="高層観測データ",
         r2_urls=[highres_url],
-        jst_now=dt12,
+        jst_now=now_utc,
         pwa=True,
         size_bytes=len(combined),
         header=f"高層観測データ {dt12.strftime('%Y/%m/%d')}まとめ",
         icon_emoji="📈",
         links=[("University of Wyoming 高層観測アーカイブ", WYOMING_PORTAL_URL)],
+        yml_jst=dt00.replace(hour=19),
     )
 
     notify_dm_subscribers(build_content(dt12, highres_url), thumb)

@@ -2716,6 +2716,18 @@ def upload_to_r2(run_prefix: str, atts: List[Attachment]) -> Tuple[List[str], Op
     return urls, rep_url
 
 
+def _nearest_scheduled_slot_jst(now: datetime, slots: List[Tuple[int, int]]) -> datetime:
+    """(hour, minute)のリストから、nowに最も近いスケジュール時刻を返す
+    (実行が数分〜数時間遅れても、YMLプロパティは定刻表示にするため、
+    2026-09-18追加)。"""
+    def _circular_diff_seconds(a: datetime, b: datetime) -> float:
+        diff = abs((a - b).total_seconds())
+        return min(diff, 86400 - diff)
+
+    candidates = [now.replace(hour=h, minute=m, second=0, microsecond=0) for h, m in slots]
+    return min(candidates, key=lambda t: _circular_diff_seconds(now, t))
+
+
 def notion_write_db(
     *,
     issue_dt_jst: datetime,
@@ -2728,6 +2740,7 @@ def notion_write_db(
     size_bytes: int = 0,
     issue_time_label: str = "",
     category: str = "JMA",
+    yml_jst: Optional[datetime] = None,
 ) -> Optional[str]:
     if not notion_enabled():
         return None
@@ -2763,6 +2776,7 @@ def notion_write_db(
         header=issue_time_label,
         icon_emoji=icon_emoji,
         cover_url=rep_url or "",
+        yml_iso=yml_jst.isoformat() if yml_jst else "",
     )
 
     if not page_id:
@@ -2947,6 +2961,7 @@ def main_dashboard_jma() -> None:
             size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
             issue_time_label=init_label,
             category=PWA_CATEGORY_BY_FILENAME.get(filename, "JMA"),
+            yml_jst=_nearest_scheduled_slot_jst(now_jst(), [(5, 0), (11, 30), (17, 0), (23, 30)]),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""
@@ -3077,6 +3092,7 @@ def main_layout4() -> None:
             size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
             issue_time_label=init_label,
             category=PWA_CATEGORY_BY_FILENAME.get(filename, "JMA"),
+            yml_jst=_nearest_scheduled_slot_jst(now_jst(), [(12, 0)]),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""
@@ -3267,6 +3283,7 @@ def main_monthly() -> None:
             size_bytes=len(image_bytes_by_filename.get(f"{filename}.png", b"")),
             issue_time_label=init_label,
             category=PWA_CATEGORY_BY_FILENAME.get(filename, "JMA"),
+            yml_jst=_nearest_scheduled_slot_jst(now_jst(), [(12, 30)]),
         )
 
         notion_url = notion_page_url(page_id) if page_id else ""

@@ -777,7 +777,21 @@ def main() -> None:
     )
 
     jst = timezone(timedelta(hours=9))
-    init_jst_iso = init_dt_for_title.astimezone(jst).isoformat()
+    now_jst = datetime.now(jst)
+    # 配信日時は実際の投稿時刻(now_jst)を使う。init_dt_for_titleはGSMの数値
+    # 予報初期値(00Z/12Z)のラベル値であり、実行が遅延しても表示上は常に定刻
+    # 扱いになってしまうため配信日時には使わない(2026-09-18修正)。YMLには
+    # このジョブのcronが本来狙う時刻(05:10/17:10 JST)を入れる。
+    init_jst_iso = now_jst.isoformat()
+
+    def _circular_diff_seconds(a: datetime, b: datetime) -> float:
+        diff = abs((a - b).total_seconds())
+        return min(diff, 86400 - diff)
+
+    yml_candidates = [
+        now_jst.replace(hour=h, minute=m, second=0, microsecond=0) for h, m in [(5, 10), (17, 10)]
+    ]
+    yml_jst = min(yml_candidates, key=lambda t: _circular_diff_seconds(now_jst, t))
 
     day = init_dt_for_title.strftime("%Y%m%d")
     run_prefix = f"{r2_prefix}/{day}/RJTD_{rjtd_for_title}"
@@ -794,6 +808,7 @@ def main() -> None:
         memo="DiscordはGIFのみ。NotionにはGIFと元画像JPGを保存。R2は21日保持の一時置き場。",
         r2_url="",
         autogen=True,
+        yml_iso=yml_jst.isoformat(),
     )
 
     print(f"[OK] Notion DB row created: {page_id}")

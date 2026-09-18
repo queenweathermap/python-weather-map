@@ -734,6 +734,7 @@ def main():
             pwa=False,
             icon_emoji="🧭",
             cover_url=cover_url,
+            yml_iso=slot_jst.isoformat(),
         )
 
         if page_id:

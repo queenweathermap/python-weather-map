@@ -611,16 +611,22 @@ def main_daily_stations() -> int:
     url = make_url(r2_key)
     print(f"R2 UPLOADED: {url}")
 
+    # 配信日時は実際の投稿時刻(_jst_now())を使う。target_jstは「まとめ対象の
+    # 前日」を指すラベル値なので、タイトル・header・R2キーにはそのまま使うが
+    # 配信日時には使わない(2026-09-18修正。従来はtarget_jstをそのまま配信日時
+    # に入れていたため、実行が遅延しても表示上は常に定刻扱いになっていた)。
+    # YMLにはこのジョブのcronが本来狙う時刻(翌日03:00 JST)を入れる。
     archive_to_notion(
         title=f"ウィンドプロファイラ　前日まとめ（{station_count}地点）",
         category="高層観測データ",
         r2_urls=[url],
-        jst_now=target_jst,
+        jst_now=_jst_now(),
         pwa=True,
         size_bytes=len(image_bytes),
         header=f"高層観測データ {target_jst.strftime('%Y/%m/%d')}まとめ",
         icon_emoji="🌬️",
         links=[("気象庁 ウィンドプロファイラ（地点別）", BASE_URL)],
+        yml_jst=_jst_now().replace(hour=3, minute=0, second=0, microsecond=0),
     )
 
     cleanup_composited_station_images(target_jst)

@@ -25,6 +25,15 @@
 #   NOTION_PROP_MEMO="メモ"
 #   NOTION_PROP_R2URL="R2 URL"
 #   NOTION_PROP_AUTOGEN="自動生成"
+#   NOTION_PROP_YML="YML"
+#
+# 配信日時とYMLの違い(2026-09-18追加):
+#   配信日時 = 実際にDiscord等へ配信した時刻(now_jst()、実行が遅延しても
+#              そのままの実時刻を使う。PWA一覧のソート・重複判定に使うため
+#              丸めてはいけない)。
+#   YML      = そのジョブのworkflow/cronが本来狙っている時刻(例: 11:30/
+#              17:00/23:30/05:00 JST)。実行が数分〜数時間遅れても、表示上は
+#              このスケジュール時刻に揃える。
 # =============================================================================
 
 from __future__ import annotations
@@ -98,6 +107,10 @@ def _prop_size() -> str:
 
 def _prop_header() -> str:
     return _env("NOTION_PROP_HEADER", "ヘッダ")
+
+
+def _prop_yml() -> str:
+    return _env("NOTION_PROP_YML", "YML")
 
 
 # -----------------------------------------------------------------------------
@@ -238,6 +251,7 @@ def create_db_row(
     header: str = "",
     icon_emoji: str = "🗺️",
     cover_url: str = "",
+    yml_iso: str = "",
 ) -> Optional[str]:
     if not notion_enabled():
         return None
@@ -269,6 +283,8 @@ def create_db_row(
         props[_prop_size()] = {"number": size_bytes}
     if header:
         props[_prop_header()] = {"rich_text": [{"type": "text", "text": {"content": header}}]}
+    if yml_iso:
+        props[_prop_yml()] = {"date": {"start": yml_iso}}
 
     payload: Dict[str, Any] = {
         "parent": {"type": "database_id", "database_id": db_id},
@@ -466,6 +482,7 @@ def archive_to_notion(
     chunk: int = 10,
     timeout_seconds: int = 180,
     poll_seconds: float = 2.0,
+    yml_jst=None,
 ) -> Optional[str]:
     """資料アーカイブDB(NOTION_DATABASE_ID)に1件記録し、画像をNotion管理ストレージへ
     インポートする（R2側の保存期限が切れてもNotion上には残る）。amedas.py以外の
@@ -476,6 +493,9 @@ def archive_to_notion(
     リンクはページ上部(画像より前)に置く(2026-09-17、Discordと同じ位置に揃える)。
     cover_urlを省略した場合、Notionのギャラリービュー表示用にr2_urlsの先頭画像を
     そのままカバーにする(2026-09-17)。
+    jst_now(配信日時)は必ず実際の配信時刻(now_jst())を渡すこと。yml_jstは
+    そのジョブのworkflow/cronが本来狙っているスケジュール時刻(例: 11:30/17:00/
+    23:30/05:00 JST)で、省略時はYMLプロパティに何も書かない(2026-09-18追加)。
     失敗しても呼び出し元の配信自体は止めたくないので例外は握りつぶす。"""
     if not notion_enabled():
         return None
@@ -490,6 +510,7 @@ def archive_to_notion(
             memo=memo,
             r2_url=valid_urls[0] if valid_urls else "",
             autogen=True,
+            yml_iso=yml_jst.isoformat() if yml_jst else "",
             pwa=pwa,
             size_bytes=size_bytes,
             header=header,
