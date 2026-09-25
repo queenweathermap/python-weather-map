@@ -396,8 +396,7 @@ def weekly_forecast_issue_label(issue_dt_jst: datetime) -> str:
 
 def monthly_forecast_issue_label(issue_dt_jst: datetime) -> str:
     """1か月予報資料(main_monthly)専用のラベル。FCVX11〜15は毎週水曜
-    00UTC(09:00JST)に更新される(2026-09-17に実資料で確認。報道機関が
-    翌木曜に発表するのは慣習であって、資料自体の更新日ではない)。
+    00UTC(09:00JST)初期値で、ファイル公開は翌木曜の朝。日付は初期値を示す。
     週間4列結合と同じ「日付＋更新版」の形式で示す。
     例: "2026/09/16　00UTC (09:00JST) 更新版" """
     return f"{issue_dt_jst.strftime('%Y/%m/%d')}　00UTC ({issue_dt_jst.strftime('%H:%M')}JST) 更新版"
@@ -3241,9 +3240,10 @@ def build_monthly_only() -> Tuple[List[Attachment], List[str]]:
 def main_monthly() -> None:
     """
     1か月予報資料専用のエントリポイント。
-    気象庁の1か月予報資料(FCVX11〜15)は毎週水曜09:00JST(00UTC)に更新されるため、
-    週1回、水曜の空いている時間帯に実行する(scripts/jma_monthly_forecast.py。
-    2026-09-17に実資料で確認: 報道機関が発表する翌木曜ではなく水曜更新)。
+    気象庁の1か月予報資料(FCVX11〜15)は水曜00UTC(09:00JST)初期値で、
+    ファイル自体は翌木曜の朝(07:20JST頃)に公開されるため、週1回、木曜昼に
+    実行する(scripts/jma_monthly_forecast.py。2026-09-25にLast-Modifiedで確認:
+    2026-09-17に初期値時刻を公開時刻と取り違えて水曜実行にしていたのを戻した)。
     週間4列結合・全部入りと同じDiscord公開チャンネルに投稿し、Notionカタログ
     (全部入りと同じDB)にも書き込み、有料PWA配信(OneSignal push + PWAギャラリー)
     も行う(DM_SAFE_FILENAMES参照)。
@@ -3262,11 +3262,13 @@ def main_monthly() -> None:
 
         filename = "09_MONTHLY_FORECAST"
         url = all_urls[0] if all_urls else ""
-        # 気象庁の1か月アンサンブル予報(FCVX11〜15)は毎週水曜00UTC(09:00JST)に
-        # 更新される(本ジョブも水曜実行想定)。実行日=資料更新日のため、前日への
-        # 補正はしない(2026-09-17修正: 以前は木曜実行想定で前日補正していたが、
-        # 実資料は水曜更新であることを確認)。
-        monthly_init_dt_jst = issue_dt_jst.replace(
+        # 気象庁の1か月アンサンブル予報(FCVX11〜15)は水曜00UTC(09:00JST)初期値で、
+        # 公開は翌木曜の朝。実行日から見て「直前の水曜(当日が水曜なら前週の水曜)」を
+        # 初期値とする。木曜の定期実行でも、配信漏れを金曜以降に手動で再実行した
+        # 場合でも正しい初期値日付になる(水曜に手動実行した場合は新資料が未公開の
+        # ため前週分となり、それに合わせて前週水曜を返す)。
+        days_back = (issue_dt_jst.weekday() - 2) % 7 or 7
+        monthly_init_dt_jst = (issue_dt_jst - timedelta(days=days_back)).replace(
             hour=9, minute=0, second=0, microsecond=0
         )
         init_label = monthly_forecast_issue_label(monthly_init_dt_jst)
