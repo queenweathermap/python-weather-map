@@ -24,6 +24,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import ssl
 import tempfile
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,13 @@ from typing import Dict, List, Optional, Tuple
 RISH_BASE = "https://database.rish.kyoto-u.ac.jp/arch/jmadata/data/gpv/original"
 MSM_FILES = ["FH00-15", "FH16-33", "FH34-39"]
 JST = timezone(timedelta(hours=9))
+
+# RISHのサーバーは中間証明書が不足していて、GitHub Actions(Linux)のPythonでは
+# 「unable to get local issuer certificate」で接続できない(Macは補って通るため気づきにくい)。
+# 公開の気象データを読むだけなので、このホストに限り証明書の検証を行わない。
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
 
 # MSM(格子): 北緯47.6〜22.4度を0.05度刻み(505点)、東経120〜150度を0.0625度刻み(481点)
 LAT0, DLAT = 47.6, 0.05
@@ -75,7 +83,7 @@ def _list_inits(day: datetime) -> Dict[str, List[str]]:
     url = f"{RISH_BASE}/{day:%Y/%m/%d}/"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "akita-guidance-bot/1.0"})
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=60, context=_SSL_CTX) as r:
             html = r.read().decode("utf-8", "replace")
     except Exception as e:
         print(f"[WARN] MSM一覧の取得失敗: {e} ({url})")
@@ -100,7 +108,7 @@ def find_latest_init(now_utc: Optional[datetime] = None) -> Optional[datetime]:
 
 def _download(url: str, dest: str) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "akita-guidance-bot/1.0"})
-    with urllib.request.urlopen(req, timeout=300) as r, open(dest, "wb") as f:
+    with urllib.request.urlopen(req, timeout=300, context=_SSL_CTX) as r, open(dest, "wb") as f:
         while True:
             chunk = r.read(1 << 20)
             if not chunk:
