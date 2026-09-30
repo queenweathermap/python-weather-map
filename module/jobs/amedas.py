@@ -11,7 +11,8 @@
 #              向けに1日3回)。post_discord/post_notionともFalseで呼び出され、
 #              Discord投稿・Notion記録は呼び出し元(weather_warning.py)が
 #              警報スクショと合わせて1件にまとめて行う。
-# main_ranking() : 秋田県観測値一覧＋全国ランキングをJMA公開APIから描画
+# main_ranking() : 秋田県観測値一覧＋全国ランキング。177chart.comの表示を撮影して配信
+#              （撮れなかった画像はJMA公開APIからPillowで描画して補う。collect_images参照）
 #              （2026-09-30、WCNサーバ停止によりスクショ方式から置換）。
 # 配信: scripts/jma_amedas.py経由で朝6時/12時/18時（JST）にmain_ranking()のみ実行し、
 #      R2保存・Discord(#amedas)投稿・Notion記録まで行う。
@@ -357,7 +358,7 @@ def _notion_write(
         pwa=False,
         icon_emoji="🌡️",
         # Discordの投稿と同じリンク文言に揃える(2026-09-17)。
-        links=[("アメダス（秋田）", JMA_AMEDAS_URL)],
+        links=[("アメダス（秋田）", JMA_AMEDAS_URL), ("177chart アメダスランキング", f"{SITE_BASE}/amedas-ranking/")],
         yml_jst=yml_jst,
     )
 
@@ -656,6 +657,101 @@ def build_amedas_images() -> List[Tuple[str, bytes]]:
     return images
 
 
+# =============================================================================
+# 177chart.com の表示を撮影して配信する（2026-10-01〜）
+#
+# サイト側の表示(気象庁の公開APIをブラウザで描画)をそのまま撮影して配信画像にする。
+# サイトが落ちている/Cloudflareに弾かれる/描画が終わらない等で撮影できなかった画像だけ、
+# 従来のPillow描画(build_amedas_images)で補う。配信自体は止めない。
+#   /amedas-akita/?view=shot   -> #ap177-shot        (秋田県の観測局一覧)
+#   /amedas-ranking/?view=all  -> #ac177-g-temp/rain/wind (全国ランキング3枚)
+# 描画が終わると、撮影対象の要素に data-ready="1" が付く(サイト側の約束)。
+# =============================================================================
+
+SITE_BASE = os.environ.get("SITE_BASE_URL", "https://177chart.com").rstrip("/")
+SITE_SHOT_TOKEN = os.environ.get("SITE_SHOT_TOKEN", "").strip()   # Cloudflareで撮影用アクセスを許可する場合の合言葉(任意)
+AMEDAS_USE_SITE = os.environ.get("AMEDAS_USE_SITE", "1").lower() in ("1", "true", "yes", "on")
+
+# (URLパス, [(ファイル名, 撮影する要素のセレクタ), ...])
+SITE_PAGES = [
+    ("/amedas-akita/?view=shot", [("amedas_akita.png", "#ap177-shot")]),
+    ("/amedas-ranking/?view=all", [
+        ("amedas_ranking_temp.png", "#ac177-g-temp"),
+        ("amedas_ranking_rain.png", "#ac177-g-rain"),
+        ("amedas_ranking_wind.png", "#ac177-g-wind"),
+    ]),
+]
+SITE_EXPECTED = [fn for _, tg in SITE_PAGES for fn, _ in tg]
+
+
+def screenshot_site() -> List[Tuple[str, bytes]]:
+    """サイトのページを開いて、対象の要素を撮影する。撮れた分だけ返す(失敗は握りつぶさず表示する)。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[WARN] playwright 未インストール — サイト撮影をスキップ")
+        return []
+
+    out: List[Tuple[str, bytes]] = []
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        headers = {"X-Shot-Token": SITE_SHOT_TOKEN} if SITE_SHOT_TOKEN else {}
+        ctx = browser.new_context(
+            viewport={"width": 1000, "height": 900},
+            device_scale_factor=2,
+            locale="ja-JP",
+            extra_http_headers=headers,
+            user_agent=("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0 Safari/537.36 177chart-shot/1.0"),
+        )
+        for path, targets in SITE_PAGES:
+            url = SITE_BASE + path
+            page = ctx.new_page()
+            try:
+                resp = page.goto(url, wait_until="networkidle", timeout=60_000)
+                status = resp.status if resp else 0
+                title = page.title()
+                if status >= 400 or "Just a moment" in title or "Attention Required" in title:
+                    raise RuntimeError(f"アクセスできない/Cloudflareの確認画面 (HTTP {status}, title={title!r})")
+                page.locator('[data-ready="1"]').first.wait_for(timeout=90_000)
+                for fname, sel in targets:
+                    el = page.locator(sel).first
+                    el.wait_for(timeout=10_000)
+                    png = el.screenshot()
+                    print(f"[OK] site shot {fname}  {len(png):,} bytes  ({url})")
+                    out.append((fname, png))
+            except Exception as e:
+                print(f"[WARN] サイト撮影失敗 {url}: {e}")
+            finally:
+                page.close()
+        browser.close()
+    return out
+
+
+def collect_images() -> List[Tuple[str, bytes]]:
+    """配信する画像を集める。サイトの撮影を優先し、撮れなかった分だけPillow描画で補う。"""
+    shots: Dict[str, bytes] = {}
+    if AMEDAS_USE_SITE:
+        try:
+            shots = dict(screenshot_site())
+        except Exception as e:
+            print(f"[WARN] サイト撮影で例外: {e}")
+    missing = [fn for fn in SITE_EXPECTED if fn not in shots]
+    fallback: Dict[str, bytes] = {}
+    if missing:
+        print(f"[INFO] サイトから撮れなかった画像をPillowで補う: {missing}")
+        fallback = dict(build_amedas_images())
+    images: List[Tuple[str, bytes]] = []
+    for fn in SITE_EXPECTED:
+        data = shots.get(fn) or fallback.get(fn)
+        if data:
+            images.append((fn, data))
+    src = "サイト" if len(shots) == len(SITE_EXPECTED) else ("Pillow" if not shots else "サイト+Pillow")
+    print(f"[INFO] 配信画像 {len(images)} 枚（元: {src}）")
+    return images
+
+
+
 def post_amedas_to_discord(images: List[Tuple[str, bytes]], when: datetime) -> None:
     """Discord #amedas へ、秋田県一覧とランキングの2メッセージで投稿。"""
     url = DISCORD_AMEDAS_WEBHOOK_URL
@@ -686,15 +782,17 @@ def post_amedas_to_discord(images: List[Tuple[str, bytes]], when: datetime) -> N
             print(f"[WARN] Discord POST 失敗: {e}")
 
     post([(f, b) for f, b in images if f.startswith("amedas_akita")],
-         f"**アメダス観測値（秋田県）** {when.strftime('%m/%d %H:%M')}現在\n🔗 [アメダス（秋田）](<{JMA_AMEDAS_URL}>)")
+         f"**アメダス観測値（秋田県）** {when.strftime('%m/%d %H:%M')}現在\n"
+         f"🔗 [177chart 秋田県の一覧](<{SITE_BASE}/amedas-akita/>)　[アメダス（気象庁）](<{JMA_AMEDAS_URL}>)")
     post([(f, b) for f, b in images if f.startswith("amedas_ranking")],
-         "**アメダスランキング（全国・当日0時〜最新の正時値）**")
+         "**アメダスランキング（全国・当日0時〜最新の正時値）**\n"
+         f"🔗 [177chart アメダスランキング](<{SITE_BASE}/amedas-ranking/>)")
 
 
 def main_ranking(post_notion: bool = True) -> Tuple[List[Tuple[str, bytes]], List[str]]:
     """アメダス観測値・ランキング: JMA公開API → 画像 → R2 → Discord → Notion。"""
     jst_now = datetime.now(JST)
-    images = build_amedas_images()
+    images = collect_images()
     if not images:
         print("[INFO] アメダス画像なし — スキップ")
         return [], []

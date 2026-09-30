@@ -22,6 +22,15 @@ jobs:
       AMEDAS_RANK_TOP_N: "10"
 
       # ------------------------------------------------------------
+      # 177chart.com の表示を撮影して配信する（撮れない画像は従来のPillow描画で補う）
+      # SITE_SHOT_TOKEN: Cloudflareで撮影用アクセスを許可する場合の合言葉（任意。未設定でも動く）
+      # AMEDAS_USE_SITE=0 にすると従来のPillow描画だけで配信する
+      # ------------------------------------------------------------
+      SITE_BASE_URL: "https://177chart.com"
+      SITE_SHOT_TOKEN: ${{ secrets.SITE_SHOT_TOKEN }}
+      AMEDAS_USE_SITE: "1"
+
+      # ------------------------------------------------------------
       # R2（画像一時保存・Notion 埋め込み用）
       # ------------------------------------------------------------
       R2_ENABLE: "1"
@@ -66,7 +75,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
           fc-cache -f
-          pip install Pillow requests boto3 notion-client
+          pip install Pillow requests playwright boto3 notion-client
+
+      - name: Get installed Playwright version
+        run: echo "PLAYWRIGHT_VERSION=$(pip show playwright | grep Version | cut -d' ' -f2)" >> $GITHUB_ENV
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
+
+      - name: Install Playwright browsers
+        run: |
+          # ブラウザ本体はキャッシュ。OS側の依存ライブラリは毎回入れる(数秒)
+          playwright install --with-deps chromium
 
       - name: Run JMA Amedas
         run: |
