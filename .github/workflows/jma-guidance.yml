@@ -47,7 +47,7 @@ jobs:
 
       # ------------------------------------------------------------
       # Discord
-      # Guidance専用チャンネル
+      # Discord #177-guidance 専用チャンネル
       # ------------------------------------------------------------
       DISCORD_ENABLE: "1"
       DISCORD_GUIDANCE_WEBHOOK_URL: ${{ secrets.DISCORD_GUIDANCE_WEBHOOK_URL }}

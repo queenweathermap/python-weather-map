@@ -2,7 +2,7 @@
 # =============================================================================
 # module/jobs/guidance.py
 #
-# 気象庁(JMA)の公開データから秋田県のガイダンス表を描画し、Discord(#guidance)へ
+# 気象庁(JMA)の公開データから秋田県のガイダンス表を描画し、Discord(#177-guidance)へ
 # 投稿する。Notion資料アーカイブDB(NOTION_DATABASE_ID)にも1件にまとめて記録する。
 #
 # 2026-09-30: WCN(Weathercaster.jp)サーバ停止により、従来のWCN会員ページの
