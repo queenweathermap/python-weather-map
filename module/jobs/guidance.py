@@ -7,13 +7,15 @@
 #
 # 2026-09-30: WCN(Weathercaster.jp)サーバ停止により、従来のWCN会員ページの
 # スクリーンショット方式(MSM府県時別・分布予報・週間ガイダンス)から、JMA元データの
-# 自前描画に置き換えた。認証・Playwright不要(標準ライブラリ + Pillow)。
+# 自前描画に置き換えた。表の描画は認証不要(標準ライブラリ + Pillow)。
+# 気象庁 秋田県天気予報ページのスクリーンショットだけ、従来どおりPlaywrightで撮影して添える。
 #
 # 出力:
 #   guid_msm_rain.png  MSM 降水ガイダンス(沿岸/内陸 × 1h/3h/24h × 上位/中位/下位) + 発雷確率
 #   guid_msm_wind.png  MSM 風ガイダンス(秋田県のアメダス各地点)
 #   guid_short.png     短期予報(天気・風・降水確率・気温)
 #   guid_week.png      週間予報(天気・降水確率・信頼度・最高/最低気温と予測幅)
+#   jma_forecast.png   気象庁 秋田県天気予報ページのスクリーンショット(従来から継続)
 # WCNにあった気温・天気・日照などの地点別MSM時別ガイダンスと分布予報は、JMAが
 # 公開していない(または認証付き)ため再現できない。
 # =============================================================================
@@ -334,6 +336,57 @@ def build_week(fc) -> Optional[bytes]:
                  headers, rows, {2, 3, 4, 5}, colors)
 
 
+# =============================================================================
+# 気象庁 秋田県天気予報ページのスクリーンショット(従来から継続して配信)
+# =============================================================================
+
+def _add_label_banner(img_bytes: bytes, label: str) -> bytes:
+    """画像上部にラベルバナーを追加する。失敗したら元画像をそのまま返す。"""
+    try:
+        from PIL import Image, ImageDraw
+        from module.jobs.amedas import _load_fonts
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        banner_h = 34
+        out = Image.new("RGB", (img.width, img.height + banner_h), (45, 90, 145))
+        d = ImageDraw.Draw(out)
+        f_sm, _, _ = _load_fonts()
+        d.text((12, (banner_h - 14) // 2), label, fill=(255, 255, 255), font=f_sm)
+        out.paste(img, (0, banner_h))
+        buf = io.BytesIO()
+        out.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[WARN] ラベル追加失敗: {e}")
+        return img_bytes
+
+
+def screenshot_jma_forecast() -> Optional[bytes]:
+    """気象庁の秋田県天気予報ページ(公開・認証なし)を全体撮影する。失敗しても配信は続ける。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[WARN] playwright 未インストール — 気象庁ページの撮影をスキップ")
+        return None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            # 幅が狭いと気象庁のページはタブレット用の表示(横スクロール)になるので、
+            # パソコン用の表示になる幅で開き、左の1024pxだけを切り出す
+            ctx = browser.new_context(viewport={"width": 1280, "height": 900}, locale="ja-JP")
+            page = ctx.new_page()
+            page.goto(JMA_FORECAST_URL, wait_until="networkidle", timeout=60_000)
+            page.wait_for_timeout(4000)      # JSによる描画の完了待ち
+            height = page.evaluate("Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)")
+            raw = page.screenshot(full_page=True, clip={"x": 0, "y": 0, "width": 1024, "height": int(height)})
+            browser.close()
+        img = _add_label_banner(raw, "気象庁 秋田県天気予報")
+        print(f"[OK] jma_forecast.png  {len(img):,} bytes")
+        return img
+    except Exception as e:
+        print(f"[WARN] 気象庁ページの撮影失敗: {e}")
+        return None
+
+
 def build_images() -> Tuple[List[Tuple[str, bytes]], Optional[datetime]]:
     images: List[Tuple[str, bytes]] = []
     init = None
@@ -355,6 +408,10 @@ def build_images() -> Tuple[List[Tuple[str, bytes]], Optional[datetime]]:
                     images.append((fname, img))
             except Exception as e:
                 print(f"[WARN] {fname} 生成失敗: {e}")
+
+    jf = screenshot_jma_forecast()
+    if jf:
+        images.append(("jma_forecast.png", jf))
     return images, init
 
 
