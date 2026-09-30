@@ -2,7 +2,7 @@
 # =============================================================================
 # scripts/jma_amedas.py
 #
-# WCN アメダス観測値・ランキング スクリーンショット → R2 → Discord(#amedas)
+# アメダス観測値・ランキング(JMA公開API) → R2 → Discord(#amedas)
 # → Notion。
 #
 # 鷹巣・秋田・横手のJMAアメダス3地点詳細(module.jobs.amedas.main())は
@@ -17,8 +17,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from module.jobs.amedas import main_wcn
+from module.jobs.amedas import main_ranking
 
 
 if __name__ == "__main__":
-    main_wcn(post_notion=True)
+    main_ranking(post_notion=True)

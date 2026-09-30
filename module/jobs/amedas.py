@@ -2,7 +2,7 @@
 # =============================================================================
 # module/jobs/amedas.py
 #
-# JMA AMeDAS データ / WCN画面 → Discord 画像配信
+# JMA AMeDAS データ → Discord 画像配信
 #
 # main()     : JMA公開API(urllib + Pillow, 認証不要)から鷹巣・秋田・横手
 #              3地点の時系列詳細テーブルPNGを作る。discord_webhook_url引数で
@@ -11,9 +11,9 @@
 #              向けに1日3回)。post_discord/post_notionともFalseで呼び出され、
 #              Discord投稿・Notion記録は呼び出し元(weather_warning.py)が
 #              警報スクショと合わせて1件にまとめて行う。
-# main_wcn() : WCN(Weathercaster.jp)会員ページを Playwright でスクリーンショット
-#              （積算降水量/気温ランキング等）。
-# 配信: scripts/wcn_amedas.py経由で朝6時/12時/18時（JST）にmain_wcn()のみ実行し、
+# main_ranking() : 秋田県観測値一覧＋全国ランキングをJMA公開APIから描画
+#              （2026-09-30、WCNサーバ停止によりスクショ方式から置換）。
+# 配信: scripts/jma_amedas.py経由で朝6時/12時/18時（JST）にmain_ranking()のみ実行し、
 #      R2保存・Discord(#amedas)投稿・Notion記録まで行う。
 # =============================================================================
 
@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Tuple
 # =============================================================================
 # JMA AMeDAS 公開API（認証不要）
 # =============================================================================
-LATEST_TIME_URL = "https://www.jma.go.jp/bosai/amedas/data/latest_time.json"
+LATEST_TIME_URL = "https://www.jma.go.jp/bosai/amedas/data/latest_time.txt"
 MAP_BASE_URL = "https://www.jma.go.jp/bosai/amedas/data/map"
 
 DISCORD_AMEDAS_WEBHOOK_URL = os.environ.get("DISCORD_AMEDAS_WEBHOOK_URL", "")
@@ -111,12 +111,7 @@ def _val(entry: dict, key: str) -> Optional[float]:
 # =============================================================================
 
 def _parse_latest() -> Tuple[datetime, datetime]:
-    raw = _fetch(LATEST_TIME_URL)
-    if raw:
-        utc = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    else:
-        utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-        utc = utc.replace(minute=(utc.minute // 10) * 10) - timedelta(minutes=10)
+    utc = _fetch_latest_utc()
     return utc.astimezone(JST), utc
 
 
@@ -180,8 +175,9 @@ def _draw_table_img(
     headers: List[str],
     rows: List[List[str]],
     right_align_cols: set = None,
+    cell_colors: Optional[Dict[Tuple[int, int], Tuple[int, int, int]]] = None,
 ) -> bytes:
-    """テーブル画像を PNG バイト列で返す。"""
+    """テーブル画像を PNG バイト列で返す。cell_colors={(行, 列): RGB} でセルを塗れる。"""
     from PIL import Image, ImageDraw
 
     right_align_cols = right_align_cols or set()
@@ -234,6 +230,8 @@ def _draw_table_img(
         d.line([(0, y), (total_w, y)], fill=C_BORDER)
         x = 0
         for ci, (cell, cw) in enumerate(zip(row, col_widths)):
+            if cell_colors and (ri, ci) in cell_colors:
+                d.rectangle([(x, y + 1), (x + cw - 1, y + ROW_H - 1)], fill=cell_colors[(ri, ci)])
             bb = d.textbbox((0, 0), cell, font=f_sm)
             tw = bb[2] - bb[0]
             if ci in right_align_cols:
@@ -478,398 +476,239 @@ def main(
 
 
 # =============================================================================
-# WCN アメダス観測値・ランキング スクリーンショット
+# アメダス観測値一覧（秋田）・全国ランキング（JMA公開API版）
+#
+# 旧WCN会員ページ(allamedas/ranking)のスクショ方式は、WCNサーバ停止により
+# 取得できなくなったため、JMA公開API(map)の正時値から同等の表を自前で描画する。
+# 日最高/最低・最大風速・最小湿度・12h雨量は「当日0時JST〜最新」の正時値からの
+# 集計(10分値ではない)。最大瞬間風速はmapに含まれないためランキングから除外。
 # =============================================================================
-WCN_USER      = os.environ.get("WEATHERCASTER_USER", "").strip()
-WCN_PASS      = os.environ.get("WEATHERCASTER_PASS", "").strip()
-WCN_WAIT_MS   = int(os.environ.get("GUIDANCE_WAIT_MS", "3000"))
-WCN_VP_W      = int(os.environ.get("GUIDANCE_VIEWPORT_WIDTH",  "1400"))
-WCN_VP_H      = int(os.environ.get("GUIDANCE_VIEWPORT_HEIGHT", "1200"))
-WCN_ALLAMEDAS_URL = os.environ.get(
-    "WCN_ALLAMEDAS_URL",
-    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/allamedas.html",
-)
-WCN_RANKING_URL = os.environ.get(
-    "WCN_RANKING_URL",
-    "https://www.weathercaster.jp/web/member_only/weather-data/amedas/ranking.html",
-)
+
+PREF_LABEL = {
+    "11": "宗谷", "12": "上川", "13": "留萌", "14": "石狩", "15": "空知", "16": "後志",
+    "17": "網走", "18": "根室", "19": "釧路", "20": "十勝", "21": "胆振", "22": "日高",
+    "23": "渡島", "24": "檜山", "31": "青森", "32": "秋田", "33": "岩手", "34": "宮城",
+    "35": "山形", "36": "福島", "40": "茨城", "41": "栃木", "42": "群馬", "43": "埼玉",
+    "44": "東京", "45": "千葉", "46": "神奈川", "48": "長野", "49": "山梨", "50": "静岡",
+    "51": "愛知", "52": "岐阜", "53": "三重", "54": "新潟", "55": "富山", "56": "石川",
+    "57": "福井", "60": "滋賀", "61": "京都", "62": "大阪", "63": "兵庫", "64": "奈良",
+    "65": "和歌山", "66": "岡山", "67": "広島", "68": "島根", "69": "鳥取", "71": "徳島",
+    "72": "香川", "73": "愛媛", "74": "高知", "81": "山口", "82": "福岡", "83": "大分",
+    "84": "長崎", "85": "佐賀", "86": "熊本", "87": "宮崎", "88": "鹿児島", "91": "沖縄",
+    "92": "大東島", "93": "宮古島", "94": "八重山",
+}
+RANK_TOP_N = int(os.environ.get("AMEDAS_RANK_TOP_N", "10"))
 
 
-def _wcn_label_banner(raw: bytes, label: str) -> bytes:
-    """スクリーンショットの上部にラベルバナーを追加。"""
+def _fetch_latest_utc() -> datetime:
+    """最新観測時刻(UTC)。latest_time.txt はJSONでなくISO文字列そのもの。"""
     try:
-        from PIL import Image, ImageDraw, ImageFont
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
-        banner_h = 36
-        banner = Image.new("RGB", (img.width, banner_h), (30, 30, 60))
-        draw = ImageDraw.Draw(banner)
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 20)
-        except Exception:
-            font = ImageFont.load_default()
-        draw.text((8, 6), label, fill=(255, 255, 255), font=font)
-        combined = Image.new("RGB", (img.width, banner_h + img.height))
-        combined.paste(banner, (0, 0))
-        combined.paste(img, (0, banner_h))
-        buf = io.BytesIO()
-        combined.save(buf, format="PNG")
-        return buf.getvalue()
-    except Exception:
-        return raw
+        req = urllib.request.Request(
+            LATEST_TIME_URL, headers={"User-Agent": "akita-amedas-bot/1.0 (+https://github.com/)"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return datetime.fromisoformat(r.read().decode().strip()).astimezone(timezone.utc)
+    except Exception as e:
+        print(f"[WARN] latest_time: {e} — 現在時刻から推定")
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        return now.replace(minute=(now.minute // 10) * 10) - timedelta(minutes=20)
 
 
-def screenshot_wcn_amedas_pages() -> List[Tuple[str, bytes]]:
-    """WCN アメダス地点一覧とランキングをスクリーンショット。
+def _collect_stats() -> Tuple[Dict[str, dict], Dict[str, dict], datetime]:
+    """全アメダス局の集計値を返す: ({code: stat}, amedastable, 最新時刻JST)。"""
+    table = _fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json") or {}
+    latest = _fetch_latest_utc()
+    latest_jst = latest.astimezone(JST)
+    day_start_utc = latest_jst.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
-    allamedas.html: 3時間降水量/最高気温/最低気温/最大風速/最小湿度/積雪深（最大6枚）
-    ranking.html  : 気温ランキング / 降水量ランキング / 風速・湿度・積雪ランキング（3枚）
-    """
-    if not (WCN_USER and WCN_PASS):
-        print("[SKIP] WEATHERCASTER_USER/PASS 未設定 — WCN アメダス スクリーンショットをスキップ")
+    maps = _fetch_maps([latest.strftime("%Y%m%d%H%M%S")])            # 最新(10分値)
+    ts_list = _hourly_ts_list(latest, 24)                              # 正時24本
+    maps.update(_fetch_maps(ts_list))
+    latest_map = maps.get(latest.strftime("%Y%m%d%H%M%S"), {})
+    if not latest_map:
+        return {}, table, latest_jst
+
+    def ts_dt(ts: str) -> datetime:
+        return datetime.strptime(ts, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+
+    today_ts = [ts for ts in ts_list if ts in maps and ts_dt(ts) >= day_start_utc]
+    last12 = [ts for ts in ts_list[:12] if ts in maps]
+
+    stats: Dict[str, dict] = {}
+    for code, e in latest_map.items():
+        s = {
+            "temp": _val(e, "temp"), "r1": _val(e, "precipitation1h"),
+            "r3": _val(e, "precipitation3h"), "r24": _val(e, "precipitation24h"),
+            "wind": _val(e, "wind"), "wdir": _val(e, "windDirection"),
+            "hum": _val(e, "humidity"), "snow": _val(e, "snow"),
+        }
+        def series(key, tss):
+            out = []
+            for ts in tss:
+                v = _val(maps[ts].get(code, {}), key)
+                if v is not None:
+                    out.append(v)
+            return out
+        temps = series("temp", today_ts) + ([s["temp"]] if s["temp"] is not None else [])
+        winds = series("wind", today_ts) + ([s["wind"]] if s["wind"] is not None else [])
+        hums = series("humidity", today_ts) + ([s["hum"]] if s["hum"] is not None else [])
+        s["tmax"] = max(temps) if temps else None
+        s["tmin"] = min(temps) if temps else None
+        s["wmax"] = max(winds) if winds else None
+        s["hmin"] = min(hums) if hums else None
+        r12 = series("precipitation1h", last12)
+        s["r12"] = sum(r12) if len(r12) >= 11 else None
+        stats[code] = s
+    return stats, table, latest_jst
+
+
+def _fmt(v: Optional[float], nd: int = 1) -> str:
+    return "---" if v is None else f"{v:.{nd}f}"
+
+
+def _akita_table_image(stats: Dict[str, dict], table: Dict[str, dict], when: datetime) -> Optional[bytes]:
+    codes = sorted(c for c in stats if c.startswith("32"))
+    if not codes:
+        return None
+    has_snow = any(stats[c]["snow"] is not None for c in codes)
+    headers = ["地点", "気温", "最高", "最低", "1h雨", "3h雨", "24h雨", "風向", "風速", "最大風速", "最小湿度"]
+    if has_snow:
+        headers.append("積雪深")
+    rows = []
+    for c in codes:
+        s = stats[c]
+        wd = s["wdir"]
+        wd_jp = WIND_DIR_JP[int(wd) - 1] if wd and 1 <= wd <= 16 else "---"
+        row = [table.get(c, {}).get("kjName", c), _fmt(s["temp"]), _fmt(s["tmax"]), _fmt(s["tmin"]),
+               _fmt(s["r1"]), _fmt(s["r3"]), _fmt(s["r24"]), wd_jp, _fmt(s["wind"]),
+               _fmt(s["wmax"]), _fmt(s["hmin"], 0)]
+        if has_snow:
+            row.append(_fmt(s["snow"], 0))
+        rows.append(row)
+    return _draw_table_img(
+        f"アメダス観測値 秋田県  {when.strftime('%m/%d %H:%M')}現在（気温℃・雨mm・風m/s・湿度%）",
+        headers, rows, right_align_cols=set(range(1, len(headers))) - {7},
+    )
+
+
+def _rank_table(stats, table, key, title, reverse, unit_nd=1, min_val=None) -> Optional[bytes]:
+    items = [(c, s[key]) for c, s in stats.items() if s.get(key) is not None]
+    if min_val is not None:
+        items = [(c, v) for c, v in items if v >= min_val]
+    if not items:
+        return None
+    items.sort(key=lambda x: x[1], reverse=reverse)
+    rows = []
+    for i, (c, v) in enumerate(items[:RANK_TOP_N], 1):
+        nm = table.get(c, {}).get("kjName", c)
+        rows.append([str(i), f"{nm}({PREF_LABEL.get(c[:2], '')})", _fmt(v, unit_nd)])
+    return _draw_table_img(title, ["順位", "地点", "値"], rows, right_align_cols={0, 2})
+
+
+def _compose_2x2(img_bytes_list: List[bytes], pad: int = 6) -> bytes:
+    from PIL import Image as PILImage
+    imgs = [PILImage.open(io.BytesIO(b)).convert("RGB") for b in img_bytes_list]
+    nrows = (len(imgs) + 1) // 2
+    col_w = max(i.width for i in imgs)
+    row_h = max(i.height for i in imgs)
+    canvas = PILImage.new("RGB", (col_w * 2 + pad, row_h * nrows + pad * (nrows - 1)), (220, 220, 220))
+    for i, img in enumerate(imgs):
+        r, c = divmod(i, 2)
+        canvas.paste(img, (c * (col_w + pad), r * (row_h + pad)))
+    buf = io.BytesIO()
+    canvas.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def build_amedas_images() -> List[Tuple[str, bytes]]:
+    """秋田県観測値一覧 + 全国ランキング3枚（気温/降水/風・湿度・積雪）を作る。"""
+    stats, table, when = _collect_stats()
+    if not stats:
+        print("[WARN] アメダスmap取得失敗")
         return []
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print("[WARN] playwright 未インストール — WCN アメダス スクリーンショットをスキップ")
-        return []
+    images: List[Tuple[str, bytes]] = []
+    img = _akita_table_image(stats, table, when)
+    if img:
+        images.append(("amedas_akita.png", img))
 
-    results: List[Tuple[str, bytes]] = []
+    def group(fname, specs):
+        tabs = [t for t in (_rank_table(stats, table, *sp) for sp in specs) if t]
+        if tabs:
+            images.append((fname, _compose_2x2(tabs)))
 
-    def _wait(page):
-        page.wait_for_load_state("networkidle", timeout=30_000)
-        page.wait_for_timeout(WCN_WAIT_MS)
-
-    # 秋田のアンカーID（allamedas_2.cgi#XX の XX）
-    ALLAMEDAS_ANCHOR = os.environ.get("WCN_ALLAMEDAS_ANCHOR", "15")
-
-
-    def _shot_pref_section(page) -> bytes:
-        """秋田セクションだけを切り抜いて返す。
-        秋田アンカー → 次都道府県アンカー直前までを PIL でクロップ。
-        """
-        df = page.frame(name="data_area")
-        if not df:
-            raise RuntimeError("data_area not found")
-
-        # 全高展開してから Y 座標を取得（scroll=0 にすると getBoundingClientRect が絶対Y値になる）
-        scroll_h = df.evaluate("document.body.scrollHeight")
-        page.evaluate(
-            f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{scroll_h}px'"
-        )
-        page.wait_for_timeout(300)
-        df.evaluate("window.scrollTo(0, 0)")
-        page.wait_for_timeout(200)
-
-        # 秋田アンカーと次都道府県アンカーの Y 位置を取得
-        pos = df.evaluate(f"""
-            (() => {{
-                const anchor = '{ALLAMEDAS_ANCHOR}';
-                const all = Array.from(document.querySelectorAll('a[name], [id]'));
-                let akitaY = null, nextY = null;
-                for (let i = 0; i < all.length; i++) {{
-                    const name = all[i].getAttribute('name') || all[i].id;
-                    if (name === anchor) {{
-                        akitaY = all[i].getBoundingClientRect().top;
-                    }} else if (akitaY !== null && nextY === null) {{
-                        const y = all[i].getBoundingClientRect().top;
-                        if (y > akitaY + 80) nextY = y;
-                    }}
-                }}
-                return {{
-                    akita: akitaY ?? 0,
-                    next: nextY ?? document.body.scrollHeight
-                }};
-            }})()
-        """)
-        akita_y = int(pos.get("akita", 0))
-        next_y  = int(pos.get("next",  scroll_h))
-
-        # 全高撮影してから PIL でクロップ
-        raw_full = page.locator('iframe[name="data_area"]').screenshot()
-
-        try:
-            from PIL import Image as PILImage
-            img = PILImage.open(io.BytesIO(raw_full))
-            y0 = max(0, akita_y - 20)         # 秋田ヘッダーの少し上から
-            y1 = min(img.height, next_y + 10)  # 次都道府県ヘッダーの直後で切る
-            cropped = img.crop((0, y0, img.width, y1))
-            buf = io.BytesIO()
-            cropped.save(buf, "PNG")
-            return buf.getvalue()
-        except Exception as e:
-            print(f"[WARN] PIL crop failed: {e} — 全高撮影を返す")
-            return raw_full
-
-    def _compose_2x2(img_bytes_list: List[bytes], pad: int = 6) -> bytes:
-        """4枚以内の画像を 2列グリッドに合成して PNG バイト列を返す。"""
-        from PIL import Image as PILImage
-        imgs = [PILImage.open(io.BytesIO(b)).convert("RGB") for b in img_bytes_list]
-        ncols = 2
-        nrows = (len(imgs) + 1) // 2
-        col_w = max(img.width for img in imgs)
-        row_h = max(img.height for img in imgs)
-        canvas = PILImage.new(
-            "RGB",
-            (col_w * ncols + pad * (ncols - 1), row_h * nrows + pad * (nrows - 1)),
-            (220, 220, 220),
-        )
-        for i, img in enumerate(imgs):
-            r, c = divmod(i, ncols)
-            canvas.paste(img, (c * (col_w + pad), r * (row_h + pad)))
-        buf = io.BytesIO()
-        canvas.save(buf, "PNG")
-        return buf.getvalue()
-
-    def _shot_ranking_tables(page) -> List[bytes]:
-        """ranking data_area のランキングテーブルを個別撮影して返す。
-        「順位」列ヘッダーを持つテーブルだけを対象にすることで
-        ナビゲーション等の余分なテーブルを除外する。
-        """
-        df = page.frame(name="data_area")
-        if not df:
-            raise RuntimeError("data_area not found")
-        # 全高展開 → 再レンダリング待ち
-        scroll_h = df.evaluate("document.body.scrollHeight")
-        page.evaluate(
-            f"document.querySelector('iframe[name=\"data_area\"]').style.height = '{scroll_h}px'"
-        )
-        # iframe リサイズ後に全テーブルが再描画されるまで待つ（短すぎると先頭テーブルが空白になる）
-        page.wait_for_timeout(2000)
-        table_imgs: List[bytes] = []
-        tables = df.locator("table").all()
-        for i, tbl in enumerate(tables):
-            try:
-                bb = tbl.bounding_box()
-                if not bb:
-                    continue
-                is_ranking = (
-                    tbl.locator("th, td").filter(has_text="順位").count() > 0
-                    or tbl.locator("th, td").filter(has_text="地点名").count() > 0
-                )
-                if not is_ranking:
-                    continue
-                raw = tbl.screenshot()
-                from PIL import Image as _PIL
-                tmp = _PIL.open(io.BytesIO(raw))
-                tw, th = tmp.width, tmp.height
-                print(f"[INFO] ranking table[{i}] {len(raw)} bytes {tw}x{th}")
-                # ヘッダー行だけ（データなし）のテーブルはスキップ
-                if th < 50:
-                    print(f"[WARN] table[{i}] too short ({th}px), skip")
-                    continue
-                table_imgs.append(raw)
-            except Exception as e:
-                print(f"[WARN] table[{i}] error: {e}")
-        return table_imgs
-
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(
-            http_credentials={"username": WCN_USER, "password": WCN_PASS},
-            viewport={"width": WCN_VP_W, "height": WCN_VP_H},
-        )
-        page = ctx.new_page()
-
-        # ---- 1. allamedas.html ----------------------------------------
-        # 最初のロードでフォームオプションを読み、キーワードで value を特定する。
-        # その後 data_area に直接 URL ナビゲートして確実に切り替える。
-        ALLAMEDAS_ITEMS = [
-            ("rain3h", "wcn_amedas_rain3h.png", "アメダス 3時間降水量",
-             ["降水量", "3時間降水", "rain3", "雨量"]),
-            ("tmax",   "wcn_amedas_tmax.png",   "アメダス 最高気温",
-             ["最高気温", "tmax", "最高"]),
-            ("tmin",   "wcn_amedas_tmin.png",   "アメダス 最低気温",
-             ["最低気温", "tmin", "最低"]),
-            ("wmax",   "wcn_amedas_wmax.png",   "アメダス 最大風速",
-             ["最大風速", "wmax", "風速"]),
-            ("humin",  "wcn_amedas_humin.png",  "アメダス 最小湿度",
-             ["最小湿度", "humin", "湿度"]),
-            ("snow",   "wcn_amedas_snow.png",   "アメダス 積雪深",
-             ["積雪深", "snow", "積雪"]),
-        ]
-
-        # 最初のロードでフォーム構造を解析
-        page.goto(WCN_ALLAMEDAS_URL, wait_until="networkidle", timeout=60_000)
-        _wait(page)
-
-        ff = page.frame(name="form_area")
-
-        # factorNo ラジオボタンのラベルを読んで要素種別を特定する
-        factor_map: dict = {}   # elem_key → factorNo value (str)
-        if ff:
-            try:
-                factor_labels = ff.evaluate("""
-                    Array.from(document.querySelectorAll('input[name="factorNo"]')).map(r => {
-                        let lbl = '';
-                        const lel = document.querySelector('label[for="' + r.id + '"]');
-                        if (lel) { lbl = lel.innerText.trim(); }
-                        else {
-                            let p = r.parentElement;
-                            while (p && p.tagName !== 'LABEL' && p.tagName !== 'FORM') p = p.parentElement;
-                            if (p && p.tagName === 'LABEL') lbl = p.innerText.trim();
-                        }
-                        if (!lbl) {
-                            let n = r.nextSibling;
-                            while (n && n.nodeType !== 3) n = n.nextSibling;
-                            if (n) lbl = n.textContent.trim();
-                        }
-                        return {v: r.value, t: lbl};
-                    })
-                """)
-                WANT_KEYWORDS = {
-                    "rain3h": ["3時間降水量", "3時間降水", "3時間", "rain3"],
-                    "tmax":   ["最高気温", "最高", "tmax"],
-                    "tmin":   ["最低気温", "最低", "tmin"],
-                    "wmax":   ["最大風速", "最大風", "wmax", "風速"],
-                    "humin":  ["最小湿度", "最小", "湿度", "humin"],
-                    "snow":   ["積雪深", "積雪", "snow"],
-                }
-                for key, kws in WANT_KEYWORDS.items():
-                    for entry in factor_labels:
-                        if any(kw in entry["t"] for kw in kws):
-                            factor_map[key] = entry["v"]
-                            break
-            except Exception as e:
-                print(f"[WARN] factorNo parse: {e}")
-
-        # ラベルで取れなかった要素はデータタイトルで確認しつつインデックスで推測
-        # WCN allamedas のデフォルト順: 0=最高気温,1=最低気温,2=降水量,3=最大風速,4=最小湿度,5=積雪深 (推測)
-        FALLBACK_ORDER = ["tmax", "tmin", "rain3h", "wmax", "humin", "snow"]
-        for i, key in enumerate(FALLBACK_ORDER):
-            if key not in factor_map:
-                factor_map[key] = str(i)
-                print(f"[WARN] {key}: label not found, fallback factorNo={i}")
-
-        def _switch_element(factor_no: str) -> None:
-            """factorNo ラジオを変更してフォームを POST 送信、data_area を更新する。"""
-            if not ff:
-                return
-            ff.evaluate(f"""
-                (() => {{
-                    // factorNo ラジオをセット
-                    const radios = document.querySelectorAll('input[name="factorNo"]');
-                    radios.forEach(r => {{ r.checked = (r.value === '{factor_no}'); }});
-                    // フォームを submit（target="data_area" なので data_area だけ更新）
-                    const frm = document.querySelector('form');
-                    if (frm) frm.submit();
-                }})()
-            """)
-            page.wait_for_load_state("networkidle", timeout=30_000)
-            page.wait_for_timeout(WCN_WAIT_MS)
-
-        for elem_key, fname, lbl, _ in ALLAMEDAS_ITEMS:
-            try:
-                _switch_element(factor_map[elem_key])
-                raw = _shot_pref_section(page)
-                img = _wcn_label_banner(raw, lbl)
-                results.append((fname, img))
-                print(f"[OK] {fname}  {len(img):,} bytes")
-            except Exception as e:
-                print(f"[WARN] {fname} 撮影失敗: {e}")
-
-        # ---- 2. ranking.html ------------------------------------------
-        # 12テーブルを4つずつ 2×2 グリッドで合成 → 3枚
-        RANKING_LABELS = [
-            "ランキング 気温（最高↑ / 最低↓ / 低最高↓ / 高最低↑）",
-            "ランキング 降水量（1h / 3h / 12h / 24h）",
-            "ランキング 風速・湿度・積雪（最大風速 / 最大瞬間 / 最小湿度 / 積雪深）",
-        ]
-        RANKING_FNAMES = [
-            "wcn_ranking_temp.png",
-            "wcn_ranking_rain.png",
-            "wcn_ranking_wind.png",
-        ]
-        try:
-            page.goto(WCN_RANKING_URL, wait_until="networkidle", timeout=60_000)
-            _wait(page)
-            table_imgs = _shot_ranking_tables(page)
-            # 最大12テーブルを4つずつグループ化
-            groups = [table_imgs[i:i + 4] for i in range(0, min(12, len(table_imgs)), 4)]
-            for i, (group, fname, lbl) in enumerate(zip(groups, RANKING_FNAMES, RANKING_LABELS)):
-                raw = _compose_2x2(group)
-                img = _wcn_label_banner(raw, lbl)
-                results.append((fname, img))
-                print(f"[OK] {fname}  {len(img):,} bytes")
-        except Exception as e:
-            print(f"[WARN] ranking 撮影失敗: {e}")
-
-        browser.close()
-
-    return results
+    group("amedas_ranking_temp.png", [
+        ("tmax", "最高気温 高い順(℃)", True),
+        ("tmin", "最低気温 低い順(℃)", False),
+        ("tmax", "最高気温 低い順(℃)", False),
+        ("tmin", "最低気温 高い順(℃)", True),
+    ])
+    group("amedas_ranking_rain.png", [
+        ("r1", "1時間降水量(mm)", True, 1, 0.5),
+        ("r3", "3時間降水量(mm)", True, 1, 0.5),
+        ("r12", "12時間降水量(mm)", True, 1, 0.5),
+        ("r24", "24時間降水量(mm)", True, 1, 0.5),
+    ])
+    group("amedas_ranking_wind.png", [
+        ("wmax", "最大風速(m/s)", True),
+        ("hmin", "最小湿度(%)", False, 0),
+        ("snow", "積雪深(cm)", True, 0, 1),
+    ])
+    return images
 
 
-def post_wcn_amedas_to_discord(images: List[Tuple[str, bytes]]) -> None:
-    """WCN アメダス画像を Discord #amedas チャンネルへ投稿。"""
+def post_amedas_to_discord(images: List[Tuple[str, bytes]], when: datetime) -> None:
+    """Discord #amedas へ、秋田県一覧とランキングの2メッセージで投稿。"""
     url = DISCORD_AMEDAS_WEBHOOK_URL
     if not url:
         print("[SKIP] DISCORD_AMEDAS_WEBHOOK_URL 未設定 — Discord 投稿をスキップ")
         return
-
-    import json as _json
     import uuid
 
-    allamedas = [(f, b) for f, b in images if f.startswith("wcn_amedas_")]
-    rankings  = [(f, b) for f, b in images if f.startswith("wcn_ranking_")]
-
-    def _post_multipart(files: List[Tuple[str, bytes]], content: str = "") -> None:
+    def post(files: List[Tuple[str, bytes]], content: str) -> None:
         if not files:
             return
         boundary = uuid.uuid4().hex
-        body = b""
-        if content:
-            body += (
-                f'--{boundary}\r\n'
-                f'Content-Disposition: form-data; name="payload_json"\r\n\r\n'
-                f'{_json.dumps({"content": content, "flags": 4})}\r\n'
-            ).encode()
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="payload_json"\r\n\r\n'
+                f'{json.dumps({"content": content, "flags": 4})}\r\n').encode()
         for i, (fname, data) in enumerate(files):
-            body += (
-                f'--{boundary}\r\n'
-                f'Content-Disposition: form-data; name="files[{i}]"; '
-                f'filename="{fname}"\r\n'
-                f'Content-Type: image/png\r\n\r\n'
-            ).encode() + data + b"\r\n"
+            body += (f'--{boundary}\r\nContent-Disposition: form-data; name="files[{i}]"; '
+                     f'filename="{fname}"\r\nContent-Type: image/png\r\n\r\n').encode() + data + b"\r\n"
         body += f"--{boundary}--\r\n".encode()
         req = urllib.request.Request(
-            url, data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                "User-Agent": "discord-bot/1.0",
-            },
-            method="POST",
+            url, data=body, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                     "User-Agent": "akita-amedas-bot/1.0 (+https://github.com/)"},
         )
         try:
-            with urllib.request.urlopen(req) as resp:
-                print(f"[Discord] POST {resp.status} ({content or 'no content'})")
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                print(f"[Discord] POST {resp.status} ({content[:20]})")
         except Exception as e:
             print(f"[WARN] Discord POST 失敗: {e}")
 
-    if allamedas:
-        _post_multipart(allamedas, content=f"**アメダス観測値（WCN）**\n🔗 [アメダス（秋田）](<{JMA_AMEDAS_URL}>)")
-    if rankings:
-        _post_multipart(rankings, content="**アメダスランキング（WCN）**")
+    post([(f, b) for f, b in images if f.startswith("amedas_akita")],
+         f"**アメダス観測値（秋田県）** {when.strftime('%m/%d %H:%M')}現在\n🔗 [アメダス（秋田）](<{JMA_AMEDAS_URL}>)")
+    post([(f, b) for f, b in images if f.startswith("amedas_ranking")],
+         "**アメダスランキング（全国・当日0時〜最新の正時値）**")
 
 
-def main_wcn(post_notion: bool = True) -> Tuple[List[Tuple[str, bytes]], List[str]]:
-    """WCN アメダス観測値・ランキング: スクリーンショット → R2 → Discord → Notion。"""
+def main_ranking(post_notion: bool = True) -> Tuple[List[Tuple[str, bytes]], List[str]]:
+    """アメダス観測値・ランキング: JMA公開API → 画像 → R2 → Discord → Notion。"""
     jst_now = datetime.now(JST)
-    images = screenshot_wcn_amedas_pages()
+    images = build_amedas_images()
     if not images:
-        print("[INFO] WCN アメダス画像なし — スキップ")
+        print("[INFO] アメダス画像なし — スキップ")
         return [], []
 
     r2_urls = _upload_r2(images, jst_now)
-    post_wcn_amedas_to_discord(images)
+    post_amedas_to_discord(images, jst_now)
 
     if post_notion:
-        ts = jst_now.strftime("%m/%d %H:%M")
         _notion_write(
-            title=f"WCN アメダス観測値・ランキング / {ts}",
+            title=f"アメダス観測値・ランキング / {jst_now.strftime('%m/%d %H:%M')}",
             r2_urls=r2_urls,
             jst_now=jst_now,
             yml_jst=_nearest_scheduled_slot_jst(jst_now, [6, 12, 18]),
         )
-
     return images, r2_urls
 
 
