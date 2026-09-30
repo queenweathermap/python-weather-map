@@ -683,6 +683,17 @@ SITE_PAGES = [
 ]
 SITE_EXPECTED = [fn for _, tg in SITE_PAGES for fn, _ in tg]
 
+# 撮影時に隠すサイトの部品(スクロールに追従して固定されるメニューやサイドバー、通知の案内などが、
+# 撮影対象の要素に重なって写り込むのを防ぐ)
+SITE_HIDE_CSS = """
+#header, #header_main, #header_meta, .header_bg, #wpadminbar, .sidebar, aside, #footer, #socket,
+#scroll-top-link, .av-burger-menu-main, #onesignal-slidedown-container, #onesignal-bell-container,
+.onesignal-reset, .cmplz-cookiebanner, #cookie-notice { display: none !important; }
+#ac177, #ap177 { max-width: none !important; width: auto !important; }
+#ac177 th, #ap177 th { text-transform: none !important; letter-spacing: 0 !important; }
+html, body { scroll-behavior: auto !important; }
+"""
+
 
 def screenshot_site() -> List[Tuple[str, bytes]]:
     """サイトのページを開いて、対象の要素を撮影する。撮れた分だけ返す(失敗は握りつぶさず表示する)。"""
@@ -697,7 +708,7 @@ def screenshot_site() -> List[Tuple[str, bytes]]:
         browser = pw.chromium.launch(headless=True)
         headers = {"X-Shot-Token": SITE_SHOT_TOKEN} if SITE_SHOT_TOKEN else {}
         ctx = browser.new_context(
-            viewport={"width": 1000, "height": 900},
+            viewport={"width": 1400, "height": 1000},
             device_scale_factor=2,
             locale="ja-JP",
             extra_http_headers=headers,
@@ -714,6 +725,8 @@ def screenshot_site() -> List[Tuple[str, bytes]]:
                 if status >= 400 or "Just a moment" in title or "Attention Required" in title:
                     raise RuntimeError(f"アクセスできない/Cloudflareの確認画面 (HTTP {status}, title={title!r})")
                 page.locator('[data-ready="1"]').first.wait_for(timeout=90_000)
+                page.add_style_tag(content=SITE_HIDE_CSS)
+                page.wait_for_timeout(300)
                 for fname, sel in targets:
                     el = page.locator(sel).first
                     el.wait_for(timeout=10_000)
