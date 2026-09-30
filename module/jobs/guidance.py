@@ -13,11 +13,10 @@
 # 出力:
 #   guid_msm_rain.png  MSM 降水ガイダンス(沿岸/内陸 × 1h/3h/24h × 上位/中位/下位) + 発雷確率
 #   guid_msm_wind.png  MSM 風ガイダンス(秋田県のアメダス各地点)
-#   guid_short.png     短期予報(天気・風・降水確率・気温)
-#   guid_week.png      週間予報(天気・降水確率・信頼度・最高/最低気温と予測幅)
+#   guid_msm_weather.png  MSMから変換した、秋田県25市町村の3時間ごとの天気の目安(気象庁の予報ではない。module/jobs/msm_weather.py)
 #   jma_forecast.png   気象庁 秋田県天気予報ページのスクリーンショット(従来から継続)
-# WCNにあった気温・天気・日照などの地点別MSM時別ガイダンスと分布予報は、JMAが
-# 公開していない(または認証付き)ため再現できない。
+# 短期予報・週間予報の表は、気象庁 秋田県天気予報ページの撮影(jma_forecast.png)と内容が同じなので配信しない。
+# WCNの天気分布予報(市町村の3時間天気)は、気象庁の元データが無料で取れないため、MSMからの変換(目安)で代替している。
 # =============================================================================
 
 from __future__ import annotations
@@ -36,7 +35,6 @@ from typing import Dict, List, Optional, Tuple
 DISCORD_GUIDANCE_WEBHOOK_URL = os.environ.get("DISCORD_GUIDANCE_WEBHOOK_URL", "")
 
 JMA_ADV_DATA = "https://www.jma.go.jp/bosai/advisor/data"
-JMA_FORECAST_JSON = "https://www.jma.go.jp/bosai/forecast/data/forecast/050000.json"
 AMEDAS_TABLE_URL = "https://www.jma.go.jp/bosai/amedas/const/amedastable.json"
 JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/#area_type=offices&area_code=050000"
 
@@ -54,22 +52,6 @@ WIND_DIR_JP = {
     "SE": "南東", "SSE": "南南東", "S": "南", "SSW": "南南西", "SW": "南西", "WSW": "西南西",
     "W": "西", "WNW": "西北西", "NW": "北西", "NNW": "北北西",
 }
-
-# 天気コード → 短い天気文言(主要コードのみ。無ければ先頭桁で大分類)
-WEATHER_TEXT = {
-    "100": "晴", "101": "晴時々曇", "102": "晴一時雨", "103": "晴時々雨", "104": "晴一時雪",
-    "105": "晴時々雪", "110": "晴のち時々曇", "111": "晴のち曇", "112": "晴のち一時雨",
-    "113": "晴のち時々雨", "114": "晴のち雨", "115": "晴のち一時雪", "116": "晴のち時々雪",
-    "117": "晴のち雪", "200": "曇", "201": "曇時々晴", "202": "曇一時雨", "203": "曇時々雨",
-    "204": "曇一時雪", "205": "曇時々雪", "206": "曇時々雨か雪", "207": "曇時々雨か雪",
-    "210": "曇のち時々晴", "211": "曇のち晴", "212": "曇のち一時雨", "213": "曇のち時々雨",
-    "214": "曇のち雨", "215": "曇のち一時雪", "216": "曇のち時々雪", "217": "曇のち雪",
-    "218": "曇のち雨か雪", "300": "雨", "301": "雨時々晴", "302": "雨時々止む", "303": "雨時々雪",
-    "308": "大雨", "311": "雨のち晴", "313": "雨のち曇", "314": "雨のち時々雪", "315": "雨のち雪",
-    "400": "雪", "401": "雪時々晴", "402": "雪時々止む", "403": "雪時々雨", "406": "暴風雪",
-    "411": "雪のち晴", "413": "雪のち曇", "414": "雪のち雨",
-}
-WEATHER_FALLBACK = {"1": "晴系", "2": "曇系", "3": "雨系", "4": "雪系"}
 
 # 画像スタイル(module/jobs/amedas.py の表と揃える)
 RAIN_COLORS = [(50, (230, 80, 160)), (30, (255, 130, 130)), (20, (255, 190, 120)),
@@ -230,113 +212,6 @@ def build_msm_wind() -> Optional[Tuple[bytes, datetime]]:
 
 
 # =============================================================================
-# [3] 短期予報・週間予報(気象庁 府県天気予報 公開JSON)
-# =============================================================================
-
-def _wx(code: str) -> str:
-    if not code:
-        return "---"
-    return WEATHER_TEXT.get(code) or WEATHER_FALLBACK.get(code[:1], code)
-
-
-def _md(iso: str) -> str:
-    t = datetime.fromisoformat(iso).astimezone(JST)
-    return f"{t.month}/{t.day}({'月火水木金土日'[t.weekday()]})"
-
-
-def _dh(iso: str) -> str:
-    t = datetime.fromisoformat(iso).astimezone(JST)
-    return f"{t.day}日{t.hour:02d}時"
-
-
-def _tlabel(iso: str) -> str:
-    """気温予報の時刻定義: 00時=朝の最低、09時=日中の最高。"""
-    t = datetime.fromisoformat(iso).astimezone(JST)
-    return f"{t.month}/{t.day}{'最高' if t.hour == 9 else '最低'}"
-
-
-def build_short(fc) -> Optional[bytes]:
-    short = fc[0]
-    weather = short["timeSeries"][0]
-    pops = short["timeSeries"][1]
-    temps = short["timeSeries"][2]
-
-    headers = ["区域", "日", "天気", "風"]
-    rows = []
-    for a in weather["areas"]:
-        for i, td in enumerate(weather["timeDefines"]):
-            rows.append([
-                a["area"]["name"], _md(td), a.get("weathers", [""] * 3)[i].replace("　", ""),
-                a.get("winds", [""] * 3)[i].replace("　", ""),
-            ])
-    img1 = _draw(f"短期予報（秋田県）  {_md(short['reportDatetime'])} {short['publishingOffice']}発表",
-                 headers, rows, set())
-
-    # 降水確率(6時間毎)・地点気温
-    ph = ["区域"] + [_dh(t) for t in pops["timeDefines"]]
-    prow, pcol = [], {}
-    for r, a in enumerate(pops["areas"]):
-        prow.append([a["area"]["name"]] + [f"{p}%" if p != "" else "---" for p in a["pops"]])
-        for ci, p in enumerate(a["pops"], 1):
-            c = _shade(_num(p), POT_COLORS)
-            if c:
-                pcol[(r, ci)] = c
-    img2 = _draw("降水確率（6時間毎）", ph, prow, set(range(1, len(ph))), pcol)
-
-    th = ["地点"] + [_tlabel(t) for t in temps["timeDefines"]]
-    trow = [[a["area"]["name"]] + [f"{v}℃" if v != "" else "---" for v in a["temps"]] for a in temps["areas"]]
-    img3 = _draw("気温予報（最低=朝の最低気温 / 最高=日中の最高気温）", th, trow, set(range(1, len(th))))
-
-    try:
-        from PIL import Image
-        imgs = [Image.open(io.BytesIO(b)).convert("RGB") for b in (img1, img2, img3)]
-        w = max(i.width for i in imgs)
-        h = sum(i.height for i in imgs) + 8 * (len(imgs) - 1)
-        canvas = Image.new("RGB", (w, h), (220, 220, 220))
-        y = 0
-        for im in imgs:
-            canvas.paste(im, (0, y))
-            y += im.height + 8
-        buf = io.BytesIO()
-        canvas.save(buf, "PNG")
-        return buf.getvalue()
-    except Exception as e:
-        print(f"[WARN] 短期予報 合成失敗: {e}")
-        return img1
-
-
-def build_week(fc) -> Optional[bytes]:
-    week = fc[1]
-    wx, tp = week["timeSeries"][0], week["timeSeries"][1]
-    w = wx["areas"][0]
-    t = tp["areas"][0]
-
-    def rng(vals, up, lo, i):
-        v = vals[i] if i < len(vals) else ""
-        if v == "":
-            return "---"
-        u = up[i] if i < len(up) else ""
-        l = lo[i] if i < len(lo) else ""
-        return f"{v} ({l}〜{u})" if u != "" and l != "" else v
-
-    headers = ["日", "天気", "降水確率", "信頼度", "最高℃ (予測幅)", "最低℃ (予測幅)"]
-    rows, colors = [], {}
-    for i, td in enumerate(wx["timeDefines"]):
-        pop = w["pops"][i] if i < len(w["pops"]) else ""
-        rows.append([
-            _md(td), _wx(w["weatherCodes"][i]), f"{pop}%" if pop != "" else "---",
-            (w["reliabilities"][i] if i < len(w["reliabilities"]) else "") or "---",
-            rng(t["tempsMax"], t["tempsMaxUpper"], t["tempsMaxLower"], i),
-            rng(t["tempsMin"], t["tempsMinUpper"], t["tempsMinLower"], i),
-        ])
-        c = _shade(_num(pop), POT_COLORS)
-        if c:
-            colors[(i, 2)] = c
-    return _draw(f"週間予報（秋田県・{t['area']['name']}）  {_md(week['reportDatetime'])} {week['publishingOffice']}発表",
-                 headers, rows, {2, 3, 4, 5}, colors)
-
-
-# =============================================================================
 # 気象庁 秋田県天気予報ページのスクリーンショット(従来から継続して配信)
 # =============================================================================
 
@@ -399,15 +274,14 @@ def build_images() -> Tuple[List[Tuple[str, bytes]], Optional[datetime]]:
         except Exception as e:
             print(f"[WARN] {fname} 生成失敗: {e}")
 
-    fc = _get_json(JMA_FORECAST_JSON)
-    if fc and len(fc) >= 2:
-        for fname, fn in (("guid_short.png", build_short), ("guid_week.png", build_week)):
-            try:
-                img = fn(fc)
-                if img:
-                    images.append((fname, img))
-            except Exception as e:
-                print(f"[WARN] {fname} 生成失敗: {e}")
+    # MSMから作る、市町村ごとの天気の目安(気象庁の天気予報ではない。画像に但し書きを入れる)
+    try:
+        from module.jobs.msm_weather import build_msm_weather
+        res = build_msm_weather()
+        if res:
+            images.append(("guid_msm_weather.png", res[0]))
+    except Exception as e:
+        print(f"[WARN] guid_msm_weather.png 生成失敗: {e}")
 
     jf = screenshot_jma_forecast()
     if jf:
@@ -512,7 +386,8 @@ def main():
     _post_images_bulk(
         images,
         content=(f"**ガイダンス（秋田県）** MSM初期値 {init_txt}JST\n"
-                 f"🔗 [気象庁 秋田県天気予報](<{JMA_FORECAST_URL}>)"),
+                 f"🔗 [気象庁 秋田県天気予報](<{JMA_FORECAST_URL}>)\n"
+                 "※「MSM 天気の目安」は、気象庁のMSM数値予報から当方で天気に変換した参考の目安で、気象庁が発表する天気予報ではありません。"),
     )
 
     # Notion資料アーカイブDBへ1件にまとめて記録する（Discord/PWAとは独立、
@@ -545,7 +420,7 @@ def main():
             append_bookmark(page_id, JMA_FORECAST_URL, caption="気象庁 秋田県天気予報")
             ok_urls = [u for u in urls if u]
             if ok_urls:
-                append_heading(page_id, "MSMガイダンス・短期予報・週間予報（秋田県）", level=2)
+                append_heading(page_id, "MSMガイダンス・天気の目安・気象庁 秋田県天気予報（※天気の目安は気象庁の予報ではありません）", level=2)
                 items = [(f"{i + 1:02d}.png", u, "image/png") for i, u in enumerate(ok_urls)]
                 try:
                     append_imported_images_from_urls(page_id, items, chunk=10)
