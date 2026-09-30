@@ -15,7 +15,7 @@ jobs:
       TZ: Asia/Tokyo
 
       # ------------------------------------------------------------
-      # Discord  #amedas 専用チャンネル
+      # Discord  #177-amedas 専用チャンネル
       # ------------------------------------------------------------
       DISCORD_AMEDAS_WEBHOOK_URL: ${{ secrets.DISCORD_AMEDAS_WEBHOOK_URL }}
 

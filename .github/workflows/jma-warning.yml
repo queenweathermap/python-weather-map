@@ -40,7 +40,7 @@ jobs:
           # JMAアメダス(鷹巣・秋田・横手)もこのチャンネルへ同じ時刻に投稿する
           # (module/jobs/weather_warning.py::post_amedas_detail、2026-09-16追加)。
           # Discordと同じ内容をNotionにも1件アーカイブする(2026-09-18変更。
-          # 従来はscripts/wcn_amedas.py側(朝6/12/18時)がR2/Notionを担当して
+          # 従来はscripts/jma_amedas.py側(朝6/12/18時)がR2/Notionを担当して
           # いたが、Discord投稿内容と記録内容を一致させるためこちらに一本化した)。
           R2_ENABLE: "1"
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}

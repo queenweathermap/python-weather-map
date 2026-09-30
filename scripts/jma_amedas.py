@@ -2,7 +2,7 @@
 # =============================================================================
 # scripts/jma_amedas.py
 #
-# アメダス観測値・ランキング(JMA公開API) → R2 → Discord(#amedas)
+# アメダス観測値・ランキング(JMA公開API) → R2 → Discord(#177-amedas)
 # → Notion。
 #
 # 鷹巣・秋田・横手のJMAアメダス3地点詳細(module.jobs.amedas.main())は

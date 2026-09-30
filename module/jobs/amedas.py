@@ -15,7 +15,7 @@
 #              （撮れなかった画像はJMA公開APIからPillowで描画して補う。collect_images参照）
 #              （2026-09-30、WCNサーバ停止によりスクショ方式から置換）。
 # 配信: scripts/jma_amedas.py経由で朝6時/12時/18時（JST）にmain_ranking()のみ実行し、
-#      R2保存・Discord(#amedas)投稿・Notion記録まで行う。
+#      R2保存・Discord(#177-amedas)投稿・Notion記録まで行う。
 # =============================================================================
 
 from __future__ import annotations
@@ -369,7 +369,7 @@ def _notion_write(
 
 def _post_image(image_bytes: bytes, filename: str, content: str = "", webhook_url: str = ""):
     """Discord Webhook にファイルを添付して送信する。webhook_url省略時は
-    DISCORD_AMEDAS_WEBHOOK_URL(#amedas)を使う。jma-warningチャンネルなど
+    DISCORD_AMEDAS_WEBHOOK_URL(#177-amedas)を使う。jma-warningチャンネルなど
     別の投稿先に送りたい呼び出し元は明示的に渡す。"""
     webhook_url = webhook_url or DISCORD_AMEDAS_WEBHOOK_URL
     if not webhook_url:
@@ -467,7 +467,7 @@ def main(
         )
 
     # Discord 投稿（呼び出し元が制御する場合は skip。discord_webhook_url指定時は
-    # #amedasの代わりにそちらへ投稿する）
+    # #177-amedasの代わりにそちらへ投稿する）
     if post_discord:
         for i, (fname, img_d) in enumerate(detail_imgs):
             content = f"<{JMA_AMEDAS_URL}>" if i == 0 else ""
@@ -766,7 +766,7 @@ def collect_images() -> List[Tuple[str, bytes]]:
 
 
 def post_amedas_to_discord(images: List[Tuple[str, bytes]], when: datetime) -> None:
-    """Discord #amedas へ、秋田県一覧とランキングの2メッセージで投稿。"""
+    """Discord #177-amedas へ、秋田県一覧とランキングの2メッセージで投稿。"""
     url = DISCORD_AMEDAS_WEBHOOK_URL
     if not url:
         print("[SKIP] DISCORD_AMEDAS_WEBHOOK_URL 未設定 — Discord 投稿をスキップ")
