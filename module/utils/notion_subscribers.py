@@ -12,6 +12,9 @@
 #   admin    ... 運営者自身。課金なしで常に配信対象
 #   lifetime ... 本格運用開始より前から参加してくれた人。課金なしで常に配信対象
 #                （betaと違い期限なし。自己登録ルートは無く、Notionに手動で設定する）
+#   wcn      ... WCN(気象キャスターネットワーク)のサーバ停止中の暫定無料公開(2026-10-01〜)。
+#                Stripeを経由せず、Notionに手動で登録する。復旧したらStatus=wcnの行を
+#                まとめてcanceledにする。Worker側(weather-dm-signup src/notion.ts)も同じ扱い
 #   canceled ... 配信対象外
 #
 # 必要な環境変数
@@ -38,7 +41,7 @@ API_BASE = "https://api.notion.com/v1"
 JST = timezone(timedelta(hours=9))
 BETA_CUTOFF = datetime(2026, 10, 1, 0, 0, tzinfo=JST)
 
-ELIGIBLE_STATUSES = ("active", "beta", "admin", "lifetime")
+ELIGIBLE_STATUSES = ("active", "beta", "admin", "lifetime", "wcn")
 
 
 def _env(name: str, default: str = "") -> str:
@@ -113,7 +116,7 @@ def _existing_select_options(data_source_id: str, prop_name: str) -> set:
 
 
 def _query_eligible_pages() -> List[dict]:
-    """購読者データベースから配信対象（active/beta/admin/lifetime）のページ一覧を返す。
+    """購読者データベースから配信対象（active/beta/admin/lifetime/wcn）のページ一覧を返す。
     ただしbetaはBETA_CUTOFFを過ぎたら対象外にする（Notion側のStatusは
     手動更新不要で、ここでの日付判定だけで自動的に配信が止まる）。
     Discord経由・PWA(メール)経由どちらの購読者もこの1つの判定を共有する。"""
