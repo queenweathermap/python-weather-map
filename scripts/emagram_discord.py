@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import os
 import re
@@ -266,20 +267,67 @@ RETRY_COUNT = 3
 RETRY_WAIT_SECONDS = 180
 
 
+# ワイオミング大学のサーバーは、同じ地点・時刻の画像でも取得のたびに描画し直して
+# いるらしく、他の利用者のリクエストと重なったタイミングで別地点・別年月日・
+# 別スタイルの画像が返ってくることがある(2026-10-07分で館野・秋田・松江・
+# 南大東島・父島の12Zに混入。同じ地点を続けて取り直すと正常な画像に戻る)。
+# 取得した画像の中身(地点・時刻)はこちらでは検証できないため、同じ画像が
+# 2回(PNGのメタデータ差を除くため画素単位で)一致するまで取り直し、一致した
+# ものだけを採用する。前日まとめで時間がかかっても質を優先する運用のため、
+# 一致するまで間隔を空けて最大VERIFY_MAX_FETCHES回まで粘る。
+VERIFY_MAX_FETCHES = 8
+VERIFY_WAIT_SECONDS = 10
+
+
+def _pixel_digest(img_bytes: bytes) -> str | None:
+    try:
+        with Image.open(BytesIO(img_bytes)) as im:
+            return hashlib.sha256(im.convert("RGB").tobytes()).hexdigest()
+    except Exception as exc:
+        print(f"WARN: 画像のデコードに失敗: {exc}", file=sys.stderr)
+        return None
+
+
+def fetch_verified_image(stnm: str, dt: datetime) -> bytes | None:
+    """画素が2回一致した画像だけを返す。最初の取得でデータなし(None)なら即None。
+    一致が得られないまま上限に達した場合もNone(呼び出し側のリトライ・
+    プレースホルダー処理に任せる)。"""
+    seen: dict[str, bytes] = {}
+    for attempt in range(1, VERIFY_MAX_FETCHES + 1):
+        if attempt > 1:
+            time.sleep(VERIFY_WAIT_SECONDS)
+        img = fetch_image(stnm, dt)
+        if img is None:
+            if not seen:
+                return None
+            continue
+        digest = _pixel_digest(img)
+        if digest is None:
+            continue
+        if digest in seen:
+            if attempt > 2:
+                print(f"VERIFIED: {stnm} は{attempt}回目の取得で一致を確認")
+            return seen[digest]
+        seen[digest] = img
+    print(f"WARN: {stnm} は{VERIFY_MAX_FETCHES}回取得しても画像が一致しませんでした"
+          f"(別画像の混入が続いた可能性)", file=sys.stderr)
+    return None
+
+
 def fetch_image_with_fallback(stnm: str, name: str, dt: datetime, streak: int) -> tuple[bytes, bool]:
     """当該時刻の画像を確保する。無ければプレースホルダー。
     地点間で時系列がずれるのを避けるため、前回観測への遡りはしない。
     一部地点はサーバー側の反映が観測から数時間後にずれ込むことがあるため、
     取得できない場合は少し待って数回リトライしてから諦める。
     戻り値: (画像bytes, データ取得に成功したか)"""
-    img_bytes = fetch_image(stnm, dt)
+    img_bytes = fetch_verified_image(stnm, dt)
     if img_bytes:
         return img_bytes, True
 
     for attempt in range(1, RETRY_COUNT + 1):
         print(f"RETRY {attempt}/{RETRY_COUNT}: {name} を{RETRY_WAIT_SECONDS}秒後に再試行します")
         time.sleep(RETRY_WAIT_SECONDS)
-        img_bytes = fetch_image(stnm, dt)
+        img_bytes = fetch_verified_image(stnm, dt)
         if img_bytes:
             print(f"RETRY OK: {name}")
             return img_bytes, True
