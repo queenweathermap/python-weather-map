@@ -29,6 +29,11 @@
 # だと1回の遅延・欠落だけで実質観測幅(約6.8時間)を超える空白ができてしまう
 # 不具合が実際に起きたため、3時間おき(1日8回)に増やして耐性を上げた
 # (2026-09-08)。
+#
+# ただしGitHub Actionsのscheduleは3時間おきと書いても実際には約7時間おきに
+# しか動かない日が続き(2026-10-07時点)、窓(約7時間)がぴったり接して
+# JST 8/15/22時付近が途切れたため、2026-10-08に「1回の実行で窓を過去側へ
+# 6時間ずつずらして3枚撮る」方式を追加した(WINDOW_SHIFT_HOURS参照)。
 
 from __future__ import annotations
 
@@ -139,6 +144,30 @@ STATION_GAP = STATION_HEADER_HEIGHT * 2
 # 継ぎ目で同種のズレが起きていたが、実撮影間隔が短い箇所ほどズレが小さく
 # 目立たなかっただけだった)。
 PX_PER_HOUR = 89.75
+
+# 1回の実行で「最新の窓」に加えて、窓を過去側へずらした分も撮影する。
+# 窓の幅は約7時間(JMAのチャートは48時間分の軸の一部を #wpr-innersvg の
+# translate でスライドして見せている)。GitHub Actionsのscheduleは3時間おきと
+# 書いても実際には1日3〜4回・約7時間おきにしか動かないことがあり(2026-10-07
+# の実行履歴: 06:04Z→13:29Z→20:38Z)、最新の窓だけだと前回との間に窓がぴったり
+# 接する/すき間ができ、JST 8時・15時・22時付近が途切れた。過去側にも窓を
+# 撮っておけば、実行間隔が多少空いても・何回か欠けても窓同士が重なる。
+# ずらし幅(6時間)は窓幅(約7時間)より小さくして1時間強の重なりを持たせる。
+# 10分値の元データ(data/<code>.json)は約48時間分あるため、12時間前までは
+# 常に遡れる。
+WINDOW_SHIFT_HOURS = 6
+WINDOW_SHOT_COUNT = int(os.environ.get("WINDPROFILER_WINDOW_SHOT_COUNT", "3"))
+
+# 窓をk回ぶん過去側へずらす(h時間)。目盛り(.xaxis .tick)の間隔=1時間分のpxから
+# 平行移動量を求めて translate を直接書き換える。成功したらtrue。
+SHIFT_WINDOW_JS = r"""(h) => {
+  const g = document.querySelector('#wpr-innersvg');
+  const t = [...document.querySelectorAll('#wpr-chart .xaxis .tick')];
+  if (!g || t.length < 2) return false;
+  const x = e => parseFloat(/translate\(([-\d.]+)/.exec(e.getAttribute('transform'))[1]);
+  g.setAttribute('transform', 'translate(' + (h * (x(t[1]) - x(t[0]))) + ',10)');
+  return true;
+}"""
 
 R2_RETENTION_DAYS = os.environ.get("R2_RETENTION_DAYS", "21")
 
@@ -340,12 +369,12 @@ def placeholder_image(name: str) -> bytes:
     return buf.getvalue()
 
 
-def screenshot_all_stations() -> List[Tuple[str, bytes]]:
-    """全33地点の #wpr-chart を撮影して [(地点名, PNGバイト列), ...] を返す。
-    個別地点の撮影に失敗した場合はプレースホルダーで埋める。"""
+def screenshot_all_stations() -> List[Tuple[str, List[bytes]]]:
+    """全33地点の #wpr-chart を撮影して [(地点名, [PNG(最新の窓), PNG(6時間前の窓), ...]), ...]
+    を返す。個別地点の撮影に失敗した場合は最新の窓のみプレースホルダーで埋める。"""
     from playwright.sync_api import sync_playwright
 
-    results: List[Tuple[str, bytes]] = []
+    results: List[Tuple[str, List[bytes]]] = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -358,6 +387,7 @@ def screenshot_all_stations() -> List[Tuple[str, bytes]]:
             page.wait_for_timeout(INITIAL_WAIT_MS)
 
             for i, (code, name) in enumerate(STATIONS_ALL):
+                shots: List[bytes] = []
                 try:
                     if i > 0:
                         page.evaluate(f"location.hash = 'code={code}&type=chart'")
@@ -373,10 +403,24 @@ def screenshot_all_stations() -> List[Tuple[str, bytes]]:
 
                     raw = page.locator(CHART_SELECTOR).screenshot()
                     print(f"[OK] {name} ({code})  {len(raw):,} bytes")
-                    results.append((name, raw))
+                    shots.append(raw)
                 except Exception as e:
                     print(f"[WARN] {name} ({code}) 撮影失敗: {e}")
-                    results.append((name, placeholder_image(name)))
+                    results.append((name, [placeholder_image(name)]))
+                    continue
+
+                # 窓を過去側へずらした分(失敗しても最新の窓は残す)
+                for k in range(1, WINDOW_SHOT_COUNT):
+                    try:
+                        if not page.evaluate(SHIFT_WINDOW_JS, k * WINDOW_SHIFT_HOURS):
+                            print(f"[WARN] {name}: 窓のずらしに失敗しました(目盛りが見つからない)")
+                            break
+                        page.wait_for_timeout(300)
+                        shots.append(page.locator(CHART_SELECTOR).screenshot())
+                    except Exception as e:
+                        print(f"[WARN] {name} ({code}) {k * WINDOW_SHIFT_HOURS}時間前の窓の撮影失敗: {e}")
+                        break
+                results.append((name, shots))
         finally:
             browser.close()
 
@@ -388,15 +432,19 @@ def station_key(code: str, dt_jst: datetime) -> str:
     return f"stations/{code}/{dt_jst.strftime('%Y%m%d%H%M')}.png"
 
 
-def upload_station_images(all_images: List[Tuple[str, bytes]], dt_jst: datetime) -> None:
+def upload_station_images(all_images: List[Tuple[str, List[bytes]]], dt_jst: datetime) -> None:
     """地点ごとのraw画像を個別にR2へ保存する（1日1回のmain_daily_stations()が
-    後でまとめ直すための材料）。購読者向けDiscord配信(main())の成否には
-    影響させないよう、失敗しても例外は握りつぶしログのみ出す。"""
-    for (code, name), (_name, img_bytes) in zip(STATIONS_ALL, all_images):
-        try:
-            put_bytes(station_key(code, dt_jst), img_bytes, content_type="image/png")
-        except Exception as e:
-            print(f"[WARN] {name} ({code}) の個別画像アップロードに失敗: {e}", file=sys.stderr)
+    後でまとめ直すための材料）。窓を過去側へずらしたk枚目は、その窓の終端時刻
+    (撮影時刻 - k*WINDOW_SHIFT_HOURS)をファイル名にする(build_daily_station_grid()が
+    ファイル名の時刻を窓の終端として貼り合わせるため)。失敗しても例外は握りつぶし
+    ログのみ出す。"""
+    for (code, name), (_name, shots) in zip(STATIONS_ALL, all_images):
+        for k, img_bytes in enumerate(shots):
+            shot_dt = dt_jst - timedelta(hours=k * WINDOW_SHIFT_HOURS)
+            try:
+                put_bytes(station_key(code, shot_dt), img_bytes, content_type="image/png")
+            except Exception as e:
+                print(f"[WARN] {name} ({code}) の個別画像アップロードに失敗: {e}", file=sys.stderr)
 
 
 def build_daily_station_grid(dt_jst: datetime, *, cols: int = 5) -> Tuple[bytes, int]:
