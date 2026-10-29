@@ -202,3 +202,40 @@ def get_active_emails() -> List[str]:
         if email:
             emails.append(email)
     return emails
+
+
+def get_free_emails() -> List[str]:
+    """無料プラン(Status=free、カード不要のメール登録)のメールアドレスを返す。
+    有料の配信対象(ELIGIBLE_STATUSES)には含めず、1日1回の無料配信だけに使う。
+    free選択肢がまだ作られていない(無料登録者がまだ0人)ときは空を返す。"""
+    db_id = _must_env("NOTION_SUBSCRIBERS_DATABASE_ID")
+    data_source_id = _resolve_data_source_id(db_id)
+    if "free" not in _existing_select_options(data_source_id, _prop_status()):
+        return []
+
+    emails: List[str] = []
+    cursor = None
+    while True:
+        body = {
+            "filter": {"property": _prop_status(), "select": {"equals": "free"}},
+            "page_size": 100,
+        }
+        if cursor:
+            body["start_cursor"] = cursor
+        r = requests.post(
+            f"{API_BASE}/data_sources/{data_source_id}/query",
+            headers=_headers(),
+            json=body,
+            timeout=30,
+        )
+        _raise_with_body(r)
+        data = r.json()
+        for page in data.get("results", []):
+            email = _rich_text_value(page, _prop_email())
+            if email:
+                emails.append(email)
+        if data.get("has_more"):
+            cursor = data.get("next_cursor")
+        else:
+            break
+    return emails

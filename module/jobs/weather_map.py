@@ -37,7 +37,7 @@ from module.utils.notion_utils import (
 from module.utils.discord_utils import (
     post_discord_complete,
 )
-from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails
+from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails, get_free_emails
 from module.utils.discord_dm import send_dm_to_all
 from module.utils.onesignal_push import send_push_to_all
 
@@ -2881,6 +2881,27 @@ def notify_dm_subscribers(
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
 
+def notify_free_subscribers(*, push_title: str) -> None:
+    """無料プラン(カード不要のメール登録)の人へ、全部入り天気図のプッシュを1日1回だけ送る。
+    全部入りは1日4回生成されるが、無料は11:30 JST頃の回(FREE_PUSH_JST_HOURS、
+    既定11時台)だけ。有料との差(4回/日・高層・週間)を見せて移行を促すのが狙い。
+    会員ページ側のWorker /recent は無料に最新1枚だけ返す。失敗しても握りつぶす。"""
+    hours = {int(h) for h in os.environ.get("FREE_PUSH_JST_HOURS", "11").split(",") if h.strip()}
+    if now_jst().hour not in hours:
+        return
+    try:
+        emails = get_free_emails()
+        if emails:
+            send_push_to_all(
+                emails,
+                push_title,
+                "今日の天気図が届きました。有料プランなら毎日4回・高層データも届きます。",
+                url=PWA_MEMBER_URL,
+            )
+    except Exception as e:
+        print(f"[WARN] 無料プランpush送信失敗: {e}")
+
+
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:
     if not discord_jma_enabled():
         return
@@ -2998,6 +3019,7 @@ def main_dashboard_jma() -> None:
                         thumb_mime,
                         push_title=DISCORD_TITLES.get(filename, filename),
                     )
+                    notify_free_subscribers(push_title=DISCORD_TITLES.get(filename, filename))
                 else:
                     print(f"[WARN] Discord thumbnail source missing: {src_path}")
 
