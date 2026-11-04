@@ -27,7 +27,7 @@ BATCH_SIZE = 100  # Resendのbatch APIは1リクエスト100通まで
 REFERENCE_LINKS = [
     ("気象庁 専門家向け資料", "https://www.jma.go.jp/jma/kishou/know/expert/index.html"),
     ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
-    ("気象庁 分布情報", "https://www.jma.go.jp/bosai/forecast/"),
+    ("気象庁 天気予報", "https://www.jma.go.jp/bosai/forecast/"),
     ("気象庁 気象衛星", "https://www.jma.go.jp/bosai/map.html#5/34.5/137/&elem=ir&contents=himawari"),
     ("気象庁 波浪実況・予想図", "https://www.data.jma.go.jp/waveinf/tile/jp/#zoom:4/lat:34.000000/lon:135.000000/mapheight:600/colordepth:normal/element:wave"),
     ("国土交通省 水文水質データベース", "https://www1.river.go.jp/"),
