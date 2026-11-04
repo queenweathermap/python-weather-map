@@ -38,6 +38,7 @@ from module.utils.discord_utils import (
     post_discord_complete,
 )
 from module.utils.notion_subscribers import get_active_discord_ids, get_active_emails, get_free_emails
+from module.utils.email_notify import send_notice_emails
 from module.utils.discord_dm import send_dm_to_all
 from module.utils.onesignal_push import send_push_to_all
 
@@ -2880,6 +2881,19 @@ def notify_dm_subscribers(
         except Exception as e:
             print(f"[WARN] OneSignal push送信失敗: {e}")
 
+    # メールで受け取る設定(会員ページのボタン)をONにした有料購読者へ、会員ページへのリンクを送る。
+    if push_title:
+        try:
+            mail_to = get_active_emails(email_notify_only=True)
+            send_notice_emails(
+                mail_to,
+                subject=f"【177chart】{push_title}",
+                lead="新しい配信が届きました。",
+                member_url=PWA_MEMBER_URL,
+            )
+        except Exception as e:
+            print(f"[WARN] 天気図メール(有料)送信失敗: {e}")
+
 
 def notify_free_subscribers(*, push_title: str) -> None:
     """無料プラン(カード不要のメール登録)の人へ、全部入り天気図のプッシュを1日1回だけ送る。
@@ -2900,6 +2914,22 @@ def notify_free_subscribers(*, push_title: str) -> None:
             )
     except Exception as e:
         print(f"[WARN] 無料プランpush送信失敗: {e}")
+
+    # メールで受け取る設定をONにした無料会員へ、同じ回のお知らせをメールで送る。
+    try:
+        mail_to = get_free_emails(email_notify_only=True)
+        send_notice_emails(
+            mail_to,
+            subject=f"【177chart】{push_title}",
+            lead="今日の天気図が届きました。",
+            member_url=PWA_MEMBER_URL,
+            extra_html=(
+                '<p style="font-size:13px;">有料プランなら、全部入り天気図が毎日4回、'
+                "高層観測データ・週間予報資料・長期予報資料も届き、配信から21日間は見返せます。</p>"
+            ),
+        )
+    except Exception as e:
+        print(f"[WARN] 天気図メール(無料)送信失敗: {e}")
 
 
 def notify_discord_complete(*, errors: List[str], attach_count: int) -> None:

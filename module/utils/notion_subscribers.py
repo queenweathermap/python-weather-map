@@ -73,6 +73,10 @@ def _prop_email() -> str:
     return _env("NOTION_SUB_PROP_EMAIL", "Email")
 
 
+def _prop_email_notify() -> str:
+    return _env("NOTION_SUB_PROP_EMAIL_NOTIFY", "Email Notify")
+
+
 def _raise_with_body(r: requests.Response) -> None:
     """Notion APIのエラーはbodyに具体的な理由(code/message)が入っているため、
     ステータスコードだけでなくbodyもログに残す。"""
@@ -190,20 +194,29 @@ def get_active_discord_ids() -> List[str]:
     return ids
 
 
-def get_active_emails() -> List[str]:
+def _email_notify_on(page: dict) -> bool:
+    """会員ページの「メールで受け取る」ボタン(Notionの「Email Notify」チェック)がONか。"""
+    return page.get("properties", {}).get(_prop_email_notify(), {}).get("checkbox") is True
+
+
+def get_active_emails(email_notify_only: bool = False) -> List[str]:
     """配信対象のうち、Emailが設定されている購読者のメールアドレスを返す
-    （PWA/OneSignal向けのexternal_id）。"""
+    （PWA/OneSignal向けのexternal_id）。email_notify_only=Trueなら、
+    メール配信をONにした人だけ。"""
     emails = []
     for page in _query_eligible_pages():
+        if email_notify_only and not _email_notify_on(page):
+            continue
         email = _rich_text_value(page, _prop_email())
         if email:
             emails.append(email)
     return emails
 
 
-def get_free_emails() -> List[str]:
+def get_free_emails(email_notify_only: bool = False) -> List[str]:
     """無料プラン(Status=free、カード不要のメール登録)のメールアドレスを返す。
     有料の配信対象(ELIGIBLE_STATUSES)には含めず、1日1回の無料配信だけに使う。
+    email_notify_only=Trueなら、メール配信をONにした人だけ。
     free選択肢がまだ作られていない(無料登録者がまだ0人)ときは空を返す。"""
     db_id = _must_env("NOTION_SUBSCRIBERS_DATABASE_ID")
     data_source_id = _resolve_data_source_id(db_id)
@@ -228,6 +241,8 @@ def get_free_emails() -> List[str]:
         _raise_with_body(r)
         data = r.json()
         for page in data.get("results", []):
+            if email_notify_only and not _email_notify_on(page):
+                continue
             email = _rich_text_value(page, _prop_email())
             if email:
                 emails.append(email)
