@@ -23,9 +23,17 @@ RESEND_BATCH_API = "https://api.resend.com/emails/batch"
 REQUEST_TIMEOUT_SECONDS = 30
 BATCH_SIZE = 100  # Resendのbatch APIは1リクエスト100通まで
 
-# メール本文に添える気象庁のリンク。HTMLメールなのでリンク文字列で見せ、長いURLは画面に出さない。
-JMA_EXPERT_URL = "https://www.jma.go.jp/jma/kishou/know/expert/index.html"
-JMA_BOSAI_URL = "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"
+# メール本文に添える参考リンク。HTMLメールなのでリンク文字列で見せ、長いURLは画面に出さない。
+REFERENCE_LINKS = [
+    ("気象庁 専門家向け資料", "https://www.jma.go.jp/jma/kishou/know/expert/index.html"),
+    ("気象庁 防災情報", "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"),
+    ("気象庁 分布情報", "https://www.jma.go.jp/bosai/forecast/"),
+    ("気象庁 気象衛星", "https://www.jma.go.jp/bosai/map.html#5/34.5/137/&elem=ir&contents=himawari"),
+    ("気象庁 波浪実況・予想図", "https://www.data.jma.go.jp/waveinf/tile/jp/#zoom:4/lat:34.000000/lon:135.000000/mapheight:600/colordepth:normal/element:wave"),
+    ("国土交通省 水文水質データベース", "https://www1.river.go.jp/"),
+    ("University of Wyoming", "https://weather.arcc.uwyo.edu/upperair/"),
+    ("気象庁 ウィンドプロファイラ", "https://www.jma.go.jp/bosai/windprofiler/"),
+]
 
 
 def _env(name: str, default: str = "") -> str:
@@ -33,16 +41,23 @@ def _env(name: str, default: str = "") -> str:
     return default if v is None else v.strip()
 
 
+def _reference_links_html() -> str:
+    rows = "<br>".join(
+        f'🔗 <a href="{html.escape(url)}" target="_blank" rel="noopener">{html.escape(label)}</a>'
+        for label, url in REFERENCE_LINKS
+    )
+    return (
+        '<p style="font-size:13px;line-height:1.9;margin-top:18px;">'
+        f"参考リンク<br>{rows}</p>"
+    )
+
+
 def _build_html(lead: str, member_url: str, extra: str) -> str:
     return (
         f"<p>{html.escape(lead)}</p>"
         f'<p><a href="{html.escape(member_url)}">会員ページで天気図を見る</a></p>'
         f"{extra}"
-        '<p style="font-size:13px;line-height:1.9;margin-top:18px;">'
-        "気象庁の公開情報もあわせてご覧いただけます。<br>"
-        f'🔗 <a href="{html.escape(JMA_EXPERT_URL)}">気象庁 専門家向け資料</a><br>'
-        f'🔗 <a href="{html.escape(JMA_BOSAI_URL)}">気象庁 防災情報</a>'
-        "</p>"
+        f"{_reference_links_html()}"
         '<hr style="border:none;border-top:1px solid #ddd;margin:20px 0;">'
         '<p style="font-size:12px;color:#666;line-height:1.7;">'
         "このメールは、会員ページで「メールで受け取る」をONにしている方へお送りしています。<br>"
