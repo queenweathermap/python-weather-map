@@ -23,6 +23,10 @@ RESEND_BATCH_API = "https://api.resend.com/emails/batch"
 REQUEST_TIMEOUT_SECONDS = 30
 BATCH_SIZE = 100  # Resendのbatch APIは1リクエスト100通まで
 
+# メール本文に添える気象庁のリンク。HTMLメールなのでリンク文字列で見せ、長いURLは画面に出さない。
+JMA_EXPERT_URL = "https://www.jma.go.jp/jma/kishou/know/expert/index.html"
+JMA_BOSAI_URL = "https://www.jma.go.jp/bosai/#pattern=default&area_type=japan&area_code=010000"
+
 
 def _env(name: str, default: str = "") -> str:
     v = os.getenv(name)
@@ -34,6 +38,11 @@ def _build_html(lead: str, member_url: str, extra: str) -> str:
         f"<p>{html.escape(lead)}</p>"
         f'<p><a href="{html.escape(member_url)}">会員ページで天気図を見る</a></p>'
         f"{extra}"
+        '<p style="font-size:13px;line-height:1.9;margin-top:18px;">'
+        "気象庁の公開情報もあわせてご覧いただけます。<br>"
+        f'🔗 <a href="{html.escape(JMA_EXPERT_URL)}">気象庁 専門家向け資料</a><br>'
+        f'🔗 <a href="{html.escape(JMA_BOSAI_URL)}">気象庁 防災情報</a>'
+        "</p>"
         '<hr style="border:none;border-top:1px solid #ddd;margin:20px 0;">'
         '<p style="font-size:12px;color:#666;line-height:1.7;">'
         "このメールは、会員ページで「メールで受け取る」をONにしている方へお送りしています。<br>"
