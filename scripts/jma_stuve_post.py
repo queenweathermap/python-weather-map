@@ -97,7 +97,7 @@ def main() -> int:
         header=f"高層観測データ {label}まとめ",
         icon_emoji="📈",
         links=[("気象庁 過去の気象データ検索（高層）", JMA_UPPER_URL)],
-        yml_jst=(now.astimezone(JST)).replace(hour=4, minute=0, second=0, microsecond=0),
+        yml_jst=(now.astimezone(JST)).replace(hour=4, minute=30, second=0, microsecond=0),
     )
     content = (
         f"高層観測データ　{label}まとめ\n"

@@ -6,7 +6,7 @@ name: Emagram (JMA confirmed data, 2 days later)
 # (手動実行は残してある)。手動実行の既定は DRY_RUN=1(配信せずプレビューのみ)。
 on:
   schedule:
-    - cron: "0 19 * * *"   # UTC 19:00 = JST 翌04:00 (JST今日の2日前の観測をまとめて配信)
+    - cron: "30 19 * * *"   # UTC 19:30 = JST 翌04:30(ウィンドプロファイラ04:00と30分ずらし。公開時刻の実測後に再調整予定) (JST今日の2日前の観測をまとめて配信)
   workflow_dispatch:
     inputs:
       dry_run:
