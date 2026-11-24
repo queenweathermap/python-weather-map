@@ -1,0 +1,77 @@
+name: Emagram (JMA confirmed data, 2 days later)
+
+# 気象庁「過去の気象データ検索(高層)」の確定データから、15地点のStüve線図を
+# 合成して配信する(2日後配信)。emagram-discord.yml(Wyoming・前日まとめ)の補完/後継。
+# 切替前は手動実行のみ・DRY_RUN=1(配信せずR2のpreview/へ画像を置くだけ)。
+# 本番にする手順: schedule を有効化し、既定の DRY_RUN を "0" にする。
+# Wyoming版(emagram-discord.yml)を残すか止めるかは運用判断(二重配信に注意)。
+on:
+  # schedule:
+  #   - cron: "0 19 * * *"   # UTC 19:00 = JST 翌04:00
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "1=配信せずプレビューのみ / 0=本番配信"
+        default: "1"
+      target_date:
+        description: "対象日(JST, YYYYMMDD)。空ならJST今日の2日前"
+        default: ""
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    env:
+      DRY_RUN: ${{ github.event.inputs.dry_run || '1' }}
+      TARGET_DATE: ${{ github.event.inputs.target_date || '' }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      ASSET_BASE_URL: ${{ secrets.ASSET_BASE_URL }}
+      R2_PREFIX: "emagram"
+      R2_RETENTION_DAYS: "21"
+      R2_CLEANUP_DRY_RUN: "0"
+      DISCORD_DM_ENABLE: "0"
+      DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_SUBSCRIBERS_DATABASE_ID: ${{ secrets.NOTION_SUBSCRIBERS_DATABASE_ID }}
+      ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+      ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
+      NOTION_ENABLE: "1"
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      NOTION_IMPORT_IMAGES: "1"
+      NOTION_IMPORT_TIMEOUT_SECONDS: "240"
+      NOTION_IMPORT_POLL_SECONDS: "2.0"
+      NOTION_PROP_TITLE: "タイトル"
+      NOTION_PROP_CATEGORY: "区分"
+      NOTION_PROP_INIT_JST: "配信日時"
+      NOTION_PROP_MEMO: "メモ"
+      NOTION_PROP_R2URL: "R2 URL"
+      NOTION_PROP_AUTOGEN: "自動生成"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-temp.txt
+
+      - name: Install Japanese fonts
+        run: sudo apt-get install -y fonts-noto-cjk
+
+      - name: Install dependencies
+        run: pip install -r requirements-temp.txt
+
+      - name: Post emagram
+        run: python scripts/jma_stuve_post.py
+
+      - name: Cleanup old R2 objects
+        if: always()
+        run: python scripts/r2_cleanup.py

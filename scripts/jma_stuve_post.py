@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""気象庁の高層観測データ(確定値)から15地点のStüve線図を合成して2日後に配信する。
+
+気象庁の「過去の気象データ検索(高層)」は観測の翌日〜翌々日に反映される。
+UTC 19:00(JST翌04:00)に実行し、JST今日から2日前の 9時(00Z)/21時(12Z) をまとめる。
+データ元が公的で15地点の欠測が最小(0〜2地点)になるのが利点。速報性は無い。
+
+DRY_RUN=1(既定)の間は配信せず、R2の preview/ にだけ置いてURLを表示する。
+本番切替は workflow の env で DRY_RUN を "0" にする。
+TARGET_DATE=YYYYMMDD で対象日を指定できる(検証用)。
+"""
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from PIL import Image  # noqa: E402
+
+from module.utils.r2_utils import put_bytes, make_url  # noqa: E402
+from module.utils import stuve_grid, jma_upper  # noqa: E402
+
+DRY_RUN = os.environ.get("DRY_RUN", "1").strip().lower() in ("1", "true", "yes", "on")
+JMA_UPPER_URL = "https://www.data.jma.go.jp/stats/etrn/upper/index.php"
+SOURCE = "気象庁 高層気象観測(確定データ)"
+THUMB_MAX_WIDTH = 1400
+JST = timezone(timedelta(hours=9))
+
+
+def target_date(now: datetime) -> datetime:
+    t = os.environ.get("TARGET_DATE", "").strip()
+    if t:
+        return datetime.strptime(t, "%Y%m%d").replace(tzinfo=JST)
+    return (now.astimezone(JST) - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def main() -> int:
+    now = datetime.now(timezone.utc)
+    d = target_date(now)
+    stations = [s for _, s in stuve_grid.STATIONS]
+    print(f"対象日(JST): {d:%Y-%m-%d}  DRY_RUN={DRY_RUN}")
+    decoded = jma_upper.fetch_decoded(stations, d.year, d.month, d.day)
+    buf = BytesIO()
+    status = stuve_grid.build_grid(d.day, buf, decoded=decoded, source=SOURCE)
+    combined = buf.getvalue()
+    ok = sum(1 for v in status.values() for s in v if s == "ok")
+    print(f"cells drawn: {ok}/{len(status) * 2}")
+    for stn, v in status.items():
+        print(" ", stn, v)
+
+    # 反映前(全滅に近い)の日に誤って配信しない。通常は13/15地点×2=26前後。
+    if ok < 20:
+        print("描けたセルが少なすぎる(気象庁側の反映待ちの可能性)ため配信しない")
+        return 1
+
+    day_str = d.strftime("%Y%m%d")
+    if DRY_RUN:
+        key = f"preview/jma_stuve_{day_str}_{now:%H%M%S}.png"
+        put_bytes(key, combined, content_type="image/png")
+        print(f"DRY_RUN: preview uploaded: {make_url(key)}")
+        return 0
+
+    # ---- 本番配信 (emagram_discord と同じ経路) ----
+    from scripts import emagram_discord as ed
+
+    r2_key = f"{day_str}_{now:%H%M%S}.png"
+    put_bytes(r2_key, combined, content_type="image/png")
+    highres_url = make_url(r2_key)
+    print(f"R2 UPLOADED: {highres_url}")
+
+    with Image.open(BytesIO(combined)) as im:
+        rgb = im.convert("RGB")
+        if rgb.width > THUMB_MAX_WIDTH:
+            rgb = rgb.resize((THUMB_MAX_WIDTH, int(rgb.height * THUMB_MAX_WIDTH / rgb.width)))
+        tb = BytesIO()
+        rgb.save(tb, format="JPEG", quality=85, optimize=True)
+        thumb = tb.getvalue()
+
+    label = f"{d:%Y/%m/%d}"
+    ed.archive_to_notion(
+        title=f"エマグラム　{label}まとめ（確定データ・{len(stuve_grid.STATIONS)}地点）",
+        category="高層観測データ",
+        r2_urls=[highres_url],
+        jst_now=now,
+        pwa=True,
+        size_bytes=len(combined),
+        header=f"高層観測データ {label}まとめ（確定データ）",
+        icon_emoji="📈",
+        links=[("気象庁 過去の気象データ検索（高層）", JMA_UPPER_URL)],
+        yml_jst=(now.astimezone(JST)).replace(hour=4, minute=0, second=0, microsecond=0),
+    )
+    content = (
+        f"高層観測データ　{label}まとめ（確定データ）\n"
+        f"エマグラム {len(stuve_grid.STATIONS)}地点\n"
+        f"📥 [高解像度PNGをダウンロード（{ed.R2_RETENTION_DAYS}日間有効）](<{highres_url}>)"
+    )
+    ed.notify_dm_subscribers(content, thumb)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

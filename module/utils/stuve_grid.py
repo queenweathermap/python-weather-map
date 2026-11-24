@@ -70,7 +70,8 @@ def _cell(name, stn, day, hour, decoded):
     return im, "none" if not v else "partial"
 
 
-def build_grid(day, out_path, raw_dir=None, cols=3, decoded=None):
+def build_grid(day, out_path, raw_dir=None, cols=3, decoded=None,
+               source="気象庁 高層気象観測(TEMP電文)"):
     """out_path はパスでもBytesIOでも可。decoded を渡せば raw_dir は不要。"""
     if decoded is None:
         decoded = load_decoded(raw_dir)
@@ -88,7 +89,7 @@ def build_grid(day, out_path, raw_dir=None, cols=3, decoded=None):
             canvas.paste(im, ((c * 2 + k) * CELL_W, r * CELL_H))
     d = ImageDraw.Draw(canvas)
     now = datetime.now(timezone.utc)
-    note = f"作成日時: {now:%Y年%m月%d日 %H:%M} UTC　出典: 気象庁 高層気象観測(TEMP電文)　作成: 177chart"
+    note = f"作成日時: {now:%Y年%m月%d日 %H:%M} UTC　出典: {source}　作成: 177chart"
     f = _font(24)
     d.text((W - d.textlength(note, font=f) - 20, H - foot + 20), note, font=f, fill=(90, 90, 90))
     canvas.save(out_path, format="PNG", optimize=True)
