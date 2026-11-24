@@ -3,7 +3,6 @@
 build_grid(day, out_path, raw_dir) -> dict(地点番号: [00Zの状態, 12Zの状態])
 状態: "ok" 描画 / "partial" 電文はあるが図にできない / "none" 電文なし
 """
-import glob
 import os
 import sys
 from datetime import datetime, timezone
@@ -12,7 +11,6 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, os.path.dirname(__file__))
-import temp_decode as td  # noqa: E402
 import stuve_plot as sp  # noqa: E402
 
 STATIONS = [("稚内", "47401"), ("札幌", "47412"), ("釧路", "47418"),
@@ -33,18 +31,6 @@ def _font(size):
         except Exception:
             pass
     return ImageFont.load_default()
-
-
-def load_decoded(raw_dir):
-    txt = ""
-    for f in sorted(glob.glob(os.path.join(raw_dir, "*", "*.txt"))):
-        txt += open(f, errors="replace").read() + "\n"
-    return td.decode_text(txt)
-
-
-def decode_texts(texts):
-    """電文テキストのリスト(R2から取得した分など)をまとめてデコードする。"""
-    return td.decode_text("\n".join(texts) + "\n")
 
 
 def usable(levels):
@@ -94,7 +80,7 @@ def build_grid(day, out_path, raw_dir=None, cols=3, decoded=None,
     レイアウト: 3地点/行。各地点は 00Z(左)+12Z(右) の組で、組どうしは大きく空ける。
     地点名(大)と緯度経度は左(00Z)の上にだけ書く。"""
     if decoded is None:
-        decoded = load_decoded(raw_dir)
+        raise ValueError("decoded が必要")
     rows = (len(STATIONS) + cols - 1) // cols
     foot = 80
     block_w = 2 * CELL_W + GAP
@@ -122,10 +108,3 @@ def build_grid(day, out_path, raw_dir=None, cols=3, decoded=None,
     canvas.save(out_path, format="PNG", optimize=True)
     return status
 
-
-if __name__ == "__main__":
-    import matplotlib
-    matplotlib.rcParams["font.family"] = "Hiragino Sans"
-    st = build_grid(int(sys.argv[1]), sys.argv[2], os.path.expanduser("~/weather_data/temp_raw"))
-    for k, v in st.items():
-        print(k, v)
