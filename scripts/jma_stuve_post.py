@@ -83,10 +83,11 @@ def main() -> int:
         rgb.save(tb, format="JPEG", quality=85, optimize=True)
         thumb = tb.getvalue()
 
-    # 「前日」「2日前」のような相対表現は使わず、観測日を明記する(配信が遅れても正しい)。
+    # 表記はウィンドプロファイラ(「前日まとめ（33地点）」)に揃える: タイトルは相対表現、
+    # 観測日は header(ギャラリー上段)に出す。定期実行は常にJST今日の2日前を扱う。
     label = f"{d:%Y/%m/%d}"
     ed.archive_to_notion(
-        title=f"エマグラム　{label}まとめ（{len(stuve_grid.STATIONS)}地点）",
+        title=f"エマグラム　2日前まとめ（{len(stuve_grid.STATIONS)}地点）",
         category="高層観測データ",
         r2_urls=[highres_url],
         jst_now=now,
