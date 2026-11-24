@@ -61,6 +61,10 @@ def main() -> int:
         key = f"preview/jma_stuve_{day_str}_{now:%H%M%S}.png"
         put_bytes(key, combined, content_type="image/png")
         print(f"DRY_RUN: preview uploaded: {make_url(key)}")
+        # Actionsの成果物としても残す(workflowのupload-artifactが拾う)
+        out_dir = REPO_ROOT / "preview_out"
+        out_dir.mkdir(exist_ok=True)
+        (out_dir / "jma_stuve.png").write_bytes(combined)
         return 0
 
     # ---- 本番配信 (emagram_discord と同じ経路) ----

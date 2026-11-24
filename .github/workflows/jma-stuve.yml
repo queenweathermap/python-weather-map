@@ -72,6 +72,14 @@ jobs:
       - name: Post emagram
         run: python scripts/jma_stuve_post.py
 
+      - name: Upload preview (DRY_RUN only)
+        if: env.DRY_RUN == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jma-stuve-preview
+          path: preview_out/jma_stuve.png
+          retention-days: 3
+
       - name: Cleanup old R2 objects
         if: always()
         run: python scripts/r2_cleanup.py
