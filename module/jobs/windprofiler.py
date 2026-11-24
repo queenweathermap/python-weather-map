@@ -665,7 +665,8 @@ def main_daily_stations() -> int:
     # に入れていたため、実行が遅延しても表示上は常に定刻扱いになっていた)。
     # YMLにはこのジョブのcronが本来狙う時刻(翌日03:00 JST)を入れる。
     archive_to_notion(
-        title=f"ウィンドプロファイラ　前日まとめ（{station_count}地点）",
+        # 日付は観測日(target_jst)。headerやPush文面の日付と同じ。
+        title=f"ウィンドプロファイラ（{station_count}地点）: 前日まとめ（{target_jst.strftime('%m/%d')}）",
         category="高層観測データ",
         r2_urls=[url],
         jst_now=_jst_now(),
