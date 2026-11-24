@@ -79,22 +79,24 @@ def main() -> int:
         rgb.save(tb, format="JPEG", quality=85, optimize=True)
         thumb = tb.getvalue()
 
+    # 「前日」「2日前」のような相対表現は使わず、観測日を明記する(配信が遅れても正しい)。
     label = f"{d:%Y/%m/%d}"
     ed.archive_to_notion(
-        title=f"エマグラム　{label}まとめ（確定データ・{len(stuve_grid.STATIONS)}地点）",
+        title=f"エマグラム　{label}まとめ（{len(stuve_grid.STATIONS)}地点）",
         category="高層観測データ",
         r2_urls=[highres_url],
         jst_now=now,
+        memo="気象庁の確定データ(観測日の2日後に配信)",
         pwa=True,
         size_bytes=len(combined),
-        header=f"高層観測データ {label}まとめ（確定データ）",
+        header=f"高層観測データ {label}まとめ",
         icon_emoji="📈",
         links=[("気象庁 過去の気象データ検索（高層）", JMA_UPPER_URL)],
         yml_jst=(now.astimezone(JST)).replace(hour=4, minute=0, second=0, microsecond=0),
     )
     content = (
-        f"高層観測データ　{label}まとめ（確定データ）\n"
-        f"エマグラム {len(stuve_grid.STATIONS)}地点\n"
+        f"高層観測データ　{label}まとめ\n"
+        f"エマグラム {len(stuve_grid.STATIONS)}地点（気象庁の確定データ）\n"
         f"📥 [高解像度PNGをダウンロード（{ed.R2_RETENTION_DAYS}日間有効）](<{highres_url}>)"
     )
     ed.notify_dm_subscribers(content, thumb)
