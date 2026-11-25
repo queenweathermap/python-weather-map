@@ -1,0 +1,22 @@
+name: JMA upper-air availability probe
+
+# 気象庁「過去の気象データ検索(高層)」の各回(00Z/12Z)が、観測の何時間後に
+# 揃うかを実測する。読み取りのみで配信はしない。実測が済んだら削除してよい。
+# 結果は実行ログの PROBE 行(と Job summary)で見る。
+on:
+  schedule:
+    - cron: "5 * * * *"   # 毎時5分(GitHubの遅延で数十分ずれることがある)
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Probe
+        run: python scripts/jma_upper_probe.py
