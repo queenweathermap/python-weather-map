@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""気象庁の高層観測データ(確定値)から15地点のStüve線図を合成して2日後に配信する。
+"""気象庁の高層観測データ(確定値)から15地点のStüve線図を合成して前日まとめとして配信する。
 
 気象庁の「過去の気象データ検索(高層)」は観測の翌日〜翌々日に反映される。
-UTC 19:00(JST翌04:00)に実行し、JST今日から2日前の 9時(00Z)/21時(12Z) をまとめる。
+JST今日の前日を対象日Dとし、(D-1日12Z, D日00Z)を左右に並べる(半日ずらし)。
+公開は日単位のため、D日分が出そろってから実行すること(時刻は公開時刻の実測で決める)。
 データ元が公的で15地点の欠測が最小(0〜2地点)になるのが利点。速報性は無い。
 
 DRY_RUN=1(既定)の間は配信せず、R2の preview/ にだけ置いてURLを表示する。
@@ -34,7 +35,7 @@ def target_date(now: datetime) -> datetime:
     t = os.environ.get("TARGET_DATE", "").strip()
     if t:
         return datetime.strptime(t, "%Y%m%d").replace(tzinfo=JST)
-    return (now.astimezone(JST) - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (now.astimezone(JST) - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def main() -> int:
@@ -42,9 +43,13 @@ def main() -> int:
     d = target_date(now)
     stations = [s for _, s in stuve_grid.STATIONS]
     print(f"対象日(JST): {d:%Y-%m-%d}  DRY_RUN={DRY_RUN}")
-    decoded = jma_upper.fetch_decoded(stations, d.year, d.month, d.day)
+    # 半日ずらし: 前日12Z(左) + 対象日00Z(右)。対象日00Zを主役にして「前日まとめ」とする。
+    prev = d - timedelta(days=1)
+    cells = ((prev.day, 12), (d.day, 0))
+    decoded = jma_upper.fetch_decoded(stations, prev.year, prev.month, prev.day)
+    decoded.update(jma_upper.fetch_decoded(stations, d.year, d.month, d.day))
     buf = BytesIO()
-    status = stuve_grid.build_grid(d.day, buf, decoded=decoded, source=SOURCE)
+    status = stuve_grid.build_grid(d.day, buf, decoded=decoded, source=SOURCE, cells=cells)
     combined = buf.getvalue()
     ok = sum(1 for v in status.values() for s in v if s == "ok")
     print(f"cells drawn: {ok}/{len(status) * 2}")
@@ -84,20 +89,20 @@ def main() -> int:
         thumb = tb.getvalue()
 
     # 表記はウィンドプロファイラ(「ウィンドプロファイラ（33地点）: 前日まとめ（11/23）」)に揃える:
-    # 相対表現＋観測日。定期実行は常にJST今日の2日前を扱う。
+    # 相対表現＋観測日。定期実行は常にJST今日の前日(D)を扱う。
     label = f"{d:%Y/%m/%d}"
     ed.archive_to_notion(
-        title=f"エマグラム（{len(stuve_grid.STATIONS)}地点）: 2日前まとめ（{d:%m/%d}）",
+        title=f"エマグラム（{len(stuve_grid.STATIONS)}地点）: 前日まとめ（{d:%m/%d}）",
         category="高層観測データ",
         r2_urls=[highres_url],
         jst_now=now,
-        memo="気象庁の確定データ(観測日の2日後に配信)",
+        memo="気象庁の確定データ(前日12Z+前日00Z、翌日に配信)",
         pwa=True,
         size_bytes=len(combined),
         header=f"高層観測データ {label}まとめ",
         icon_emoji="📈",
         links=[("気象庁 過去の気象データ検索（高層）", JMA_UPPER_URL)],
-        yml_jst=(now.astimezone(JST)).replace(hour=4, minute=30, second=0, microsecond=0),
+        yml_jst=(now.astimezone(JST)).replace(hour=23, minute=0, second=0, microsecond=0),
     )
     content = (
         f"高層観測データ　{label}まとめ\n"

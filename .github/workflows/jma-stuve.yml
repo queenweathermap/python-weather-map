@@ -1,19 +1,19 @@
-name: Emagram (JMA confirmed data, 2 days later)
+name: Emagram (JMA confirmed data, previous day)
 
 # 気象庁「過去の気象データ検索(高層)」の確定データから、15地点のStüve線図を
-# 合成して配信する(2日後配信)。emagram-discord.yml(Wyoming版)の後継で、
+# 合成して配信する(前日まとめ: 前日12Z+対象日00Zを並べる。2026-11-25に半日ずらしへ変更)。emagram-discord.yml(Wyoming版)の後継で、
 # 2026-11-24 に本番切替済み。Wyoming版は二重配信を避けるため schedule を外した
 # (手動実行は残してある)。手動実行の既定は DRY_RUN=1(配信せずプレビューのみ)。
 on:
   schedule:
-    - cron: "30 19 * * *"   # UTC 19:30 = JST 翌04:30(ウィンドプロファイラ04:00と30分ずらし。公開時刻の実測後に再調整予定) (JST今日の2日前の観測をまとめて配信)
+    - cron: "0 14 * * *"   # UTC 14:00 = JST 23:00(前日分D日00Zの公開は翌日日中〜20:38までに出る。jma-upper-probeの実測で再調整) 
   workflow_dispatch:
     inputs:
       dry_run:
         description: "1=配信せずプレビューのみ / 0=本番配信"
         default: "1"
       target_date:
-        description: "対象日(JST, YYYYMMDD)。空ならJST今日の2日前"
+        description: "対象日(JST, YYYYMMDD)。空ならJST今日の前日"
         default: ""
 
 jobs:

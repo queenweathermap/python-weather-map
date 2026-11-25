@@ -74,13 +74,16 @@ def _latlon(stn):
     return f"北緯{lat:.2f}°　東経{lon:.2f}°"
 
 
-def build_grid(day, out_path, raw_dir=None, cols=3, decoded=None,
+def build_grid(day, out_path, raw_dir=None, cols=3, decoded=None, cells=None,
                source="気象庁 高層気象観測(TEMP電文)"):
     """out_path はパスでもBytesIOでも可。decoded を渡せば raw_dir は不要。
     レイアウト: 3地点/行。各地点は 00Z(左)+12Z(右) の組で、組どうしは大きく空ける。
     地点名(大)と緯度経度は左(00Z)の上にだけ書く。"""
     if decoded is None:
         raise ValueError("decoded が必要")
+    # cells: 左→右に並べる (日, 時) の組。省略時は同じ日の 00Z(左)・12Z(右)。
+    if cells is None:
+        cells = ((day, 0), (day, 12))
     rows = (len(STATIONS) + cols - 1) // cols
     foot = 80
     block_w = 2 * CELL_W + GAP
@@ -97,8 +100,8 @@ def build_grid(day, out_path, raw_dir=None, cols=3, decoded=None,
         d.text((x0 + 6, y0 + 6), name, font=f_name, fill=(0, 0, 0))
         d.text((x0 + 8, y0 + 86), f"{stn}　{_latlon(stn)}", font=f_sub, fill=(90, 90, 90))
         status[stn] = []
-        for k, hour in enumerate((0, 12)):
-            im, st = _cell(day, hour, stn, decoded)
+        for k, (cday, hour) in enumerate(cells):
+            im, st = _cell(cday, hour, stn, decoded)
             status[stn].append(st)
             canvas.paste(im, (x0 + k * (CELL_W + GAP), y0 + HEAD))
     now = datetime.now(timezone.utc)
