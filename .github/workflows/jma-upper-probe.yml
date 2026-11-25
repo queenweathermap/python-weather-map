@@ -18,5 +18,8 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install dependencies
+        run: pip install -r requirements-temp.txt
+
       - name: Probe
         run: python scripts/jma_upper_probe.py
