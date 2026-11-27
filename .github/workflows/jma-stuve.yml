@@ -5,13 +5,10 @@ name: Emagram (JMA confirmed data, previous day)
 # 2026-11-24 に本番切替済み。Wyoming版は二重配信を避けるため schedule を外した
 # (手動実行は残してある)。手動実行の既定は DRY_RUN=1(配信せずプレビューのみ)。
 on:
-  schedule:
-    # 気象庁のD日分は翌日 11:44〜20:38(JST) の間に公開される(実測)。GitHubのcronは数時間遅れる
-    # ことがあるため、1日に複数回走らせ、データが出そろった最初の回で配信する(配信済みはスキップ)。
-    - cron: "0 6 * * *"    # JST 15:00
-    - cron: "0 8 * * *"    # JST 17:00 (狙い)
-    - cron: "0 10 * * *"   # JST 19:00
-    - cron: "0 12 * * *"   # JST 21:00 
+  # 定期起動は Cloudflare Worker(weathermap-scheduler)から workflow_dispatch で行う。
+  # GitHub自身のcronは数時間遅れたり抜けたりして配信が成立しなかったため使わない。
+  # Worker側: JST 17:00(本命)と23:30(保険)に dry_run=0 で起動(他の回は未公開で何もせず終わる)。
+  # 気象庁のD日分は翌日13:40頃JSTに公開される(実測)。配信済みはR2目印でスキップされる。
   workflow_dispatch:
     inputs:
       dry_run:
