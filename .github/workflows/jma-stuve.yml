@@ -6,7 +6,12 @@ name: Emagram (JMA confirmed data, previous day)
 # (手動実行は残してある)。手動実行の既定は DRY_RUN=1(配信せずプレビューのみ)。
 on:
   schedule:
-    - cron: "0 14 * * *"   # UTC 14:00 = JST 23:00(前日分D日00Zの公開は翌日日中〜20:38までに出る。jma-upper-probeの実測で再調整) 
+    # 気象庁のD日分は翌日 11:44〜20:38(JST) の間に公開される(実測)。GitHubのcronは数時間遅れる
+    # ことがあるため、1日に複数回走らせ、データが出そろった最初の回で配信する(配信済みはスキップ)。
+    - cron: "0 6 * * *"    # JST 15:00
+    - cron: "0 8 * * *"    # JST 17:00 (狙い)
+    - cron: "0 10 * * *"   # JST 19:00
+    - cron: "0 12 * * *"   # JST 21:00 
   workflow_dispatch:
     inputs:
       dry_run:
@@ -15,6 +20,10 @@ on:
       target_date:
         description: "対象日(JST, YYYYMMDD)。空ならJST今日の前日"
         default: ""
+
+concurrency:
+  group: jma-stuve
+  cancel-in-progress: false   # 同時実行による二重配信を防ぐ
 
 jobs:
   post:

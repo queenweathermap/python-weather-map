@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from PIL import Image  # noqa: E402
 
-from module.utils.r2_utils import put_bytes, make_url  # noqa: E402
+from module.utils.r2_utils import put_bytes, get_bytes, make_url  # noqa: E402
 from module.utils import stuve_grid, jma_upper  # noqa: E402
 
 DRY_RUN = os.environ.get("DRY_RUN", "1").strip().lower() in ("1", "true", "yes", "on")
@@ -38,9 +38,19 @@ def target_date(now: datetime) -> datetime:
     return (now.astimezone(JST) - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def marker_key(d: datetime) -> str:
+    return f"state/jma_stuve_delivered_{d:%Y%m%d}"
+
+
 def main() -> int:
     now = datetime.now(timezone.utc)
     d = target_date(now)
+    # 定期実行は1日に何度か走らせ、データが出そろった最初の回で配信する。
+    # 配信済みの目印(R2)があれば何もしない。手動(TARGET_DATE指定/DRY_RUN)は目印を見ない。
+    use_marker = not DRY_RUN and not os.environ.get("TARGET_DATE", "").strip()
+    if use_marker and get_bytes(marker_key(d)) is not None:
+        print(f"{d:%Y-%m-%d} 分は配信済みのためスキップ")
+        return 0
     stations = [s for _, s in stuve_grid.STATIONS]
     print(f"対象日(JST): {d:%Y-%m-%d}  DRY_RUN={DRY_RUN}")
     # 半日ずらし: 前日12Z(左) + 対象日00Z(右)。対象日00Zを主役にして「前日まとめ」とする。
@@ -59,7 +69,9 @@ def main() -> int:
     # 反映前(全滅に近い)の日に誤って配信しない。通常は13/15地点×2=26前後。
     if ok < 20:
         print("描けたセルが少なすぎる(気象庁側の反映待ちの可能性)ため配信しない")
-        return 1
+        # 反映待ちは次の回で再挑戦する。対象日の翌日22時(JST)を過ぎても出ない場合だけ失敗扱いにして気づけるようにする。
+        late = now.astimezone(JST) >= d + timedelta(days=1, hours=22)
+        return 1 if late else 0
 
     day_str = d.strftime("%Y%m%d")
     if DRY_RUN:
@@ -102,7 +114,7 @@ def main() -> int:
         header=f"高層観測データ {label}まとめ",
         icon_emoji="📈",
         links=[("気象庁 過去の気象データ検索（高層）", JMA_UPPER_URL)],
-        yml_jst=(now.astimezone(JST)).replace(hour=23, minute=0, second=0, microsecond=0),
+        yml_jst=(now.astimezone(JST)).replace(hour=17, minute=0, second=0, microsecond=0),
     )
     content = (
         f"高層観測データ　{label}まとめ\n"
@@ -110,6 +122,7 @@ def main() -> int:
         f"📥 [高解像度PNGをダウンロード（{ed.R2_RETENTION_DAYS}日間有効）](<{highres_url}>)"
     )
     ed.notify_dm_subscribers(content, thumb)
+    put_bytes(marker_key(d), now.isoformat().encode(), content_type="text/plain")
     return 0
 
 
