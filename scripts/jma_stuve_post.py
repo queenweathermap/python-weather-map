@@ -108,7 +108,7 @@ def main() -> int:
         category="高層観測データ",
         r2_urls=[highres_url],
         jst_now=now,
-        memo="気象庁の確定データ(前日12Z+前日00Z、翌日に配信)",
+        memo="気象庁の確定データ(前日12Z+対象日00Z、翌日に配信)",
         pwa=True,
         size_bytes=len(combined),
         header=f"高層観測データ {label}まとめ",
